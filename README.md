@@ -1,79 +1,99 @@
 # Mocó
 
-Mocó is a future API-first, self-hosted secret-management service. Its product
-vision is tenant isolation, S3-like logical secret paths, and envelope
+Mocó is an API-first, self-hosted secret-management service. Its product
+direction combines tenant isolation, S3-like logical secret paths, and envelope
 encryption.
 
-## Scaffold status
+## Current status
 
-This repository is a bootstrap, not a runnable server. Encryption,
-authentication, persistence, and Casbin enforcement are planned but not
-implemented. The OpenAPI contract describes the intended API surface; it does
-not make security features available yet.
+The public and internal OpenAPI contracts are source-controlled and validated.
+The first executable vertical slice implements the complete tenant lifecycle:
+
+- bearer-authenticated tenant create, list, get, replace, and delete;
+- SQLite persistence with embedded startup migrations and sqlc-generated queries;
+- strong ETags for conditional reads and compare-and-swap mutations;
+- creation idempotency scoped to the authenticated principal for at least 24 hours;
+- HMAC-authenticated, expiring cursors over stable insertion snapshots;
+- unauthenticated `/livez` and `/readyz` process probes.
+
+Vault and secret routes remain in the contract but return a typed
+`503 capability_unavailable`; they are not advertised by `GET /api/v1`. Encryption,
+Casbin authorization, multi-principal authentication, and production deployment
+are not implemented yet. Do not use this slice to store secrets.
+
+## Run locally
+
+Go 1.27.0 is required. Supply two independent, high-entropy deployment secrets:
+
+```bash
+export MOCO_BEARER_TOKEN="$(openssl rand -hex 32)"
+export MOCO_CURSOR_HMAC_KEY="$(openssl rand -hex 32)"
+make run
+```
+
+The server listens on `:8080` and stores data in `./moco.db` by default. Override
+those values with `MOCO_ADDR` and `MOCO_DB_PATH`. Startup automatically applies
+embedded migrations. The listener is plain HTTP; terminate TLS in front of it
+before sending bearer credentials across a network.
+
+Example tenant creation:
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer $MOCO_BEARER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: example-tenant-001' \
+  --data '{"name":"production","labels":{}}' \
+  http://127.0.0.1:8080/api/v1/tenants
+```
 
 ## Architecture
 
-Mocó uses ports and adapters. `internal/core` holds domain concepts, port
-contracts, and future application services. It must not depend on HTTP,
-database, Casbin, or generated adapter packages. `internal/adapters` implements
-outward infrastructure behind those ports; `cmd/moco-server` will eventually
-compose the application.
+Mocó uses ports and adapters. `internal/core` contains domain validation, port
+contracts, and transport-independent tenant services. It imports neither HTTP
+nor SQL. Infrastructure under `internal/adapters` implements those ports, and
+`cmd/moco-server` is the composition root.
 
-- `openapi/`: exploded public/internal OpenAPI sources, lint rules, and
-  code-generation configuration.
-- `tools/`: isolated Go module containing pinned development tools.
-- `cmd/moco-server/`: future composition root.
-- `db/migrations/`: future go-migrate inputs.
-- `db/queries/`: future sqlc inputs.
-- `internal/core/domain/`: tenant, vault, secret, and role concepts.
-- `internal/core/ports/`: external-system contracts, including
-  `PolicyChangesBus`.
-- `internal/core/services/`: future use-case implementations.
-- `internal/adapters/db/`: future sqlc-backed database adapters.
-- `internal/adapters/http/`: generated HTTP contract and future handler.
-- `internal/adapters/authz/`: future custom Casbin adapter and enforcer wiring.
+- `openapi/`: exploded public/internal contracts, lint rules, and bundles.
+- `tools/`: isolated Go module with pinned development binaries.
+- `db/migrations/`: SQLite migrations embedded into the server.
+- `db/queries/`: sqlc query sources.
+- `internal/core/`: domain types, ports, and application services.
+- `internal/adapters/db/`: SQLite/sqlc repository.
+- `internal/adapters/http/`: generated strict contract and handwritten adapter.
+- `internal/adapters/authz/`: reserved for the future Casbin adapter.
 
-## Authorization plan
+The planned Casbin adapter will load persisted rules through sqlc, commit policy
+changes before publishing to `PolicyChangesBus`, and trigger authoritative policy
+reloads on every instance.
 
-The custom Casbin adapter will load persisted rules through sqlc-backed
-`LoadPolicy`. Policy changes will commit to the database before publishing to
-`PolicyChangesBus`. Every instance will subscribe to that bus and call
-`LoadPolicy` to reload its in-memory policy after a change.
+## Development
 
-## Prerequisites and tooling
-
-Go 1.27.0 is required. Tools are pinned in the separate `tools` Go module and
-run through `go tool` or module-pinned `go run`; no global installation is
-needed.
+Tool versions are pinned in the separate `tools` module, so global installations
+are unnecessary:
 
 - Vacuum `v0.30.0`
 - oapi-codegen `v2.8.0`
 - sqlc `v1.31.1`
 - golang-migrate `v4.19.1`
 
-## Commands
-
 ```bash
 make spec-lint
 make api-generate
-make sqlc-generate                 # after schema and queries exist
-make db-migrate DB_PATH=./moco.db  # after migrations exist
-GOWORK=off go test ./...
+make sqlc-generate
+make db-migrate DB_PATH=./moco.db
+make test
+make check
 ```
+
+Public API source lives in `openapi/public.yaml`; probe-only internal operations
+live in `openapi/internal.yaml`. Both are exploded into paths and reusable
+components. Generated bundles under `openapi/bundled/` and generated Go code are
+checked in for deterministic review.
 
 ## Secret addressing
 
-Secrets use S3-like logical paths in query parameters. Item paths forbid a
-trailing slash. Prefixes allow one optional trailing slash; both forms forbid
-empty interior, `.`, and `..` segments. Approved examples:
-
-```text
-?path=prod/db/password
-?prefix=prod/db/
-```
-
-## Current non-goals
-
-This bootstrap has no UI, client SDK, other database support, or production
-deployment. As a headless project with no UI or public page, it has no social
-metadata surface.
+The deferred secret API uses S3-like logical paths in query parameters. Item
+operations use `/secret?path=prod/db/password`; metadata listing uses
+`/secrets?prefix=prod/db/`. Paths forbid empty, `.`, and `..` segments, and
+metadata operations never return values.

@@ -1,7 +1,7 @@
 GO := go
 DB_PATH ?= ./moco.db
 
-.PHONY: spec-lint spec-bundle api-generate sqlc-generate db-migrate
+.PHONY: spec-lint spec-bundle api-generate sqlc-generate db-migrate test run check
 spec-lint:
 	GOWORK=off $(GO) -C tools tool vacuum lint --ruleset ../openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d ../openapi/public.yaml
 	GOWORK=off $(GO) -C tools tool vacuum lint --ruleset ../openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d ../openapi/internal.yaml
@@ -18,3 +18,12 @@ sqlc-generate:
 
 db-migrate:
 	GOWORK=off $(GO) -C tools run -tags sqlite github.com/golang-migrate/migrate/v4/cmd/migrate -path ../db/migrations -database "sqlite://$(abspath $(DB_PATH))" up
+
+test:
+	GOWORK=off $(GO) test ./... -count=1
+
+run:
+	GOWORK=off $(GO) run ./cmd/moco-server
+
+check: spec-lint api-generate sqlc-generate test
+	GOWORK=off $(GO) vet ./...
