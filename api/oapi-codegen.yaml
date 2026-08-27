@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+package: httpapi
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+  client: false
+  embedded-spec: false
+compatibility:
+  disable-required-readonly-as-pointer: true
+output: internal/adapters/http/moco.gen.go
