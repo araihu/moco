@@ -1,0 +1,12 @@
+name: Idempotency-Key
+in: header
+required: false
+description: |
+  Client-generated key for safely retrying a create request. Keys are scoped
+  to the authenticated principal and operation, retained for at least 24 hours,
+  and limited to visible ASCII. Reuse with a different body returns 409.
+schema:
+  type: string
+  minLength: 8
+  maxLength: 128
+  pattern: '^[\x21-\x7E]+$'

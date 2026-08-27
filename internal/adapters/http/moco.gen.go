@@ -18,182 +18,648 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
-// Problem Problem Details response based on RFC 7807.
+// Defines values for ServiceInfoApiVersion.
+const (
+	V1 ServiceInfoApiVersion = "v1"
+)
+
+// Valid indicates whether the value is a known member of the ServiceInfoApiVersion enum.
+func (e ServiceInfoApiVersion) Valid() bool {
+	switch e {
+	case V1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Labels Client-defined metadata used for organization and ownership hints.
+//
+// Example: {"app.kubernetes.io/managed-by":"moco-operator"}
+type Labels map[string]string
+
+// PageInfo Cursor state for a stable collection snapshot.
+type PageInfo struct {
+	// HasMore Whether another page exists in the same snapshot.
+	//
+	// Example: false
+	HasMore bool `json:"hasMore"`
+
+	// NextCursor Opaque cursor for the next page; null on the final page.
+	NextCursor *string `json:"nextCursor"`
+}
+
+// Problem Problem Details response compatible with RFC 9457.
 type Problem struct {
-	// Detail Example: Requested resource does not exist.
+	// Code Stable machine-readable error code.
+	//
+	// Example: resource_not_found
+	Code string `json:"code"`
+
+	// Detail Human-readable detail that never contains secret values.
+	//
+	// Example: The requested resource does not exist.
 	Detail *string `json:"detail,omitempty"`
 
-	// Instance Example: urn:moco:request:11111111-1111-4111-8111-111111111111
+	// Errors Example: [{"code":"invalid_format","field":"/name","message":"must match the documented name format"}]
+	Errors *[]ProblemError `json:"errors,omitempty"`
+
+	// Instance Occurrence identifier for support correlation.
+	//
+	// Example: urn:moco:request:11111111-1111-4111-8111-111111111111
 	Instance *string `json:"instance,omitempty"`
+
+	// RequestId Correlation identifier also returned in X-Request-ID.
+	//
+	// Example: 11111111-1111-4111-8111-111111111111
+	RequestId string `json:"requestId"`
+
+	// ResourceId Existing resource ID when safely useful for conflict recovery.
+	//
+	// Example: 11111111-1111-4111-8111-111111111111
+	ResourceId *string `json:"resourceId,omitempty"`
 
 	// Status Example: 404
 	Status int32 `json:"status"`
 
 	// Title Example: Not Found
-	Title string  `json:"title"`
-	Type  *string `json:"type,omitempty"`
+	Title string `json:"title"`
+
+	// Type Stable documentation URI for this problem type.
+	//
+	// Example: https://moco.araihu.com/problems/not-found
+	Type string `json:"type"`
 }
 
-// Secret Secret metadata and base64-encoded value.
+// ProblemError Field-specific validation failure safe to expose to clients.
+type ProblemError struct {
+	// Code Stable machine-readable validation code.
+	//
+	// Example: invalid_format
+	Code *string `json:"code,omitempty"`
+
+	// Field JSON Pointer or parameter name when the failure has a location.
+	//
+	// Example: /name
+	Field *string `json:"field,omitempty"`
+
+	// Message Human-readable message that never contains secret values.
+	//
+	// Example: must match the documented name format
+	Message string `json:"message"`
+}
+
+// Secret Secret metadata and value. Consumers must never log this object.
 type Secret struct {
+	// ContentType Example: text/plain
+	ContentType string `json:"contentType"`
+
 	// CreatedAt Example: 2026-08-25T12:00:00Z
 	CreatedAt time.Time `json:"createdAt"`
 
-	// Path Returned item path uses slash-delimited segments and forbids empty, `.`, and `..` segments.
+	// Digest SHA-256 digest of the decoded value.
+	//
+	// Example: sha256:2bb80d537b1da3e38bd30361aa855686bde0ba53e611d8a8a5e47993629e366f
+	Digest string `json:"digest"`
+
+	// Path Slash-delimited logical path; `.`, `..`, and empty segments are invalid.
 	//
 	// Example: prod/db/password
 	Path string `json:"path"`
 
-	// UpdatedAt Example: 2026-08-25T12:00:00Z
+	// UpdatedAt Example: 2026-08-25T13:00:00Z
 	UpdatedAt time.Time `json:"updatedAt"`
 
-	// Value Base64-encoded secret value.
+	// Value Base64-encoded value, limited to 1 MiB after decoding.
 	//
 	// Example: c2VjcmV0
 	Value []byte `json:"value"`
+
+	// Version Example: 4
+	Version int64 `json:"version"`
 }
 
-// SecretList Secret metadata matching a prefix; values are never included.
+// SecretList One page of secret metadata from a stable snapshot; values are omitted.
 type SecretList struct {
-	// Secrets Example: [{"createdAt":"2026-08-25T12:00:00Z","path":"prod/db/password","updatedAt":"2026-08-25T12:00:00Z"}]
-	Secrets []SecretMetadata `json:"secrets"`
+	// Items Example: [{"contentType":"text/plain","createdAt":"2026-08-25T12:00:00Z","digest":"sha256:2bb80d537b1da3e38bd30361aa855686bde0ba53e611d8a8a5e47993629e366f","path":"prod/db/password","updatedAt":"2026-08-25T13:00:00Z","version":4}]
+	Items []SecretMetadata `json:"items"`
+
+	// Page Cursor state for a stable collection snapshot.
+	Page PageInfo `json:"page"`
 }
 
 // SecretMetadata Secret identity and lifecycle metadata without its value.
 type SecretMetadata struct {
+	// ContentType Media type assigned to the decoded value.
+	//
+	// Example: text/plain
+	ContentType string `json:"contentType"`
+
 	// CreatedAt Example: 2026-08-25T12:00:00Z
 	CreatedAt time.Time `json:"createdAt"`
 
-	// Path Metadata path uses slash-delimited segments and forbids empty, `.`, and `..` segments.
+	// Digest SHA-256 digest of the decoded value for drift detection.
+	//
+	// Example: sha256:2bb80d537b1da3e38bd30361aa855686bde0ba53e611d8a8a5e47993629e366f
+	Digest string `json:"digest"`
+
+	// Path Slash-delimited logical path. Empty, `.`, and `..` segments are invalid.
+	// Paths can be sensitive metadata and must not be logged by default.
+	//
 	//
 	// Example: prod/db/password
 	Path string `json:"path"`
 
-	// UpdatedAt Example: 2026-08-25T12:00:00Z
+	// UpdatedAt Example: 2026-08-25T13:00:00Z
 	UpdatedAt time.Time `json:"updatedAt"`
+
+	// Version Monotonic version of this logical secret.
+	//
+	// Example: 4
+	Version int64 `json:"version"`
 }
 
-// SecretWrite Base64-encoded secret value to store at the query path.
+// SecretWrite Secret value and media type accepted for storage.
 type SecretWrite struct {
-	// Value Base64-encoded value accepted for storage.
+	// ContentType Example: text/plain
+	ContentType *string `json:"contentType,omitempty"`
+
+	// Value Base64-encoded value, limited to 1 MiB after decoding.
 	//
 	// Example: c2VjcmV0
 	Value []byte `json:"value"`
 }
 
-// Tenant Tenant identity and lifecycle metadata.
+// ServiceInfo Server identity and compatibility information.
+type ServiceInfo struct {
+	// ApiVersion Public API major version implemented by this endpoint.
+	//
+	// Example: v1
+	ApiVersion ServiceInfoApiVersion `json:"apiVersion"`
+
+	// Capabilities Stable feature identifiers available on this deployment.
+	//
+	// Example: ["tenants","vaults","secrets","conditional-writes"]
+	Capabilities []string `json:"capabilities"`
+
+	// ServiceVersion Mocó server version; clients must treat it as opaque.
+	//
+	// Example: 0.2.0
+	ServiceVersion string `json:"serviceVersion"`
+}
+
+// ServiceInfoApiVersion Public API major version implemented by this endpoint.
 //
-// Example: {"createdAt":"2026-08-25T12:00:00Z","id":"11111111-1111-4111-8111-111111111111","name":"production","updatedAt":"2026-08-25T12:00:00Z"}
+// Example: v1
+type ServiceInfoApiVersion string
+
+// Tenant Tenant identity, automation metadata, and lifecycle state.
 type Tenant struct {
 	// CreatedAt Example: 2026-08-25T12:00:00Z
 	CreatedAt time.Time `json:"createdAt"`
 
-	// Id Example: 11111111-1111-4111-8111-111111111111
+	// Description Optional human-readable purpose.
+	//
+	// Example: Production workloads
+	Description *string `json:"description,omitempty"`
+
+	// ExternalId Immutable caller-supplied correlation identifier, unique across tenants.
+	// Automation can rediscover a resource after losing local status.
+	//
+	//
+	// Example: kubernetes://cluster-a/platform/tenant-production
+	ExternalId *string `json:"externalId,omitempty"`
+
+	// Id Server-assigned stable identifier.
+	//
+	// Example: 11111111-1111-4111-8111-111111111111
 	Id openapi_types.UUID `json:"id"`
 
-	// Name Example: production
+	// Labels Client-defined metadata used for organization and ownership hints.
+	//
+	// Example: {"app.kubernetes.io/managed-by":"moco-operator"}
+	Labels Labels `json:"labels"`
+
+	// Name Human-readable name, unique across tenants.
+	//
+	// Example: production
 	Name string `json:"name"`
 
-	// UpdatedAt Example: 2026-08-25T12:00:00Z
+	// Revision Monotonic resource revision; the HTTP ETag remains authoritative.
+	//
+	// Example: 3
+	Revision int64 `json:"revision"`
+
+	// UpdatedAt Example: 2026-08-25T13:00:00Z
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // TenantCreate Fields accepted when creating a tenant.
 type TenantCreate struct {
+	// Description Example: Production workloads
+	Description *string `json:"description,omitempty"`
+
+	// ExternalId Immutable caller correlation identifier, unique across tenants.
+	//
+	// Example: kubernetes://cluster-a/platform/tenant-production
+	ExternalId *string `json:"externalId,omitempty"`
+
+	// Labels Client-defined metadata used for organization and ownership hints.
+	//
+	// Example: {"app.kubernetes.io/managed-by":"moco-operator"}
+	Labels *Labels `json:"labels,omitempty"`
+
 	// Name Example: production
 	Name string `json:"name"`
 }
 
-// TenantUpdate Fields accepted when updating a tenant.
+// TenantList One page from a stable tenant snapshot.
+type TenantList struct {
+	// Items Example: [{"createdAt":"2026-08-25T12:00:00Z","id":"11111111-1111-4111-8111-111111111111","labels":{},"name":"production","revision":1,"updatedAt":"2026-08-25T12:00:00Z"}]
+	Items []Tenant `json:"items"`
+
+	// Page Cursor state for a stable collection snapshot.
+	Page PageInfo `json:"page"`
+}
+
+// TenantUpdate Complete mutable tenant state used for replacement updates.
 type TenantUpdate struct {
+	// Description Set to null to clear the description.
+	//
+	// Example: Platform-owned tenant
+	Description *string `json:"description"`
+
+	// Labels Client-defined metadata used for organization and ownership hints.
+	//
+	// Example: {"app.kubernetes.io/managed-by":"moco-operator"}
+	Labels Labels `json:"labels"`
+
 	// Name Example: platform
 	Name string `json:"name"`
 }
 
-// Vault Tenant-scoped vault identity and lifecycle metadata.
+// Vault Tenant-scoped vault identity, automation metadata, and lifecycle state.
 type Vault struct {
 	// CreatedAt Example: 2026-08-25T12:00:00Z
 	CreatedAt time.Time `json:"createdAt"`
 
-	// Id Example: 22222222-2222-4222-8222-222222222222
+	// Description Example: Application runtime secrets
+	Description *string `json:"description,omitempty"`
+
+	// ExternalId Immutable caller correlation identifier, unique within its tenant.
+	//
+	// Example: kubernetes://cluster-a/platform/vault-application
+	ExternalId *string `json:"externalId,omitempty"`
+
+	// Id Server-assigned stable identifier.
+	//
+	// Example: 22222222-2222-4222-8222-222222222222
 	Id openapi_types.UUID `json:"id"`
 
-	// Name Example: application
+	// Labels Client-defined metadata used for organization and ownership hints.
+	//
+	// Example: {"app.kubernetes.io/managed-by":"moco-operator"}
+	Labels Labels `json:"labels"`
+
+	// Name Human-readable name, unique within its tenant.
+	//
+	// Example: application
 	Name string `json:"name"`
+
+	// Revision Monotonic resource revision; the HTTP ETag remains authoritative.
+	//
+	// Example: 2
+	Revision int64 `json:"revision"`
 
 	// TenantId Example: 11111111-1111-4111-8111-111111111111
 	TenantId openapi_types.UUID `json:"tenantId"`
 
-	// UpdatedAt Example: 2026-08-25T12:00:00Z
+	// UpdatedAt Example: 2026-08-25T13:00:00Z
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // VaultCreate Fields accepted when creating a vault.
 type VaultCreate struct {
+	// Description Example: Application runtime secrets
+	Description *string `json:"description,omitempty"`
+
+	// ExternalId Immutable caller correlation identifier, unique within the tenant.
+	//
+	// Example: kubernetes://cluster-a/platform/vault-application
+	ExternalId *string `json:"externalId,omitempty"`
+
+	// Labels Client-defined metadata used for organization and ownership hints.
+	//
+	// Example: {"app.kubernetes.io/managed-by":"moco-operator"}
+	Labels *Labels `json:"labels,omitempty"`
+
 	// Name Example: application
 	Name string `json:"name"`
 }
 
-// VaultUpdate Fields accepted when updating a vault.
+// VaultList One page from a stable vault snapshot.
+type VaultList struct {
+	// Items Example: [{"createdAt":"2026-08-25T12:00:00Z","id":"22222222-2222-4222-8222-222222222222","labels":{},"name":"application","revision":1,"tenantId":"11111111-1111-4111-8111-111111111111","updatedAt":"2026-08-25T12:00:00Z"}]
+	Items []Vault `json:"items"`
+
+	// Page Cursor state for a stable collection snapshot.
+	Page PageInfo `json:"page"`
+}
+
+// VaultUpdate Complete mutable vault state used for replacement updates.
 type VaultUpdate struct {
+	// Description Set to null to clear the description.
+	//
+	// Example: Platform runtime secrets
+	Description *string `json:"description"`
+
+	// Labels Client-defined metadata used for organization and ownership hints.
+	//
+	// Example: {"app.kubernetes.io/managed-by":"moco-operator"}
+	Labels Labels `json:"labels"`
+
 	// Name Example: platform
 	Name string `json:"name"`
 }
 
-// SecretPath defines model for SecretPath.
+// Cascade defines model for cascade.
+type Cascade = bool
+
+// Cursor defines model for cursor.
+type Cursor = string
+
+// ExternalIdFilter defines model for external-id-filter.
+type ExternalIdFilter = string
+
+// IdempotencyKey defines model for idempotency-key.
+type IdempotencyKey = string
+
+// IfMatch defines model for if-match.
+type IfMatch = string
+
+// IfNoneMatch defines model for if-none-match.
+type IfNoneMatch = string
+
+// Limit defines model for limit.
+type Limit = int32
+
+// NameFilter defines model for name-filter.
+type NameFilter = string
+
+// RequestId defines model for request-id.
+type RequestId = string
+
+// SecretPath defines model for secret-path.
 type SecretPath = string
 
-// SecretPrefix defines model for SecretPrefix.
+// SecretPrefix defines model for secret-prefix.
 type SecretPrefix = string
 
-// TenantId defines model for TenantId.
+// TenantId defines model for tenant-id.
 type TenantId = openapi_types.UUID
 
-// VaultId defines model for VaultId.
+// VaultId defines model for vault-id.
 type VaultId = openapi_types.UUID
 
-// BadRequest Problem Details response based on RFC 7807.
+// BadRequest Problem Details response compatible with RFC 9457.
 type BadRequest = Problem
 
-// Conflict Problem Details response based on RFC 7807.
+// Conflict Problem Details response compatible with RFC 9457.
 type Conflict = Problem
 
-// Forbidden Problem Details response based on RFC 7807.
+// CursorExpired Problem Details response compatible with RFC 9457.
+type CursorExpired = Problem
+
+// Forbidden Problem Details response compatible with RFC 9457.
 type Forbidden = Problem
 
-// InternalError Problem Details response based on RFC 7807.
+// InternalError Problem Details response compatible with RFC 9457.
 type InternalError = Problem
 
-// NotFound Problem Details response based on RFC 7807.
+// NotFound Problem Details response compatible with RFC 9457.
 type NotFound = Problem
 
-// Unauthorized Problem Details response based on RFC 7807.
+// PayloadTooLarge Problem Details response compatible with RFC 9457.
+type PayloadTooLarge = Problem
+
+// PreconditionFailed Problem Details response compatible with RFC 9457.
+type PreconditionFailed = Problem
+
+// ServiceUnavailable Problem Details response compatible with RFC 9457.
+type ServiceUnavailable = Problem
+
+// TooManyRequests Problem Details response compatible with RFC 9457.
+type TooManyRequests = Problem
+
+// Unauthorized Problem Details response compatible with RFC 9457.
 type Unauthorized = Problem
+
+// GetServiceInfoParams defines parameters for GetServiceInfo.
+type GetServiceInfoParams struct {
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// ListTenantsParams defines parameters for ListTenants.
+type ListTenantsParams struct {
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque next-page cursor returned by the preceding list response.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Name Exact, case-sensitive resource name filter.
+	Name *NameFilter `form:"name,omitempty" json:"name,omitempty"`
+
+	// ExternalId Exact immutable external correlation identifier filter.
+	ExternalId *ExternalIdFilter `form:"externalId,omitempty" json:"externalId,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// CreateTenantParams defines parameters for CreateTenant.
+type CreateTenantParams struct {
+	// IdempotencyKey Client-generated key for safely retrying a create request. Keys are scoped
+	// to the authenticated principal and operation, retained for at least 24 hours,
+	// and limited to visible ASCII. Reuse with a different body returns 409.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// DeleteTenantParams defines parameters for DeleteTenant.
+type DeleteTenantParams struct {
+	// Cascade Delete child resources when true. The default false returns 409 while child
+	// resources exist, preventing accidental secret deletion.
+	Cascade *Cascade `form:"cascade,omitempty" json:"cascade,omitempty"`
+
+	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
+	// applied only if the current ETag matches; otherwise the server returns 412.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// GetTenantParams defines parameters for GetTenant.
+type GetTenantParams struct {
+	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
+	// accepted and means create only. A PUT must not send both conditional headers.
+	IfNoneMatch *IfNoneMatch `json:"If-None-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// UpdateTenantParams defines parameters for UpdateTenant.
+type UpdateTenantParams struct {
+	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
+	// applied only if the current ETag matches; otherwise the server returns 412.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// ListVaultsParams defines parameters for ListVaults.
+type ListVaultsParams struct {
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque next-page cursor returned by the preceding list response.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Name Exact, case-sensitive resource name filter.
+	Name *NameFilter `form:"name,omitempty" json:"name,omitempty"`
+
+	// ExternalId Exact immutable external correlation identifier filter.
+	ExternalId *ExternalIdFilter `form:"externalId,omitempty" json:"externalId,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// CreateVaultParams defines parameters for CreateVault.
+type CreateVaultParams struct {
+	// IdempotencyKey Client-generated key for safely retrying a create request. Keys are scoped
+	// to the authenticated principal and operation, retained for at least 24 hours,
+	// and limited to visible ASCII. Reuse with a different body returns 409.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// DeleteVaultParams defines parameters for DeleteVault.
+type DeleteVaultParams struct {
+	// Cascade Delete child resources when true. The default false returns 409 while child
+	// resources exist, preventing accidental secret deletion.
+	Cascade *Cascade `form:"cascade,omitempty" json:"cascade,omitempty"`
+
+	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
+	// applied only if the current ETag matches; otherwise the server returns 412.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// GetVaultParams defines parameters for GetVault.
+type GetVaultParams struct {
+	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
+	// accepted and means create only. A PUT must not send both conditional headers.
+	IfNoneMatch *IfNoneMatch `json:"If-None-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// UpdateVaultParams defines parameters for UpdateVault.
+type UpdateVaultParams struct {
+	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
+	// applied only if the current ETag matches; otherwise the server returns 412.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
 
 // DeleteSecretParams defines parameters for DeleteSecret.
 type DeleteSecretParams struct {
-	// Path Required slash-delimited item path; empty, `.`, and `..` segments are forbidden.
+	// Path Slash-delimited logical secret path. Empty, `.`, and `..` segments are
+	// invalid. Paths can be sensitive metadata and should not be logged by clients.
 	Path SecretPath `form:"path" json:"path"`
+
+	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
+	// applied only if the current ETag matches; otherwise the server returns 412.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
 }
 
-// GetSecretsParams defines parameters for GetSecrets.
-type GetSecretsParams struct {
-	// Path Slash-delimited secret path. Empty, `.`, and `..` segments are forbidden.
-	Path *string `form:"path,omitempty" json:"path,omitempty"`
+// GetSecretParams defines parameters for GetSecret.
+type GetSecretParams struct {
+	// Path Slash-delimited logical secret path. Empty, `.`, and `..` segments are
+	// invalid. Paths can be sensitive metadata and should not be logged by clients.
+	Path SecretPath `form:"path" json:"path"`
 
-	// Prefix Slash-delimited prefix used to list secret metadata. One optional trailing slash is allowed; empty interior, `.`, and `..` segments are forbidden.
-	Prefix *SecretPrefix `form:"prefix,omitempty" json:"prefix,omitempty"`
+	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
+	// accepted and means create only. A PUT must not send both conditional headers.
+	IfNoneMatch *IfNoneMatch `json:"If-None-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
 }
 
-// GetSecrets200JSONResponseBody defines parameters for GetSecrets.
-type GetSecrets200JSONResponseBody struct {
-	union json.RawMessage
+// HeadSecretParams defines parameters for HeadSecret.
+type HeadSecretParams struct {
+	// Path Slash-delimited logical secret path. Empty, `.`, and `..` segments are
+	// invalid. Paths can be sensitive metadata and should not be logged by clients.
+	Path SecretPath `form:"path" json:"path"`
+
+	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
+	// accepted and means create only. A PUT must not send both conditional headers.
+	IfNoneMatch *IfNoneMatch `json:"If-None-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
 }
 
 // PutSecretParams defines parameters for PutSecret.
 type PutSecretParams struct {
-	// Path Required slash-delimited item path; empty, `.`, and `..` segments are forbidden.
+	// Path Slash-delimited logical secret path. Empty, `.`, and `..` segments are
+	// invalid. Paths can be sensitive metadata and should not be logged by clients.
 	Path SecretPath `form:"path" json:"path"`
+
+	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
+	// applied only if the current ETag matches; otherwise the server returns 412.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+
+	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
+	// accepted and means create only. A PUT must not send both conditional headers.
+	IfNoneMatch *IfNoneMatch `json:"If-None-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// ListSecretsParams defines parameters for ListSecrets.
+type ListSecretsParams struct {
+	// Prefix Slash-delimited prefix. One trailing slash is allowed; empty, `.`, and `..`
+	// segments are invalid. Omit it to list the entire vault.
+	Prefix *SecretPrefix `form:"prefix,omitempty" json:"prefix,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque next-page cursor returned by the preceding list response.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
 }
 
 // CreateTenantJSONRequestBody defines body for CreateTenant for application/json ContentType.
@@ -211,109 +677,56 @@ type UpdateVaultJSONRequestBody = VaultUpdate
 // PutSecretJSONRequestBody defines body for PutSecret for application/json ContentType.
 type PutSecretJSONRequestBody = SecretWrite
 
-// AsSecret returns the union data inside the GetSecrets200JSONResponseBody as a Secret
-func (t GetSecrets200JSONResponseBody) AsSecret() (Secret, error) {
-	var body Secret
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromSecret overwrites any union data inside the GetSecrets200JSONResponseBody as the provided Secret
-func (t *GetSecrets200JSONResponseBody) FromSecret(v Secret) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergeSecret performs a merge with any union data inside the GetSecrets200JSONResponseBody, using the provided Secret
-func (t *GetSecrets200JSONResponseBody) MergeSecret(v Secret) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-// AsSecretList returns the union data inside the GetSecrets200JSONResponseBody as a SecretList
-func (t GetSecrets200JSONResponseBody) AsSecretList() (SecretList, error) {
-	var body SecretList
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromSecretList overwrites any union data inside the GetSecrets200JSONResponseBody as the provided SecretList
-func (t *GetSecrets200JSONResponseBody) FromSecretList(v SecretList) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergeSecretList performs a merge with any union data inside the GetSecrets200JSONResponseBody, using the provided SecretList
-func (t *GetSecrets200JSONResponseBody) MergeSecretList(v SecretList) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-func (t GetSecrets200JSONResponseBody) MarshalJSON() ([]byte, error) {
-	b, err := t.union.MarshalJSON()
-	return b, err
-}
-
-func (t *GetSecrets200JSONResponseBody) UnmarshalJSON(b []byte) error {
-	err := t.union.UnmarshalJSON(b)
-	return err
-}
-
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// GetServiceInfo Get API compatibility information
+	// (GET /api/v1)
+	GetServiceInfo(w http.ResponseWriter, r *http.Request, params GetServiceInfoParams)
 	// ListTenants List tenants
 	// (GET /api/v1/tenants)
-	ListTenants(w http.ResponseWriter, r *http.Request)
+	ListTenants(w http.ResponseWriter, r *http.Request, params ListTenantsParams)
 	// CreateTenant Create a tenant
 	// (POST /api/v1/tenants)
-	CreateTenant(w http.ResponseWriter, r *http.Request)
+	CreateTenant(w http.ResponseWriter, r *http.Request, params CreateTenantParams)
 	// DeleteTenant Delete a tenant
 	// (DELETE /api/v1/tenants/{tenantId})
-	DeleteTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId)
+	DeleteTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId, params DeleteTenantParams)
 	// GetTenant Get a tenant
 	// (GET /api/v1/tenants/{tenantId})
-	GetTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId)
+	GetTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId, params GetTenantParams)
 	// UpdateTenant Update a tenant
-	// (PATCH /api/v1/tenants/{tenantId})
-	UpdateTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId)
+	// (PUT /api/v1/tenants/{tenantId})
+	UpdateTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId, params UpdateTenantParams)
 	// ListVaults List vaults
 	// (GET /api/v1/tenants/{tenantId}/vaults)
-	ListVaults(w http.ResponseWriter, r *http.Request, tenantId TenantId)
+	ListVaults(w http.ResponseWriter, r *http.Request, tenantId TenantId, params ListVaultsParams)
 	// CreateVault Create a vault
 	// (POST /api/v1/tenants/{tenantId}/vaults)
-	CreateVault(w http.ResponseWriter, r *http.Request, tenantId TenantId)
+	CreateVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, params CreateVaultParams)
 	// DeleteVault Delete a vault
 	// (DELETE /api/v1/tenants/{tenantId}/vaults/{vaultId})
-	DeleteVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId)
+	DeleteVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params DeleteVaultParams)
 	// GetVault Get a vault
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId})
-	GetVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId)
+	GetVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetVaultParams)
 	// UpdateVault Update a vault
-	// (PATCH /api/v1/tenants/{tenantId}/vaults/{vaultId})
-	UpdateVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId)
+	// (PUT /api/v1/tenants/{tenantId}/vaults/{vaultId})
+	UpdateVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params UpdateVaultParams)
 	// DeleteSecret Delete a secret
-	// (DELETE /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
+	// (DELETE /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
 	DeleteSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params DeleteSecretParams)
-	// GetSecrets Get a secret or list secret metadata
-	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
-	GetSecrets(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetSecretsParams)
-	// PutSecret Write a secret
-	// (PUT /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
+	// GetSecret Read a secret
+	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
+	GetSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetSecretParams)
+	// HeadSecret Inspect secret state without reading its value
+	// (HEAD /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
+	HeadSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params HeadSecretParams)
+	// PutSecret Create or replace a secret
+	// (PUT /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
 	PutSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params PutSecretParams)
+	// ListSecrets List secret metadata
+	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
+	ListSecrets(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params ListSecretsParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -325,11 +738,131 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// GetServiceInfo operation middleware
+func (siw *ServerInterfaceWrapper) GetServiceInfo(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetServiceInfoParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetServiceInfo(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTenants operation middleware
 func (siw *ServerInterfaceWrapper) ListTenants(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTenantsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "externalId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "externalId", r.URL.Query(), &params.ExternalId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "externalId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "externalId", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListTenants(w, r)
+		siw.Handler.ListTenants(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -342,8 +875,54 @@ func (siw *ServerInterfaceWrapper) ListTenants(w http.ResponseWriter, r *http.Re
 // CreateTenant operation middleware
 func (siw *ServerInterfaceWrapper) CreateTenant(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateTenantParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateTenant(w, r)
+		siw.Handler.CreateTenant(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -368,8 +947,64 @@ func (siw *ServerInterfaceWrapper) DeleteTenant(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteTenantParams
+
+	// ------------- Optional query parameter "cascade" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cascade", r.URL.Query(), &params.Cascade, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cascade"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cascade", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteTenant(w, r, tenantId)
+		siw.Handler.DeleteTenant(w, r, tenantId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -394,8 +1029,51 @@ func (siw *ServerInterfaceWrapper) GetTenant(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetTenantParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-None-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-None-Match")]; found {
+		var IfNoneMatch IfNoneMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-None-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-None-Match", valueList[0], &IfNoneMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-None-Match", Err: err})
+			return
+		}
+
+		params.IfNoneMatch = &IfNoneMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetTenant(w, r, tenantId)
+		siw.Handler.GetTenant(w, r, tenantId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -420,8 +1098,51 @@ func (siw *ServerInterfaceWrapper) UpdateTenant(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdateTenantParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateTenant(w, r, tenantId)
+		siw.Handler.UpdateTenant(w, r, tenantId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -446,8 +1167,84 @@ func (siw *ServerInterfaceWrapper) ListVaults(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListVaultsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "externalId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "externalId", r.URL.Query(), &params.ExternalId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "externalId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "externalId", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListVaults(w, r, tenantId)
+		siw.Handler.ListVaults(w, r, tenantId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -472,8 +1269,51 @@ func (siw *ServerInterfaceWrapper) CreateVault(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateVaultParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateVault(w, r, tenantId)
+		siw.Handler.CreateVault(w, r, tenantId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -507,8 +1347,64 @@ func (siw *ServerInterfaceWrapper) DeleteVault(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteVaultParams
+
+	// ------------- Optional query parameter "cascade" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cascade", r.URL.Query(), &params.Cascade, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cascade"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cascade", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteVault(w, r, tenantId, vaultId)
+		siw.Handler.DeleteVault(w, r, tenantId, vaultId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -542,8 +1438,51 @@ func (siw *ServerInterfaceWrapper) GetVault(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetVaultParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-None-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-None-Match")]; found {
+		var IfNoneMatch IfNoneMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-None-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-None-Match", valueList[0], &IfNoneMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-None-Match", Err: err})
+			return
+		}
+
+		params.IfNoneMatch = &IfNoneMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetVault(w, r, tenantId, vaultId)
+		siw.Handler.GetVault(w, r, tenantId, vaultId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -577,8 +1516,51 @@ func (siw *ServerInterfaceWrapper) UpdateVault(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdateVaultParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateVault(w, r, tenantId, vaultId)
+		siw.Handler.UpdateVault(w, r, tenantId, vaultId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -628,6 +1610,46 @@ func (siw *ServerInterfaceWrapper) DeleteSecret(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteSecret(w, r, tenantId, vaultId, params)
 	}))
@@ -639,8 +1661,8 @@ func (siw *ServerInterfaceWrapper) DeleteSecret(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
-// GetSecrets operation middleware
-func (siw *ServerInterfaceWrapper) GetSecrets(w http.ResponseWriter, r *http.Request) {
+// GetSecret operation middleware
+func (siw *ServerInterfaceWrapper) GetSecret(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -664,11 +1686,11 @@ func (siw *ServerInterfaceWrapper) GetSecrets(w http.ResponseWriter, r *http.Req
 	}
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetSecretsParams
+	var params GetSecretParams
 
-	// ------------- Optional query parameter "path" -------------
+	// ------------- Required query parameter "path" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -679,21 +1701,139 @@ func (siw *ServerInterfaceWrapper) GetSecrets(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// ------------- Optional query parameter "prefix" -------------
+	headers := r.Header
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "prefix", r.URL.Query(), &params.Prefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	// ------------- Optional header parameter "If-None-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-None-Match")]; found {
+		var IfNoneMatch IfNoneMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-None-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-None-Match", valueList[0], &IfNoneMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-None-Match", Err: err})
+			return
+		}
+
+		params.IfNoneMatch = &IfNoneMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecret(w, r, tenantId, vaultId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// HeadSecret operation middleware
+func (siw *ServerInterfaceWrapper) HeadSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenantId" -------------
+	var tenantId TenantId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenantId", r.PathValue("tenantId"), &tenantId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenantId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "vaultId" -------------
+	var vaultId VaultId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "vaultId", r.PathValue("vaultId"), &vaultId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vaultId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params HeadSecretParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "prefix"})
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
 		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
 		}
 		return
 	}
 
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-None-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-None-Match")]; found {
+		var IfNoneMatch IfNoneMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-None-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-None-Match", valueList[0], &IfNoneMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-None-Match", Err: err})
+			return
+		}
+
+		params.IfNoneMatch = &IfNoneMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetSecrets(w, r, tenantId, vaultId, params)
+		siw.Handler.HeadSecret(w, r, tenantId, vaultId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -743,8 +1883,165 @@ func (siw *ServerInterfaceWrapper) PutSecret(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
+	// ------------- Optional header parameter "If-None-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-None-Match")]; found {
+		var IfNoneMatch IfNoneMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-None-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-None-Match", valueList[0], &IfNoneMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-None-Match", Err: err})
+			return
+		}
+
+		params.IfNoneMatch = &IfNoneMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PutSecret(w, r, tenantId, vaultId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSecrets operation middleware
+func (siw *ServerInterfaceWrapper) ListSecrets(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenantId" -------------
+	var tenantId TenantId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenantId", r.PathValue("tenantId"), &tenantId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenantId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "vaultId" -------------
+	var vaultId VaultId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "vaultId", r.PathValue("vaultId"), &vaultId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vaultId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSecretsParams
+
+	// ------------- Optional query parameter "prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "prefix", r.URL.Query(), &params.Prefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSecrets(w, r, tenantId, vaultId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -874,52 +2171,296 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1", wrapper.GetServiceInfo)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants", wrapper.ListTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tenants", wrapper.CreateTenant)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tenants/{tenantId}", wrapper.DeleteTenant)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}", wrapper.GetTenant)
-	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/tenants/{tenantId}", wrapper.UpdateTenant)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/tenants/{tenantId}", wrapper.UpdateTenant)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults", wrapper.ListVaults)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults", wrapper.CreateVault)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}", wrapper.DeleteVault)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}", wrapper.GetVault)
-	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}", wrapper.UpdateVault)
-	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets", wrapper.DeleteSecret)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets", wrapper.GetSecrets)
-	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets", wrapper.PutSecret)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}", wrapper.UpdateVault)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets", wrapper.ListSecrets)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", wrapper.DeleteSecret)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", wrapper.GetSecret)
+	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", wrapper.HeadSecret)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", wrapper.PutSecret)
 
 	return m
 }
 
-type BadRequestApplicationProblemPlusJSONResponse Problem
+type BadRequestResponseHeaders struct {
+	XRequestID string
+}
+type BadRequestApplicationProblemPlusJSONResponse struct {
+	Body Problem
 
-type ConflictApplicationProblemPlusJSONResponse Problem
+	Headers BadRequestResponseHeaders
+}
 
-type ForbiddenApplicationProblemPlusJSONResponse Problem
+type ConflictResponseHeaders struct {
+	XRequestID string
+}
+type ConflictApplicationProblemPlusJSONResponse struct {
+	Body Problem
 
-type InternalErrorApplicationProblemPlusJSONResponse Problem
+	Headers ConflictResponseHeaders
+}
 
-type NotFoundApplicationProblemPlusJSONResponse Problem
+type CursorExpiredResponseHeaders struct {
+	XRequestID string
+}
+type CursorExpiredApplicationProblemPlusJSONResponse struct {
+	Body Problem
 
-type UnauthorizedApplicationProblemPlusJSONResponse Problem
+	Headers CursorExpiredResponseHeaders
+}
+
+type ForbiddenResponseHeaders struct {
+	XRequestID string
+}
+type ForbiddenApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers ForbiddenResponseHeaders
+}
+
+type InternalErrorResponseHeaders struct {
+	XRequestID string
+}
+type InternalErrorApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers InternalErrorResponseHeaders
+}
+
+type NotFoundResponseHeaders struct {
+	XRequestID string
+}
+type NotFoundApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers NotFoundResponseHeaders
+}
+
+type NotModifiedResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+type NotModifiedResponse struct {
+	Headers NotModifiedResponseHeaders
+}
+
+type PayloadTooLargeResponseHeaders struct {
+	XRequestID string
+}
+type PayloadTooLargeApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers PayloadTooLargeResponseHeaders
+}
+
+type PreconditionFailedResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+type PreconditionFailedApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers PreconditionFailedResponseHeaders
+}
+
+type ServiceUnavailableResponseHeaders struct {
+	RetryAfter int32
+	XRequestID string
+}
+type ServiceUnavailableApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers ServiceUnavailableResponseHeaders
+}
+
+type TooManyRequestsResponseHeaders struct {
+	RetryAfter int32
+	XRequestID string
+}
+type TooManyRequestsApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers TooManyRequestsResponseHeaders
+}
+
+type UnauthorizedResponseHeaders struct {
+	XRequestID string
+}
+type UnauthorizedApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers UnauthorizedResponseHeaders
+}
+
+type GetServiceInfoRequestObject struct {
+	Params GetServiceInfoParams
+}
+
+type GetServiceInfoResponseObject interface {
+	VisitGetServiceInfoResponse(w http.ResponseWriter) error
+}
+
+type GetServiceInfo200ResponseHeaders struct {
+	XRequestID string
+}
+
+type GetServiceInfo200JSONResponse struct {
+	Body    ServiceInfo
+	Headers GetServiceInfo200ResponseHeaders
+}
+
+func (response GetServiceInfo200JSONResponse) VisitGetServiceInfoResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceInfo401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetServiceInfo401ApplicationProblemPlusJSONResponse) VisitGetServiceInfoResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceInfo403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetServiceInfo403ApplicationProblemPlusJSONResponse) VisitGetServiceInfoResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceInfo429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetServiceInfo429ApplicationProblemPlusJSONResponse) VisitGetServiceInfoResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceInfo500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetServiceInfo500ApplicationProblemPlusJSONResponse) VisitGetServiceInfoResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceInfo503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetServiceInfo503ApplicationProblemPlusJSONResponse) VisitGetServiceInfoResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListTenantsRequestObject struct {
+	Params ListTenantsParams
 }
 
 type ListTenantsResponseObject interface {
 	VisitListTenantsResponse(w http.ResponseWriter) error
 }
 
-type ListTenants200JSONResponse []Tenant
+type ListTenants200ResponseHeaders struct {
+	XRequestID string
+}
+
+type ListTenants200JSONResponse struct {
+	Body    TenantList
+	Headers ListTenants200ResponseHeaders
+}
 
 func (response ListTenants200JSONResponse) VisitListTenantsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTenants400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListTenants400ApplicationProblemPlusJSONResponse) VisitListTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -931,10 +2472,11 @@ type ListTenants401ApplicationProblemPlusJSONResponse struct {
 func (response ListTenants401ApplicationProblemPlusJSONResponse) VisitListTenantsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -947,11 +2489,47 @@ type ListTenants403ApplicationProblemPlusJSONResponse struct {
 func (response ListTenants403ApplicationProblemPlusJSONResponse) VisitListTenantsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTenants410ApplicationProblemPlusJSONResponse struct {
+	CursorExpiredApplicationProblemPlusJSONResponse
+}
+
+func (response ListTenants410ApplicationProblemPlusJSONResponse) VisitListTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTenants429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListTenants429ApplicationProblemPlusJSONResponse) VisitListTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -963,32 +2541,64 @@ type ListTenants500ApplicationProblemPlusJSONResponse struct {
 func (response ListTenants500ApplicationProblemPlusJSONResponse) VisitListTenantsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
+type ListTenants503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListTenants503ApplicationProblemPlusJSONResponse) VisitListTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateTenantRequestObject struct {
-	Body *CreateTenantJSONRequestBody
+	Params CreateTenantParams
+	Body   *CreateTenantJSONRequestBody
 }
 
 type CreateTenantResponseObject interface {
 	VisitCreateTenantResponse(w http.ResponseWriter) error
 }
 
-type CreateTenant201JSONResponse Tenant
+type CreateTenant201ResponseHeaders struct {
+	ETag       string
+	Location   string
+	XRequestID string
+}
+
+type CreateTenant201JSONResponse struct {
+	Body    Tenant
+	Headers CreateTenant201ResponseHeaders
+}
 
 func (response CreateTenant201JSONResponse) VisitCreateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1001,10 +2611,11 @@ type CreateTenant400ApplicationProblemPlusJSONResponse struct {
 func (response CreateTenant400ApplicationProblemPlusJSONResponse) VisitCreateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1017,10 +2628,11 @@ type CreateTenant401ApplicationProblemPlusJSONResponse struct {
 func (response CreateTenant401ApplicationProblemPlusJSONResponse) VisitCreateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1033,10 +2645,11 @@ type CreateTenant403ApplicationProblemPlusJSONResponse struct {
 func (response CreateTenant403ApplicationProblemPlusJSONResponse) VisitCreateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1049,11 +2662,30 @@ type CreateTenant409ApplicationProblemPlusJSONResponse struct {
 func (response CreateTenant409ApplicationProblemPlusJSONResponse) VisitCreateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTenant429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response CreateTenant429ApplicationProblemPlusJSONResponse) VisitCreateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1065,27 +2697,53 @@ type CreateTenant500ApplicationProblemPlusJSONResponse struct {
 func (response CreateTenant500ApplicationProblemPlusJSONResponse) VisitCreateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTenant503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateTenant503ApplicationProblemPlusJSONResponse) VisitCreateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
 type DeleteTenantRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
+	Params   DeleteTenantParams
 }
 
 type DeleteTenantResponseObject interface {
 	VisitDeleteTenantResponse(w http.ResponseWriter) error
 }
 
+type DeleteTenant204ResponseHeaders struct {
+	XRequestID string
+}
+
 type DeleteTenant204Response struct {
+	Headers DeleteTenant204ResponseHeaders
 }
 
 func (response DeleteTenant204Response) VisitDeleteTenantResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(204)
 	return nil
 }
@@ -1097,10 +2755,11 @@ type DeleteTenant400ApplicationProblemPlusJSONResponse struct {
 func (response DeleteTenant400ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1113,10 +2772,11 @@ type DeleteTenant401ApplicationProblemPlusJSONResponse struct {
 func (response DeleteTenant401ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1129,10 +2789,11 @@ type DeleteTenant403ApplicationProblemPlusJSONResponse struct {
 func (response DeleteTenant403ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1145,10 +2806,11 @@ type DeleteTenant404ApplicationProblemPlusJSONResponse struct {
 func (response DeleteTenant404ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1161,11 +2823,48 @@ type DeleteTenant409ApplicationProblemPlusJSONResponse struct {
 func (response DeleteTenant409ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenant412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteTenant412ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenant429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteTenant429ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1177,35 +2876,74 @@ type DeleteTenant500ApplicationProblemPlusJSONResponse struct {
 func (response DeleteTenant500ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenant503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteTenant503ApplicationProblemPlusJSONResponse) VisitDeleteTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
 type GetTenantRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
+	Params   GetTenantParams
 }
 
 type GetTenantResponseObject interface {
 	VisitGetTenantResponse(w http.ResponseWriter) error
 }
 
-type GetTenant200JSONResponse Tenant
+type GetTenant200ResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+
+type GetTenant200JSONResponse struct {
+	Body    Tenant
+	Headers GetTenant200ResponseHeaders
+}
 
 func (response GetTenant200JSONResponse) VisitGetTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type GetTenant304Response = NotModifiedResponse
+
+func (response GetTenant304Response) VisitGetTenantResponse(w http.ResponseWriter) error {
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(304)
+	return nil
 }
 
 type GetTenant400ApplicationProblemPlusJSONResponse struct {
@@ -1215,10 +2953,11 @@ type GetTenant400ApplicationProblemPlusJSONResponse struct {
 func (response GetTenant400ApplicationProblemPlusJSONResponse) VisitGetTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1231,10 +2970,11 @@ type GetTenant401ApplicationProblemPlusJSONResponse struct {
 func (response GetTenant401ApplicationProblemPlusJSONResponse) VisitGetTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1247,10 +2987,11 @@ type GetTenant403ApplicationProblemPlusJSONResponse struct {
 func (response GetTenant403ApplicationProblemPlusJSONResponse) VisitGetTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1263,11 +3004,30 @@ type GetTenant404ApplicationProblemPlusJSONResponse struct {
 func (response GetTenant404ApplicationProblemPlusJSONResponse) VisitGetTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenant429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetTenant429ApplicationProblemPlusJSONResponse) VisitGetTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1279,17 +3039,37 @@ type GetTenant500ApplicationProblemPlusJSONResponse struct {
 func (response GetTenant500ApplicationProblemPlusJSONResponse) VisitGetTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenant503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetTenant503ApplicationProblemPlusJSONResponse) VisitGetTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
 type UpdateTenantRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
+	Params   UpdateTenantParams
 	Body     *UpdateTenantJSONRequestBody
 }
 
@@ -1297,15 +3077,25 @@ type UpdateTenantResponseObject interface {
 	VisitUpdateTenantResponse(w http.ResponseWriter) error
 }
 
-type UpdateTenant200JSONResponse Tenant
+type UpdateTenant200ResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+
+type UpdateTenant200JSONResponse struct {
+	Body    Tenant
+	Headers UpdateTenant200ResponseHeaders
+}
 
 func (response UpdateTenant200JSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1318,10 +3108,11 @@ type UpdateTenant400ApplicationProblemPlusJSONResponse struct {
 func (response UpdateTenant400ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1334,10 +3125,11 @@ type UpdateTenant401ApplicationProblemPlusJSONResponse struct {
 func (response UpdateTenant401ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1350,10 +3142,11 @@ type UpdateTenant403ApplicationProblemPlusJSONResponse struct {
 func (response UpdateTenant403ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1366,10 +3159,11 @@ type UpdateTenant404ApplicationProblemPlusJSONResponse struct {
 func (response UpdateTenant404ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1382,11 +3176,48 @@ type UpdateTenant409ApplicationProblemPlusJSONResponse struct {
 func (response UpdateTenant409ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateTenant412ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateTenant429ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1398,32 +3229,60 @@ type UpdateTenant500ApplicationProblemPlusJSONResponse struct {
 func (response UpdateTenant500ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateTenant503ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
 type ListVaultsRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
+	Params   ListVaultsParams
 }
 
 type ListVaultsResponseObject interface {
 	VisitListVaultsResponse(w http.ResponseWriter) error
 }
 
-type ListVaults200JSONResponse []Vault
+type ListVaults200ResponseHeaders struct {
+	XRequestID string
+}
+
+type ListVaults200JSONResponse struct {
+	Body    VaultList
+	Headers ListVaults200ResponseHeaders
+}
 
 func (response ListVaults200JSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1436,10 +3295,11 @@ type ListVaults400ApplicationProblemPlusJSONResponse struct {
 func (response ListVaults400ApplicationProblemPlusJSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1452,10 +3312,11 @@ type ListVaults401ApplicationProblemPlusJSONResponse struct {
 func (response ListVaults401ApplicationProblemPlusJSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1468,10 +3329,11 @@ type ListVaults403ApplicationProblemPlusJSONResponse struct {
 func (response ListVaults403ApplicationProblemPlusJSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1484,11 +3346,47 @@ type ListVaults404ApplicationProblemPlusJSONResponse struct {
 func (response ListVaults404ApplicationProblemPlusJSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVaults410ApplicationProblemPlusJSONResponse struct {
+	CursorExpiredApplicationProblemPlusJSONResponse
+}
+
+func (response ListVaults410ApplicationProblemPlusJSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVaults429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListVaults429ApplicationProblemPlusJSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1500,17 +3398,37 @@ type ListVaults500ApplicationProblemPlusJSONResponse struct {
 func (response ListVaults500ApplicationProblemPlusJSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVaults503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListVaults503ApplicationProblemPlusJSONResponse) VisitListVaultsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
 type CreateVaultRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
+	Params   CreateVaultParams
 	Body     *CreateVaultJSONRequestBody
 }
 
@@ -1518,15 +3436,27 @@ type CreateVaultResponseObject interface {
 	VisitCreateVaultResponse(w http.ResponseWriter) error
 }
 
-type CreateVault201JSONResponse Vault
+type CreateVault201ResponseHeaders struct {
+	ETag       string
+	Location   string
+	XRequestID string
+}
+
+type CreateVault201JSONResponse struct {
+	Body    Vault
+	Headers CreateVault201ResponseHeaders
+}
 
 func (response CreateVault201JSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1539,10 +3469,11 @@ type CreateVault400ApplicationProblemPlusJSONResponse struct {
 func (response CreateVault400ApplicationProblemPlusJSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1555,10 +3486,11 @@ type CreateVault401ApplicationProblemPlusJSONResponse struct {
 func (response CreateVault401ApplicationProblemPlusJSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1571,10 +3503,11 @@ type CreateVault403ApplicationProblemPlusJSONResponse struct {
 func (response CreateVault403ApplicationProblemPlusJSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1587,10 +3520,11 @@ type CreateVault404ApplicationProblemPlusJSONResponse struct {
 func (response CreateVault404ApplicationProblemPlusJSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1603,11 +3537,30 @@ type CreateVault409ApplicationProblemPlusJSONResponse struct {
 func (response CreateVault409ApplicationProblemPlusJSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVault429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response CreateVault429ApplicationProblemPlusJSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1619,11 +3572,30 @@ type CreateVault500ApplicationProblemPlusJSONResponse struct {
 func (response CreateVault500ApplicationProblemPlusJSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVault503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateVault503ApplicationProblemPlusJSONResponse) VisitCreateVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1631,16 +3603,23 @@ func (response CreateVault500ApplicationProblemPlusJSONResponse) VisitCreateVaul
 type DeleteVaultRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
 	VaultId  VaultId  `json:"vaultId"`
+	Params   DeleteVaultParams
 }
 
 type DeleteVaultResponseObject interface {
 	VisitDeleteVaultResponse(w http.ResponseWriter) error
 }
 
+type DeleteVault204ResponseHeaders struct {
+	XRequestID string
+}
+
 type DeleteVault204Response struct {
+	Headers DeleteVault204ResponseHeaders
 }
 
 func (response DeleteVault204Response) VisitDeleteVaultResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(204)
 	return nil
 }
@@ -1652,10 +3631,11 @@ type DeleteVault400ApplicationProblemPlusJSONResponse struct {
 func (response DeleteVault400ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1668,10 +3648,11 @@ type DeleteVault401ApplicationProblemPlusJSONResponse struct {
 func (response DeleteVault401ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1684,10 +3665,11 @@ type DeleteVault403ApplicationProblemPlusJSONResponse struct {
 func (response DeleteVault403ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1700,10 +3682,11 @@ type DeleteVault404ApplicationProblemPlusJSONResponse struct {
 func (response DeleteVault404ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1716,11 +3699,48 @@ type DeleteVault409ApplicationProblemPlusJSONResponse struct {
 func (response DeleteVault409ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVault412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteVault412ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVault429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteVault429ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1732,11 +3752,30 @@ type DeleteVault500ApplicationProblemPlusJSONResponse struct {
 func (response DeleteVault500ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVault503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteVault503ApplicationProblemPlusJSONResponse) VisitDeleteVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1744,24 +3783,44 @@ func (response DeleteVault500ApplicationProblemPlusJSONResponse) VisitDeleteVaul
 type GetVaultRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
 	VaultId  VaultId  `json:"vaultId"`
+	Params   GetVaultParams
 }
 
 type GetVaultResponseObject interface {
 	VisitGetVaultResponse(w http.ResponseWriter) error
 }
 
-type GetVault200JSONResponse Vault
+type GetVault200ResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+
+type GetVault200JSONResponse struct {
+	Body    Vault
+	Headers GetVault200ResponseHeaders
+}
 
 func (response GetVault200JSONResponse) VisitGetVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type GetVault304Response = NotModifiedResponse
+
+func (response GetVault304Response) VisitGetVaultResponse(w http.ResponseWriter) error {
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(304)
+	return nil
 }
 
 type GetVault400ApplicationProblemPlusJSONResponse struct {
@@ -1771,10 +3830,11 @@ type GetVault400ApplicationProblemPlusJSONResponse struct {
 func (response GetVault400ApplicationProblemPlusJSONResponse) VisitGetVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1787,10 +3847,11 @@ type GetVault401ApplicationProblemPlusJSONResponse struct {
 func (response GetVault401ApplicationProblemPlusJSONResponse) VisitGetVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1803,10 +3864,11 @@ type GetVault403ApplicationProblemPlusJSONResponse struct {
 func (response GetVault403ApplicationProblemPlusJSONResponse) VisitGetVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1819,11 +3881,30 @@ type GetVault404ApplicationProblemPlusJSONResponse struct {
 func (response GetVault404ApplicationProblemPlusJSONResponse) VisitGetVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVault429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetVault429ApplicationProblemPlusJSONResponse) VisitGetVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1835,11 +3916,30 @@ type GetVault500ApplicationProblemPlusJSONResponse struct {
 func (response GetVault500ApplicationProblemPlusJSONResponse) VisitGetVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVault503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetVault503ApplicationProblemPlusJSONResponse) VisitGetVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1847,6 +3947,7 @@ func (response GetVault500ApplicationProblemPlusJSONResponse) VisitGetVaultRespo
 type UpdateVaultRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
 	VaultId  VaultId  `json:"vaultId"`
+	Params   UpdateVaultParams
 	Body     *UpdateVaultJSONRequestBody
 }
 
@@ -1854,15 +3955,25 @@ type UpdateVaultResponseObject interface {
 	VisitUpdateVaultResponse(w http.ResponseWriter) error
 }
 
-type UpdateVault200JSONResponse Vault
+type UpdateVault200ResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+
+type UpdateVault200JSONResponse struct {
+	Body    Vault
+	Headers UpdateVault200ResponseHeaders
+}
 
 func (response UpdateVault200JSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1875,10 +3986,11 @@ type UpdateVault400ApplicationProblemPlusJSONResponse struct {
 func (response UpdateVault400ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1891,10 +4003,11 @@ type UpdateVault401ApplicationProblemPlusJSONResponse struct {
 func (response UpdateVault401ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1907,10 +4020,11 @@ type UpdateVault403ApplicationProblemPlusJSONResponse struct {
 func (response UpdateVault403ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1923,10 +4037,11 @@ type UpdateVault404ApplicationProblemPlusJSONResponse struct {
 func (response UpdateVault404ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1939,11 +4054,48 @@ type UpdateVault409ApplicationProblemPlusJSONResponse struct {
 func (response UpdateVault409ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVault412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateVault412ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVault429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateVault429ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1955,11 +4107,30 @@ type UpdateVault500ApplicationProblemPlusJSONResponse struct {
 func (response UpdateVault500ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVault503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateVault503ApplicationProblemPlusJSONResponse) VisitUpdateVaultResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1974,10 +4145,16 @@ type DeleteSecretResponseObject interface {
 	VisitDeleteSecretResponse(w http.ResponseWriter) error
 }
 
+type DeleteSecret204ResponseHeaders struct {
+	XRequestID string
+}
+
 type DeleteSecret204Response struct {
+	Headers DeleteSecret204ResponseHeaders
 }
 
 func (response DeleteSecret204Response) VisitDeleteSecretResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(204)
 	return nil
 }
@@ -1989,10 +4166,11 @@ type DeleteSecret400ApplicationProblemPlusJSONResponse struct {
 func (response DeleteSecret400ApplicationProblemPlusJSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -2005,10 +4183,11 @@ type DeleteSecret401ApplicationProblemPlusJSONResponse struct {
 func (response DeleteSecret401ApplicationProblemPlusJSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -2021,10 +4200,11 @@ type DeleteSecret403ApplicationProblemPlusJSONResponse struct {
 func (response DeleteSecret403ApplicationProblemPlusJSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -2037,11 +4217,48 @@ type DeleteSecret404ApplicationProblemPlusJSONResponse struct {
 func (response DeleteSecret404ApplicationProblemPlusJSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSecret412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteSecret412ApplicationProblemPlusJSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSecret429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteSecret429ApplicationProblemPlusJSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2053,115 +4270,356 @@ type DeleteSecret500ApplicationProblemPlusJSONResponse struct {
 func (response DeleteSecret500ApplicationProblemPlusJSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type GetSecretsRequestObject struct {
-	TenantId TenantId `json:"tenantId"`
-	VaultId  VaultId  `json:"vaultId"`
-	Params   GetSecretsParams
+type DeleteSecret503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
 }
 
-type GetSecretsResponseObject interface {
-	VisitGetSecretsResponse(w http.ResponseWriter) error
-}
-
-type GetSecrets200JSONResponse = GetSecrets200JSONResponseBody
-
-func (response GetSecrets200JSONResponse) VisitGetSecretsResponse(w http.ResponseWriter) error {
+func (response DeleteSecret503ApplicationProblemPlusJSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.union); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretRequestObject struct {
+	TenantId TenantId `json:"tenantId"`
+	VaultId  VaultId  `json:"vaultId"`
+	Params   GetSecretParams
+}
+
+type GetSecretResponseObject interface {
+	VisitGetSecretResponse(w http.ResponseWriter) error
+}
+
+type GetSecret200ResponseHeaders struct {
+	CacheControl string
+	ETag         string
+	XRequestID   string
+}
+
+type GetSecret200JSONResponse struct {
+	Body    Secret
+	Headers GetSecret200ResponseHeaders
+}
+
+func (response GetSecret200JSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type GetSecrets400ApplicationProblemPlusJSONResponse struct {
+type GetSecret304Response = NotModifiedResponse
+
+func (response GetSecret304Response) VisitGetSecretResponse(w http.ResponseWriter) error {
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(304)
+	return nil
+}
+
+type GetSecret400ApplicationProblemPlusJSONResponse struct {
 	BadRequestApplicationProblemPlusJSONResponse
 }
 
-func (response GetSecrets400ApplicationProblemPlusJSONResponse) VisitGetSecretsResponse(w http.ResponseWriter) error {
+func (response GetSecret400ApplicationProblemPlusJSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type GetSecrets401ApplicationProblemPlusJSONResponse struct {
+type GetSecret401ApplicationProblemPlusJSONResponse struct {
 	UnauthorizedApplicationProblemPlusJSONResponse
 }
 
-func (response GetSecrets401ApplicationProblemPlusJSONResponse) VisitGetSecretsResponse(w http.ResponseWriter) error {
+func (response GetSecret401ApplicationProblemPlusJSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type GetSecrets403ApplicationProblemPlusJSONResponse struct {
+type GetSecret403ApplicationProblemPlusJSONResponse struct {
 	ForbiddenApplicationProblemPlusJSONResponse
 }
 
-func (response GetSecrets403ApplicationProblemPlusJSONResponse) VisitGetSecretsResponse(w http.ResponseWriter) error {
+func (response GetSecret403ApplicationProblemPlusJSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type GetSecrets404ApplicationProblemPlusJSONResponse struct {
+type GetSecret404ApplicationProblemPlusJSONResponse struct {
 	NotFoundApplicationProblemPlusJSONResponse
 }
 
-func (response GetSecrets404ApplicationProblemPlusJSONResponse) VisitGetSecretsResponse(w http.ResponseWriter) error {
+func (response GetSecret404ApplicationProblemPlusJSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type GetSecrets500ApplicationProblemPlusJSONResponse struct {
-	InternalErrorApplicationProblemPlusJSONResponse
+type GetSecret429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
 }
 
-func (response GetSecrets500ApplicationProblemPlusJSONResponse) VisitGetSecretsResponse(w http.ResponseWriter) error {
+func (response GetSecret429ApplicationProblemPlusJSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecret500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecret500ApplicationProblemPlusJSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecret503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecret503ApplicationProblemPlusJSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadSecretRequestObject struct {
+	TenantId TenantId `json:"tenantId"`
+	VaultId  VaultId  `json:"vaultId"`
+	Params   HeadSecretParams
+}
+
+type HeadSecretResponseObject interface {
+	VisitHeadSecretResponse(w http.ResponseWriter) error
+}
+
+type HeadSecret200ResponseHeaders struct {
+	ETag               string
+	XMocoSecretDigest  string
+	XMocoSecretVersion int64
+	XRequestID         string
+}
+
+type HeadSecret200Response struct {
+	Headers HeadSecret200ResponseHeaders
+}
+
+func (response HeadSecret200Response) VisitHeadSecretResponse(w http.ResponseWriter) error {
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Moco-Secret-Digest", fmt.Sprint(response.Headers.XMocoSecretDigest))
+	w.Header().Set("X-Moco-Secret-Version", fmt.Sprint(response.Headers.XMocoSecretVersion))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	return nil
+}
+
+type HeadSecret304Response = NotModifiedResponse
+
+func (response HeadSecret304Response) VisitHeadSecretResponse(w http.ResponseWriter) error {
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(304)
+	return nil
+}
+
+type HeadSecret400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response HeadSecret400ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadSecret401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response HeadSecret401ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadSecret403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response HeadSecret403ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadSecret404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response HeadSecret404ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadSecret429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response HeadSecret429ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadSecret500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response HeadSecret500ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadSecret503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response HeadSecret503ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2177,16 +4635,50 @@ type PutSecretResponseObject interface {
 	VisitPutSecretResponse(w http.ResponseWriter) error
 }
 
-type PutSecret200JSONResponse Secret
+type PutSecret200ResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+
+type PutSecret200JSONResponse struct {
+	Body    SecretMetadata
+	Headers PutSecret200ResponseHeaders
+}
 
 func (response PutSecret200JSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSecret201ResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+
+type PutSecret201JSONResponse struct {
+	Body    SecretMetadata
+	Headers PutSecret201ResponseHeaders
+}
+
+func (response PutSecret201JSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2198,10 +4690,11 @@ type PutSecret400ApplicationProblemPlusJSONResponse struct {
 func (response PutSecret400ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
@@ -2214,10 +4707,11 @@ type PutSecret401ApplicationProblemPlusJSONResponse struct {
 func (response PutSecret401ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
@@ -2230,10 +4724,11 @@ type PutSecret403ApplicationProblemPlusJSONResponse struct {
 func (response PutSecret403ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
@@ -2246,27 +4741,65 @@ type PutSecret404ApplicationProblemPlusJSONResponse struct {
 func (response PutSecret404ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type PutSecret409ApplicationProblemPlusJSONResponse struct {
-	ConflictApplicationProblemPlusJSONResponse
+type PutSecret412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
 }
 
-func (response PutSecret409ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
+func (response PutSecret412ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(409)
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSecret413ApplicationProblemPlusJSONResponse struct {
+	PayloadTooLargeApplicationProblemPlusJSONResponse
+}
+
+func (response PutSecret413ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSecret429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response PutSecret429ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2278,17 +4811,209 @@ type PutSecret500ApplicationProblemPlusJSONResponse struct {
 func (response PutSecret500ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSecret503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response PutSecret503ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecretsRequestObject struct {
+	TenantId TenantId `json:"tenantId"`
+	VaultId  VaultId  `json:"vaultId"`
+	Params   ListSecretsParams
+}
+
+type ListSecretsResponseObject interface {
+	VisitListSecretsResponse(w http.ResponseWriter) error
+}
+
+type ListSecrets200ResponseHeaders struct {
+	XRequestID string
+}
+
+type ListSecrets200JSONResponse struct {
+	Body    SecretList
+	Headers ListSecrets200ResponseHeaders
+}
+
+func (response ListSecrets200JSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListSecrets400ApplicationProblemPlusJSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListSecrets401ApplicationProblemPlusJSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListSecrets403ApplicationProblemPlusJSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListSecrets404ApplicationProblemPlusJSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets410ApplicationProblemPlusJSONResponse struct {
+	CursorExpiredApplicationProblemPlusJSONResponse
+}
+
+func (response ListSecrets410ApplicationProblemPlusJSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListSecrets429ApplicationProblemPlusJSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListSecrets500ApplicationProblemPlusJSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListSecrets503ApplicationProblemPlusJSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// GetServiceInfo Get API compatibility information
+	// (GET /api/v1)
+	GetServiceInfo(ctx context.Context, request GetServiceInfoRequestObject) (GetServiceInfoResponseObject, error)
 	// ListTenants List tenants
 	// (GET /api/v1/tenants)
 	ListTenants(ctx context.Context, request ListTenantsRequestObject) (ListTenantsResponseObject, error)
@@ -2302,7 +5027,7 @@ type StrictServerInterface interface {
 	// (GET /api/v1/tenants/{tenantId})
 	GetTenant(ctx context.Context, request GetTenantRequestObject) (GetTenantResponseObject, error)
 	// UpdateTenant Update a tenant
-	// (PATCH /api/v1/tenants/{tenantId})
+	// (PUT /api/v1/tenants/{tenantId})
 	UpdateTenant(ctx context.Context, request UpdateTenantRequestObject) (UpdateTenantResponseObject, error)
 	// ListVaults List vaults
 	// (GET /api/v1/tenants/{tenantId}/vaults)
@@ -2317,17 +5042,23 @@ type StrictServerInterface interface {
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId})
 	GetVault(ctx context.Context, request GetVaultRequestObject) (GetVaultResponseObject, error)
 	// UpdateVault Update a vault
-	// (PATCH /api/v1/tenants/{tenantId}/vaults/{vaultId})
+	// (PUT /api/v1/tenants/{tenantId}/vaults/{vaultId})
 	UpdateVault(ctx context.Context, request UpdateVaultRequestObject) (UpdateVaultResponseObject, error)
 	// DeleteSecret Delete a secret
-	// (DELETE /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
+	// (DELETE /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
 	DeleteSecret(ctx context.Context, request DeleteSecretRequestObject) (DeleteSecretResponseObject, error)
-	// GetSecrets Get a secret or list secret metadata
-	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
-	GetSecrets(ctx context.Context, request GetSecretsRequestObject) (GetSecretsResponseObject, error)
-	// PutSecret Write a secret
-	// (PUT /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
+	// GetSecret Read a secret
+	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
+	GetSecret(ctx context.Context, request GetSecretRequestObject) (GetSecretResponseObject, error)
+	// HeadSecret Inspect secret state without reading its value
+	// (HEAD /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
+	HeadSecret(ctx context.Context, request HeadSecretRequestObject) (HeadSecretResponseObject, error)
+	// PutSecret Create or replace a secret
+	// (PUT /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
 	PutSecret(ctx context.Context, request PutSecretRequestObject) (PutSecretResponseObject, error)
+	// ListSecrets List secret metadata
+	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
+	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -2369,9 +5100,37 @@ type strictHandler struct {
 	options     StrictHTTPServerOptions
 }
 
+// GetServiceInfo operation middleware
+func (sh *strictHandler) GetServiceInfo(w http.ResponseWriter, r *http.Request, params GetServiceInfoParams) {
+	var request GetServiceInfoRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetServiceInfo(ctx, request.(GetServiceInfoRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetServiceInfo")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServiceInfoResponseObject); ok {
+		if err := validResponse.VisitGetServiceInfoResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListTenants operation middleware
-func (sh *strictHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) ListTenants(w http.ResponseWriter, r *http.Request, params ListTenantsParams) {
 	var request ListTenantsRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListTenants(ctx, request.(ListTenantsRequestObject))
@@ -2394,8 +5153,10 @@ func (sh *strictHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateTenant operation middleware
-func (sh *strictHandler) CreateTenant(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) CreateTenant(w http.ResponseWriter, r *http.Request, params CreateTenantParams) {
 	var request CreateTenantRequestObject
+
+	request.Params = params
 
 	var body CreateTenantJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -2425,10 +5186,11 @@ func (sh *strictHandler) CreateTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteTenant operation middleware
-func (sh *strictHandler) DeleteTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId) {
+func (sh *strictHandler) DeleteTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId, params DeleteTenantParams) {
 	var request DeleteTenantRequestObject
 
 	request.TenantId = tenantId
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DeleteTenant(ctx, request.(DeleteTenantRequestObject))
@@ -2451,10 +5213,11 @@ func (sh *strictHandler) DeleteTenant(w http.ResponseWriter, r *http.Request, te
 }
 
 // GetTenant operation middleware
-func (sh *strictHandler) GetTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId) {
+func (sh *strictHandler) GetTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId, params GetTenantParams) {
 	var request GetTenantRequestObject
 
 	request.TenantId = tenantId
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetTenant(ctx, request.(GetTenantRequestObject))
@@ -2477,10 +5240,11 @@ func (sh *strictHandler) GetTenant(w http.ResponseWriter, r *http.Request, tenan
 }
 
 // UpdateTenant operation middleware
-func (sh *strictHandler) UpdateTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId) {
+func (sh *strictHandler) UpdateTenant(w http.ResponseWriter, r *http.Request, tenantId TenantId, params UpdateTenantParams) {
 	var request UpdateTenantRequestObject
 
 	request.TenantId = tenantId
+	request.Params = params
 
 	var body UpdateTenantJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -2510,10 +5274,11 @@ func (sh *strictHandler) UpdateTenant(w http.ResponseWriter, r *http.Request, te
 }
 
 // ListVaults operation middleware
-func (sh *strictHandler) ListVaults(w http.ResponseWriter, r *http.Request, tenantId TenantId) {
+func (sh *strictHandler) ListVaults(w http.ResponseWriter, r *http.Request, tenantId TenantId, params ListVaultsParams) {
 	var request ListVaultsRequestObject
 
 	request.TenantId = tenantId
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListVaults(ctx, request.(ListVaultsRequestObject))
@@ -2536,10 +5301,11 @@ func (sh *strictHandler) ListVaults(w http.ResponseWriter, r *http.Request, tena
 }
 
 // CreateVault operation middleware
-func (sh *strictHandler) CreateVault(w http.ResponseWriter, r *http.Request, tenantId TenantId) {
+func (sh *strictHandler) CreateVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, params CreateVaultParams) {
 	var request CreateVaultRequestObject
 
 	request.TenantId = tenantId
+	request.Params = params
 
 	var body CreateVaultJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -2569,11 +5335,12 @@ func (sh *strictHandler) CreateVault(w http.ResponseWriter, r *http.Request, ten
 }
 
 // DeleteVault operation middleware
-func (sh *strictHandler) DeleteVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId) {
+func (sh *strictHandler) DeleteVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params DeleteVaultParams) {
 	var request DeleteVaultRequestObject
 
 	request.TenantId = tenantId
 	request.VaultId = vaultId
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DeleteVault(ctx, request.(DeleteVaultRequestObject))
@@ -2596,11 +5363,12 @@ func (sh *strictHandler) DeleteVault(w http.ResponseWriter, r *http.Request, ten
 }
 
 // GetVault operation middleware
-func (sh *strictHandler) GetVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId) {
+func (sh *strictHandler) GetVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetVaultParams) {
 	var request GetVaultRequestObject
 
 	request.TenantId = tenantId
 	request.VaultId = vaultId
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetVault(ctx, request.(GetVaultRequestObject))
@@ -2623,11 +5391,12 @@ func (sh *strictHandler) GetVault(w http.ResponseWriter, r *http.Request, tenant
 }
 
 // UpdateVault operation middleware
-func (sh *strictHandler) UpdateVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId) {
+func (sh *strictHandler) UpdateVault(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params UpdateVaultParams) {
 	var request UpdateVaultRequestObject
 
 	request.TenantId = tenantId
 	request.VaultId = vaultId
+	request.Params = params
 
 	var body UpdateVaultJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -2684,27 +5453,55 @@ func (sh *strictHandler) DeleteSecret(w http.ResponseWriter, r *http.Request, te
 	}
 }
 
-// GetSecrets operation middleware
-func (sh *strictHandler) GetSecrets(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetSecretsParams) {
-	var request GetSecretsRequestObject
+// GetSecret operation middleware
+func (sh *strictHandler) GetSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetSecretParams) {
+	var request GetSecretRequestObject
 
 	request.TenantId = tenantId
 	request.VaultId = vaultId
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetSecrets(ctx, request.(GetSecretsRequestObject))
+		return sh.ssi.GetSecret(ctx, request.(GetSecretRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetSecrets")
+		handler = middleware(handler, "GetSecret")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetSecretsResponseObject); ok {
-		if err := validResponse.VisitGetSecretsResponse(w); err != nil {
+	} else if validResponse, ok := response.(GetSecretResponseObject); ok {
+		if err := validResponse.VisitGetSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// HeadSecret operation middleware
+func (sh *strictHandler) HeadSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params HeadSecretParams) {
+	var request HeadSecretRequestObject
+
+	request.TenantId = tenantId
+	request.VaultId = vaultId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.HeadSecret(ctx, request.(HeadSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "HeadSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(HeadSecretResponseObject); ok {
+		if err := validResponse.VisitHeadSecretResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2740,6 +5537,34 @@ func (sh *strictHandler) PutSecret(w http.ResponseWriter, r *http.Request, tenan
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PutSecretResponseObject); ok {
 		if err := validResponse.VisitPutSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSecrets operation middleware
+func (sh *strictHandler) ListSecrets(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params ListSecretsParams) {
+	var request ListSecretsRequestObject
+
+	request.TenantId = tenantId
+	request.VaultId = vaultId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSecrets(ctx, request.(ListSecretsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSecrets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSecretsResponseObject); ok {
+		if err := validResponse.VisitListSecretsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

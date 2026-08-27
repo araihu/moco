@@ -1,0 +1,7 @@
+name: vaultId
+in: path
+required: true
+description: Vault UUID scoped to the tenant in the request path.
+schema:
+  type: string
+  format: uuid

@@ -1,0 +1,8 @@
+name: name
+in: query
+required: false
+description: Exact, case-sensitive resource name filter.
+schema:
+  type: string
+  minLength: 1
+  maxLength: 128

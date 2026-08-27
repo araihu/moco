@@ -1,0 +1,9 @@
+name: cascade
+in: query
+required: false
+description: |
+  Delete child resources when true. The default false returns 409 while child
+  resources exist, preventing accidental secret deletion.
+schema:
+  type: boolean
+  default: false

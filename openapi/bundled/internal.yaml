@@ -1,0 +1,93 @@
+openapi: 3.0.3
+info:
+  title: Mocó Internal Operations API
+  version: 0.2.0
+  description: |
+    Minimal process probes for orchestrators and load balancers. The endpoints
+    intentionally expose no dependency, configuration, or secret details.
+  contact:
+    name: AraiHu
+    url: https://github.com/araihu/moco
+servers:
+  - url: /
+    description: Direct deployment origin, normally restricted by network policy.
+tags:
+  - name: Health
+    description: Process liveness and traffic readiness probes.
+paths:
+  /livez:
+    get:
+      operationId: getLiveness
+      summary: Check process liveness
+      description: Returns 200 while the server process can handle HTTP requests.
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Process is live.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/health-status'
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: Check traffic readiness
+      description: |
+        Returns 200 when the instance can serve product traffic and 503 otherwise.
+        The body deliberately omits dependency and configuration details.
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Instance is ready for product traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/health-status'
+        '503':
+          description: Instance is not ready for product traffic.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/retry-after'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unavailable-status'
+components:
+  schemas:
+    health-status:
+      title: HealthStatus
+      type: object
+      description: Minimal probe result with no deployment details.
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+          example: ok
+    unavailable-status:
+      title: UnavailableStatus
+      type: object
+      description: Minimal readiness failure with no dependency details.
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - unavailable
+          example: unavailable
+  headers:
+    retry-after:
+      description: Delay in seconds before retrying the request.
+      required: true
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+      example: 5

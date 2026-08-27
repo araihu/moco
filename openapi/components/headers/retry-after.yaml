@@ -1,0 +1,7 @@
+description: Delay in seconds before retrying the request.
+required: true
+schema:
+  type: integer
+  format: int32
+  minimum: 1
+example: 5

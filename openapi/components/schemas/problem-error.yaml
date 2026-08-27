@@ -1,0 +1,20 @@
+title: ProblemError
+type: object
+description: Field-specific validation failure safe to expose to clients.
+additionalProperties: false
+required: [message]
+properties:
+  field:
+    type: string
+    description: JSON Pointer or parameter name when the failure has a location.
+    example: /name
+  code:
+    type: string
+    minLength: 1
+    description: Stable machine-readable validation code.
+    example: invalid_format
+  message:
+    type: string
+    minLength: 1
+    description: Human-readable message that never contains secret values.
+    example: must match the documented name format

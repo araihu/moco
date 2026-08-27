@@ -1,0 +1,14 @@
+description: The authenticated principal lacks permission for the operation.
+headers:
+  X-Request-ID:
+    $ref: ../headers/request-id.yaml
+content:
+  application/problem+json:
+    example:
+      type: https://moco.araihu.com/problems/forbidden
+      title: Forbidden
+      status: 403
+      code: permission_denied
+      requestId: 11111111-1111-4111-8111-111111111111
+    schema:
+      $ref: ../schemas/problem.yaml

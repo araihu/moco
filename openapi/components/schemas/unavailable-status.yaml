@@ -1,0 +1,10 @@
+title: UnavailableStatus
+type: object
+description: Minimal readiness failure with no dependency details.
+additionalProperties: false
+required: [status]
+properties:
+  status:
+    type: string
+    enum: [unavailable]
+    example: unavailable

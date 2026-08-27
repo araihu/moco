@@ -1,0 +1,20 @@
+title: TenantUpdate
+type: object
+description: Complete mutable tenant state used for replacement updates.
+additionalProperties: false
+required: [name, description, labels]
+properties:
+  name:
+    type: string
+    minLength: 1
+    maxLength: 128
+    pattern: '^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$'
+    example: platform
+  description:
+    type: string
+    maxLength: 1024
+    nullable: true
+    description: Set to null to clear the description.
+    example: Platform-owned tenant
+  labels:
+    $ref: ./labels.yaml

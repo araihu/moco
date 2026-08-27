@@ -1,0 +1,10 @@
+title: HealthStatus
+type: object
+description: Minimal probe result with no deployment details.
+additionalProperties: false
+required: [status]
+properties:
+  status:
+    type: string
+    enum: [ok]
+    example: ok

@@ -1,0 +1,121 @@
+parameters:
+  - $ref: ../components/parameters/tenant-id.yaml
+  - $ref: ../components/parameters/request-id.yaml
+get:
+  operationId: getTenant
+  summary: Get a tenant
+  description: Returns one tenant by its stable ID.
+  tags: [Tenants]
+  parameters:
+    - $ref: ../components/parameters/if-none-match.yaml
+  responses:
+    '200':
+      description: Tenant representation.
+      headers:
+        ETag:
+          $ref: ../components/headers/etag.yaml
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/tenant.yaml
+    '304':
+      $ref: ../components/responses/not-modified.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '404':
+      $ref: ../components/responses/not-found.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml
+put:
+  operationId: updateTenant
+  summary: Update a tenant
+  description: Replaces all mutable fields. externalId and server fields are immutable.
+  tags: [Tenants]
+  parameters:
+    - $ref: ../components/parameters/if-match.yaml
+  requestBody:
+    description: Complete mutable tenant state. Use null to clear description.
+    required: true
+    content:
+      application/json:
+        example:
+          name: platform
+          description: Platform-owned tenant
+          labels:
+            app.kubernetes.io/managed-by: moco-operator
+        schema:
+          $ref: ../components/schemas/tenant-update.yaml
+  responses:
+    '200':
+      description: Updated tenant representation.
+      headers:
+        ETag:
+          $ref: ../components/headers/etag.yaml
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/tenant.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '404':
+      $ref: ../components/responses/not-found.yaml
+    '409':
+      $ref: ../components/responses/conflict.yaml
+    '412':
+      $ref: ../components/responses/precondition-failed.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml
+delete:
+  operationId: deleteTenant
+  summary: Delete a tenant
+  description: |
+    Deletes an empty tenant. With cascade=true, also deletes all child vaults
+    and secrets. A missing tenant returns 404; reconcilers may treat it as success.
+  tags: [Tenants]
+  parameters:
+    - $ref: ../components/parameters/if-match.yaml
+    - $ref: ../components/parameters/cascade.yaml
+  responses:
+    '204':
+      description: Tenant deleted.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '404':
+      $ref: ../components/responses/not-found.yaml
+    '409':
+      $ref: ../components/responses/conflict.yaml
+    '412':
+      $ref: ../components/responses/precondition-failed.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

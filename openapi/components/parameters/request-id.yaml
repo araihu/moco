@@ -1,0 +1,8 @@
+name: X-Request-ID
+in: header
+required: false
+description: Optional caller correlation ID; the server returns the effective ID.
+schema:
+  type: string
+  minLength: 1
+  maxLength: 128

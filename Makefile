@@ -1,21 +1,20 @@
 GO := go
-VACUUM_VERSION := v0.30.0
-OAPI_CODEGEN_VERSION := v2.8.0
-SQLC_VERSION := v1.31.1
-MIGRATE_VERSION := v4.19.1
 DB_PATH ?= ./moco.db
 
-.PHONY: spec-lint
+.PHONY: spec-lint spec-bundle api-generate sqlc-generate db-migrate
 spec-lint:
-	GOWORK=off $(GO) run github.com/daveshanley/vacuum@$(VACUUM_VERSION) lint --ruleset api/vacuum.yaml -d api/openapi.yaml
+	GOWORK=off $(GO) -C tools tool vacuum lint --ruleset ../openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d ../openapi/public.yaml
+	GOWORK=off $(GO) -C tools tool vacuum lint --ruleset ../openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d ../openapi/internal.yaml
 
-.PHONY: api-generate
-api-generate:
-	GOWORK=off $(GO) run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) --config api/oapi-codegen.yaml api/openapi.yaml
+spec-bundle:
+	GOWORK=off $(GO) -C tools tool vacuum bundle --composed --no-style --base ../openapi ../openapi/public.yaml ../openapi/bundled/public.yaml
+	GOWORK=off $(GO) -C tools tool vacuum bundle --composed --no-style --base ../openapi ../openapi/internal.yaml ../openapi/bundled/internal.yaml
 
-.PHONY: sqlc-generate db-migrate
+api-generate: spec-bundle
+	GOWORK=off $(GO) -C tools tool oapi-codegen --config ../openapi/oapi-codegen.yaml ../openapi/bundled/public.yaml
+
 sqlc-generate:
-	GOWORK=off $(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
+	GOWORK=off $(GO) -C tools tool sqlc generate -f ../sqlc.yaml
 
 db-migrate:
-	GOWORK=off $(GO) run -tags sqlite github.com/golang-migrate/migrate/v4/cmd/migrate@$(MIGRATE_VERSION) -path db/migrations -database "sqlite://$(DB_PATH)" up
+	GOWORK=off $(GO) -C tools run -tags sqlite github.com/golang-migrate/migrate/v4/cmd/migrate -path ../db/migrations -database "sqlite://$(abspath $(DB_PATH))" up

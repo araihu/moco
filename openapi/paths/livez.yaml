@@ -1,0 +1,13 @@
+get:
+  operationId: getLiveness
+  summary: Check process liveness
+  description: Returns 200 while the server process can handle HTTP requests.
+  tags: [Health]
+  security: []
+  responses:
+    '200':
+      description: Process is live.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/health-status.yaml

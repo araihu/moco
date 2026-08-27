@@ -1,0 +1,6 @@
+description: Cache directive for secret-bearing responses.
+required: true
+schema:
+  type: string
+  enum: [no-store]
+example: no-store

@@ -1,0 +1,101 @@
+parameters:
+  - $ref: ../components/parameters/tenant-id.yaml
+  - $ref: ../components/parameters/request-id.yaml
+get:
+  operationId: listVaults
+  summary: List vaults
+  description: |
+    Lists vaults in a stable snapshot. Follow `nextCursor` until `hasMore` is
+    false. If a cursor expires, restart without one. Name and externalId filters
+    are exact and may be combined.
+  tags: [Vaults]
+  parameters:
+    - $ref: ../components/parameters/limit.yaml
+    - $ref: ../components/parameters/cursor.yaml
+    - $ref: ../components/parameters/name-filter.yaml
+    - $ref: ../components/parameters/external-id-filter.yaml
+  responses:
+    '200':
+      description: Page of vaults from a stable snapshot.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          example:
+            items:
+              - id: 22222222-2222-4222-8222-222222222222
+                tenantId: 11111111-1111-4111-8111-111111111111
+                name: application
+                labels: {}
+                revision: 1
+                createdAt: '2026-08-25T12:00:00Z'
+                updatedAt: '2026-08-25T12:00:00Z'
+            page:
+              hasMore: false
+              nextCursor: null
+          schema:
+            $ref: ../components/schemas/vault-list.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '404':
+      $ref: ../components/responses/not-found.yaml
+    '410':
+      $ref: ../components/responses/cursor-expired.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml
+post:
+  operationId: createVault
+  summary: Create a vault
+  description: |
+    Creates a tenant-scoped vault. Name and externalId are independently unique
+    within the tenant. Repeating an identical request with the same
+    Idempotency-Key returns the original result.
+  tags: [Vaults]
+  parameters:
+    - $ref: ../components/parameters/idempotency-key.yaml
+  requestBody:
+    description: Vault creation fields.
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/schemas/vault-create.yaml
+  responses:
+    '201':
+      description: Vault created, or prior identical keyed result replayed.
+      headers:
+        ETag:
+          $ref: ../components/headers/etag.yaml
+        Location:
+          $ref: ../components/headers/location.yaml
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/vault.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '404':
+      $ref: ../components/responses/not-found.yaml
+    '409':
+      $ref: ../components/responses/conflict.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

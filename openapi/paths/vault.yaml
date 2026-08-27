@@ -1,0 +1,122 @@
+parameters:
+  - $ref: ../components/parameters/tenant-id.yaml
+  - $ref: ../components/parameters/vault-id.yaml
+  - $ref: ../components/parameters/request-id.yaml
+get:
+  operationId: getVault
+  summary: Get a vault
+  description: Returns one vault by stable tenant-scoped ID.
+  tags: [Vaults]
+  parameters:
+    - $ref: ../components/parameters/if-none-match.yaml
+  responses:
+    '200':
+      description: Vault representation.
+      headers:
+        ETag:
+          $ref: ../components/headers/etag.yaml
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/vault.yaml
+    '304':
+      $ref: ../components/responses/not-modified.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '404':
+      $ref: ../components/responses/not-found.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml
+put:
+  operationId: updateVault
+  summary: Update a vault
+  description: Replaces all mutable fields. externalId and server fields are immutable.
+  tags: [Vaults]
+  parameters:
+    - $ref: ../components/parameters/if-match.yaml
+  requestBody:
+    description: Complete mutable vault state. Use null to clear description.
+    required: true
+    content:
+      application/json:
+        example:
+          name: platform
+          description: Platform runtime secrets
+          labels:
+            app.kubernetes.io/managed-by: moco-operator
+        schema:
+          $ref: ../components/schemas/vault-update.yaml
+  responses:
+    '200':
+      description: Updated vault representation.
+      headers:
+        ETag:
+          $ref: ../components/headers/etag.yaml
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/vault.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '404':
+      $ref: ../components/responses/not-found.yaml
+    '409':
+      $ref: ../components/responses/conflict.yaml
+    '412':
+      $ref: ../components/responses/precondition-failed.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml
+delete:
+  operationId: deleteVault
+  summary: Delete a vault
+  description: |
+    Deletes an empty vault. With cascade=true, also deletes all stored secrets.
+    A missing vault returns 404; reconcilers may treat it as success.
+  tags: [Vaults]
+  parameters:
+    - $ref: ../components/parameters/if-match.yaml
+    - $ref: ../components/parameters/cascade.yaml
+  responses:
+    '204':
+      description: Vault deleted.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '404':
+      $ref: ../components/responses/not-found.yaml
+    '409':
+      $ref: ../components/responses/conflict.yaml
+    '412':
+      $ref: ../components/responses/precondition-failed.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

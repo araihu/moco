@@ -1,0 +1,9 @@
+name: If-None-Match
+in: header
+required: false
+description: |
+  For GET, return 304 when the current ETag matches. For PUT, only `*` is
+  accepted and means create only. A PUT must not send both conditional headers.
+schema:
+  type: string
+  minLength: 1

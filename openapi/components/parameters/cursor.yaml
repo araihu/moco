@@ -1,0 +1,8 @@
+name: cursor
+in: query
+required: false
+description: Opaque next-page cursor returned by the preceding list response.
+schema:
+  type: string
+  minLength: 1
+  maxLength: 2048

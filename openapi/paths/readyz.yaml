@@ -1,0 +1,24 @@
+get:
+  operationId: getReadiness
+  summary: Check traffic readiness
+  description: |
+    Returns 200 when the instance can serve product traffic and 503 otherwise.
+    The body deliberately omits dependency and configuration details.
+  tags: [Health]
+  security: []
+  responses:
+    '200':
+      description: Instance is ready for product traffic.
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/health-status.yaml
+    '503':
+      description: Instance is not ready for product traffic.
+      headers:
+        Retry-After:
+          $ref: ../components/headers/retry-after.yaml
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/unavailable-status.yaml

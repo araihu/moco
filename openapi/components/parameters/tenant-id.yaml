@@ -1,0 +1,7 @@
+name: tenantId
+in: path
+required: true
+description: Tenant UUID.
+schema:
+  type: string
+  format: uuid

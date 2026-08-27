@@ -19,7 +19,9 @@ database, Casbin, or generated adapter packages. `internal/adapters` implements
 outward infrastructure behind those ports; `cmd/moco-server` will eventually
 compose the application.
 
-- `api/`: OpenAPI source, lint rules, and code-generation configuration.
+- `openapi/`: exploded public/internal OpenAPI sources, lint rules, and
+  code-generation configuration.
+- `tools/`: isolated Go module containing pinned development tools.
 - `cmd/moco-server/`: future composition root.
 - `db/migrations/`: future go-migrate inputs.
 - `db/queries/`: future sqlc inputs.
@@ -40,8 +42,9 @@ The custom Casbin adapter will load persisted rules through sqlc-backed
 
 ## Prerequisites and tooling
 
-Go 1.27.0 is required. Tools run through pinned `go run` commands; no global
-tool installation is needed.
+Go 1.27.0 is required. Tools are pinned in the separate `tools` Go module and
+run through `go tool` or module-pinned `go run`; no global installation is
+needed.
 
 - Vacuum `v0.30.0`
 - oapi-codegen `v2.8.0`

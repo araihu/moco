@@ -1,0 +1,9 @@
+name: If-Match
+in: header
+required: false
+description: |
+  Opaque ETag from the latest representation. When present, the mutation is
+  applied only if the current ETag matches; otherwise the server returns 412.
+schema:
+  type: string
+  minLength: 1

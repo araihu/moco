@@ -1,0 +1,27 @@
+parameters:
+  - $ref: ../components/parameters/request-id.yaml
+get:
+  operationId: getServiceInfo
+  summary: Get API compatibility information
+  description: Returns server and API versions plus stable capability identifiers.
+  tags: [Service]
+  responses:
+    '200':
+      description: Service information.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/service-info.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

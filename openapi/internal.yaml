@@ -1,0 +1,21 @@
+openapi: 3.0.3
+info:
+  title: Mocó Internal Operations API
+  version: 0.2.0
+  description: |
+    Minimal process probes for orchestrators and load balancers. The endpoints
+    intentionally expose no dependency, configuration, or secret details.
+  contact:
+    name: AraiHu
+    url: https://github.com/araihu/moco
+servers:
+  - url: /
+    description: Direct deployment origin, normally restricted by network policy.
+tags:
+  - name: Health
+    description: Process liveness and traffic readiness probes.
+paths:
+  /livez:
+    $ref: ./paths/livez.yaml
+  /readyz:
+    $ref: ./paths/readyz.yaml

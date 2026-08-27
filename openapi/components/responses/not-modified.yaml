@@ -1,0 +1,6 @@
+description: The representation has not changed since the supplied ETag.
+headers:
+  ETag:
+    $ref: ../headers/etag.yaml
+  X-Request-ID:
+    $ref: ../headers/request-id.yaml

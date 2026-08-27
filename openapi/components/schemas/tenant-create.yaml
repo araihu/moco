@@ -1,0 +1,25 @@
+title: TenantCreate
+type: object
+description: Fields accepted when creating a tenant.
+additionalProperties: false
+required: [name]
+properties:
+  name:
+    type: string
+    minLength: 1
+    maxLength: 128
+    pattern: '^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$'
+    example: production
+  description:
+    type: string
+    maxLength: 1024
+    nullable: true
+    example: Production workloads
+  externalId:
+    type: string
+    minLength: 1
+    maxLength: 512
+    description: Immutable caller correlation identifier, unique across tenants.
+    example: kubernetes://cluster-a/platform/tenant-production
+  labels:
+    $ref: ./labels.yaml

@@ -1,0 +1,16 @@
+title: PageInfo
+type: object
+description: Cursor state for a stable collection snapshot.
+additionalProperties: false
+required: [hasMore, nextCursor]
+properties:
+  hasMore:
+    type: boolean
+    description: Whether another page exists in the same snapshot.
+    example: false
+  nextCursor:
+    type: string
+    minLength: 1
+    nullable: true
+    description: Opaque cursor for the next page; null on the final page.
+    example: null

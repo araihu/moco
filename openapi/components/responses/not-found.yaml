@@ -1,0 +1,14 @@
+description: The requested tenant, vault, or secret does not exist.
+headers:
+  X-Request-ID:
+    $ref: ../headers/request-id.yaml
+content:
+  application/problem+json:
+    example:
+      type: https://moco.araihu.com/problems/not-found
+      title: Not Found
+      status: 404
+      code: resource_not_found
+      requestId: 11111111-1111-4111-8111-111111111111
+    schema:
+      $ref: ../schemas/problem.yaml

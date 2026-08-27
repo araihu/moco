@@ -1,0 +1,9 @@
+title: Labels
+type: object
+description: Client-defined metadata used for organization and ownership hints.
+maxProperties: 64
+additionalProperties:
+  type: string
+  maxLength: 256
+example:
+  app.kubernetes.io/managed-by: moco-operator

@@ -1,0 +1,48 @@
+openapi: 3.0.3
+info:
+  title: Mocó Public API
+  version: 0.2.0
+  description: |
+    Tenant-isolated, path-based secret management for interactive and
+    automated clients. The contract makes no network-topology assumptions:
+    clients can run inside or outside the Mocó Kubernetes cluster.
+  contact:
+    name: AraiHu
+    url: https://github.com/araihu/moco
+servers:
+  - url: /
+    description: Current deployment origin. Production deployments use TLS.
+security:
+  - bearerAuth: []
+tags:
+  - name: Service
+    description: API discovery and compatibility information.
+  - name: Tenants
+    description: Tenant lifecycle operations.
+  - name: Vaults
+    description: Tenant-scoped vault lifecycle operations.
+  - name: Secrets
+    description: Vault-scoped secret value and metadata operations.
+paths:
+  /api/v1:
+    $ref: ./paths/service.yaml
+  /api/v1/tenants:
+    $ref: ./paths/tenants.yaml
+  /api/v1/tenants/{tenantId}:
+    $ref: ./paths/tenant.yaml
+  /api/v1/tenants/{tenantId}/vaults:
+    $ref: ./paths/vaults.yaml
+  /api/v1/tenants/{tenantId}/vaults/{vaultId}:
+    $ref: ./paths/vault.yaml
+  /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets:
+    $ref: ./paths/secrets.yaml
+  /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret:
+    $ref: ./paths/secret.yaml
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Deployment-issued bearer credential sent in the Authorization header.
+        Tokens may be opaque; clients must not assume JWT structure.

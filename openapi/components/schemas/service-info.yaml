@@ -1,0 +1,24 @@
+title: ServiceInfo
+type: object
+description: Server identity and compatibility information.
+additionalProperties: false
+required: [apiVersion, serviceVersion, capabilities]
+properties:
+  apiVersion:
+    type: string
+    description: Public API major version implemented by this endpoint.
+    enum: [v1]
+    example: v1
+  serviceVersion:
+    type: string
+    description: Mocó server version; clients must treat it as opaque.
+    minLength: 1
+    example: 0.2.0
+  capabilities:
+    type: array
+    description: Stable feature identifiers available on this deployment.
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1
+    example: [tenants, vaults, secrets, conditional-writes]

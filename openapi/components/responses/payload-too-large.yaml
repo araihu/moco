@@ -1,0 +1,14 @@
+description: The decoded secret value exceeds the 1 MiB limit.
+headers:
+  X-Request-ID:
+    $ref: ../headers/request-id.yaml
+content:
+  application/problem+json:
+    example:
+      type: https://moco.araihu.com/problems/payload-too-large
+      title: Payload Too Large
+      status: 413
+      code: secret_too_large
+      requestId: 11111111-1111-4111-8111-111111111111
+    schema:
+      $ref: ../schemas/problem.yaml

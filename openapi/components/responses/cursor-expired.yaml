@@ -1,0 +1,14 @@
+description: The cursor snapshot expired; restart listing without a cursor.
+headers:
+  X-Request-ID:
+    $ref: ../headers/request-id.yaml
+content:
+  application/problem+json:
+    example:
+      type: https://moco.araihu.com/problems/cursor-expired
+      title: Cursor Expired
+      status: 410
+      code: cursor_expired
+      requestId: 11111111-1111-4111-8111-111111111111
+    schema:
+      $ref: ../schemas/problem.yaml

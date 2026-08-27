@@ -1,0 +1,6 @@
+description: Opaque strong validator for conditional requests.
+required: true
+schema:
+  type: string
+  minLength: 1
+example: '"tenant-3"'

@@ -1,0 +1,8 @@
+name: externalId
+in: query
+required: false
+description: Exact immutable external correlation identifier filter.
+schema:
+  type: string
+  minLength: 1
+  maxLength: 512

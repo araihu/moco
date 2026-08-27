@@ -8,4 +8,4 @@ generate:
   embedded-spec: false
 compatibility:
   disable-required-readonly-as-pointer: true
-output: internal/adapters/http/moco.gen.go
+output: ../internal/adapters/http/moco.gen.go

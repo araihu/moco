@@ -1,0 +1,54 @@
+title: Tenant
+type: object
+description: Tenant identity, automation metadata, and lifecycle state.
+additionalProperties: false
+required: [id, name, labels, revision, createdAt, updatedAt]
+properties:
+  id:
+    type: string
+    format: uuid
+    readOnly: true
+    description: Server-assigned stable identifier.
+    example: 11111111-1111-4111-8111-111111111111
+  name:
+    type: string
+    minLength: 1
+    maxLength: 128
+    pattern: '^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$'
+    description: Human-readable name, unique across tenants.
+    example: production
+  description:
+    type: string
+    maxLength: 1024
+    nullable: true
+    description: Optional human-readable purpose.
+    example: Production workloads
+  externalId:
+    type: string
+    minLength: 1
+    maxLength: 512
+    readOnly: true
+    nullable: true
+    description: |
+      Immutable caller-supplied correlation identifier, unique across tenants.
+      Automation can rediscover a resource after losing local status.
+    example: kubernetes://cluster-a/platform/tenant-production
+  labels:
+    $ref: ./labels.yaml
+  revision:
+    type: integer
+    format: int64
+    minimum: 1
+    readOnly: true
+    description: Monotonic resource revision; the HTTP ETag remains authoritative.
+    example: 3
+  createdAt:
+    type: string
+    format: date-time
+    readOnly: true
+    example: '2026-08-25T12:00:00Z'
+  updatedAt:
+    type: string
+    format: date-time
+    readOnly: true
+    example: '2026-08-25T13:00:00Z'
