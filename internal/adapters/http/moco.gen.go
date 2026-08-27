@@ -614,20 +614,6 @@ type GetSecretParams struct {
 	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
 }
 
-// HeadSecretParams defines parameters for HeadSecret.
-type HeadSecretParams struct {
-	// Path Slash-delimited logical secret path. Empty, `.`, and `..` segments are
-	// invalid. Paths can be sensitive metadata and should not be logged by clients.
-	Path SecretPath `form:"path" json:"path"`
-
-	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
-	// accepted and means create only. A PUT must not send both conditional headers.
-	IfNoneMatch *IfNoneMatch `json:"If-None-Match,omitempty"`
-
-	// XRequestID Optional caller correlation ID; the server returns the effective ID.
-	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
-}
-
 // PutSecretParams defines parameters for PutSecret.
 type PutSecretParams struct {
 	// Path Slash-delimited logical secret path. Empty, `.`, and `..` segments are
@@ -637,6 +623,20 @@ type PutSecretParams struct {
 	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
 	// applied only if the current ETag matches; otherwise the server returns 412.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
+
+	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
+	// accepted and means create only. A PUT must not send both conditional headers.
+	IfNoneMatch *IfNoneMatch `json:"If-None-Match,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// GetSecretMetadataParams defines parameters for GetSecretMetadata.
+type GetSecretMetadataParams struct {
+	// Path Slash-delimited logical secret path. Empty, `.`, and `..` segments are
+	// invalid. Paths can be sensitive metadata and should not be logged by clients.
+	Path SecretPath `form:"path" json:"path"`
 
 	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
 	// accepted and means create only. A PUT must not send both conditional headers.
@@ -718,12 +718,12 @@ type ServerInterface interface {
 	// GetSecret Read a secret
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
 	GetSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetSecretParams)
-	// HeadSecret Inspect secret state without reading its value
-	// (HEAD /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
-	HeadSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params HeadSecretParams)
 	// PutSecret Create or replace a secret
 	// (PUT /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
 	PutSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params PutSecretParams)
+	// GetSecretMetadata Inspect secret state without reading its value
+	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret/metadata)
+	GetSecretMetadata(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetSecretMetadataParams)
 	// ListSecrets List secret metadata
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
 	ListSecrets(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params ListSecretsParams)
@@ -1752,97 +1752,6 @@ func (siw *ServerInterfaceWrapper) GetSecret(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
-// HeadSecret operation middleware
-func (siw *ServerInterfaceWrapper) HeadSecret(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "tenantId" -------------
-	var tenantId TenantId
-
-	err = runtime.BindStyledParameterWithOptions("simple", "tenantId", r.PathValue("tenantId"), &tenantId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenantId", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "vaultId" -------------
-	var vaultId VaultId
-
-	err = runtime.BindStyledParameterWithOptions("simple", "vaultId", r.PathValue("vaultId"), &vaultId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vaultId", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params HeadSecretParams
-
-	// ------------- Required query parameter "path" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
-		}
-		return
-	}
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "If-None-Match" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("If-None-Match")]; found {
-		var IfNoneMatch IfNoneMatch
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-None-Match", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "If-None-Match", valueList[0], &IfNoneMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-None-Match", Err: err})
-			return
-		}
-
-		params.IfNoneMatch = &IfNoneMatch
-
-	}
-
-	// ------------- Optional header parameter "X-Request-ID" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
-		var XRequestID RequestId
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
-			return
-		}
-
-		params.XRequestID = &XRequestID
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.HeadSecret(w, r, tenantId, vaultId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // PutSecret operation middleware
 func (siw *ServerInterfaceWrapper) PutSecret(w http.ResponseWriter, r *http.Request) {
 
@@ -1944,6 +1853,97 @@ func (siw *ServerInterfaceWrapper) PutSecret(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PutSecret(w, r, tenantId, vaultId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSecretMetadata operation middleware
+func (siw *ServerInterfaceWrapper) GetSecretMetadata(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenantId" -------------
+	var tenantId TenantId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenantId", r.PathValue("tenantId"), &tenantId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenantId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "vaultId" -------------
+	var vaultId VaultId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "vaultId", r.PathValue("vaultId"), &vaultId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vaultId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSecretMetadataParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-None-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-None-Match")]; found {
+		var IfNoneMatch IfNoneMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-None-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-None-Match", valueList[0], &IfNoneMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-None-Match", Err: err})
+			return
+		}
+
+		params.IfNoneMatch = &IfNoneMatch
+
+	}
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecretMetadata(w, r, tenantId, vaultId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2183,9 +2183,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}", wrapper.GetVault)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}", wrapper.UpdateVault)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets", wrapper.ListSecrets)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret/metadata", wrapper.GetSecretMetadata)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", wrapper.DeleteSecret)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", wrapper.GetSecret)
-	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", wrapper.HeadSecret)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", wrapper.PutSecret)
 
 	return m
@@ -4464,166 +4464,6 @@ func (response GetSecret503ApplicationProblemPlusJSONResponse) VisitGetSecretRes
 	return err
 }
 
-type HeadSecretRequestObject struct {
-	TenantId TenantId `json:"tenantId"`
-	VaultId  VaultId  `json:"vaultId"`
-	Params   HeadSecretParams
-}
-
-type HeadSecretResponseObject interface {
-	VisitHeadSecretResponse(w http.ResponseWriter) error
-}
-
-type HeadSecret200ResponseHeaders struct {
-	ETag               string
-	XMocoSecretDigest  string
-	XMocoSecretVersion int64
-	XRequestID         string
-}
-
-type HeadSecret200Response struct {
-	Headers HeadSecret200ResponseHeaders
-}
-
-func (response HeadSecret200Response) VisitHeadSecretResponse(w http.ResponseWriter) error {
-	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
-	w.Header().Set("X-Moco-Secret-Digest", fmt.Sprint(response.Headers.XMocoSecretDigest))
-	w.Header().Set("X-Moco-Secret-Version", fmt.Sprint(response.Headers.XMocoSecretVersion))
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(200)
-	return nil
-}
-
-type HeadSecret304Response = NotModifiedResponse
-
-func (response HeadSecret304Response) VisitHeadSecretResponse(w http.ResponseWriter) error {
-	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(304)
-	return nil
-}
-
-type HeadSecret400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response HeadSecret400ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadSecret401ApplicationProblemPlusJSONResponse struct {
-	UnauthorizedApplicationProblemPlusJSONResponse
-}
-
-func (response HeadSecret401ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadSecret403ApplicationProblemPlusJSONResponse struct {
-	ForbiddenApplicationProblemPlusJSONResponse
-}
-
-func (response HeadSecret403ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadSecret404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response HeadSecret404ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadSecret429ApplicationProblemPlusJSONResponse struct {
-	TooManyRequestsApplicationProblemPlusJSONResponse
-}
-
-func (response HeadSecret429ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(429)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadSecret500ApplicationProblemPlusJSONResponse struct {
-	InternalErrorApplicationProblemPlusJSONResponse
-}
-
-func (response HeadSecret500ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadSecret503ApplicationProblemPlusJSONResponse struct {
-	ServiceUnavailableApplicationProblemPlusJSONResponse
-}
-
-func (response HeadSecret503ApplicationProblemPlusJSONResponse) VisitHeadSecretResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
-	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
-	w.WriteHeader(503)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type PutSecretRequestObject struct {
 	TenantId TenantId `json:"tenantId"`
 	VaultId  VaultId  `json:"vaultId"`
@@ -4826,6 +4666,170 @@ type PutSecret503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response PutSecret503ApplicationProblemPlusJSONResponse) VisitPutSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretMetadataRequestObject struct {
+	TenantId TenantId `json:"tenantId"`
+	VaultId  VaultId  `json:"vaultId"`
+	Params   GetSecretMetadataParams
+}
+
+type GetSecretMetadataResponseObject interface {
+	VisitGetSecretMetadataResponse(w http.ResponseWriter) error
+}
+
+type GetSecretMetadata200ResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+
+type GetSecretMetadata200JSONResponse struct {
+	Body    SecretMetadata
+	Headers GetSecretMetadata200ResponseHeaders
+}
+
+func (response GetSecretMetadata200JSONResponse) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretMetadata304Response = NotModifiedResponse
+
+func (response GetSecretMetadata304Response) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(304)
+	return nil
+}
+
+type GetSecretMetadata400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecretMetadata400ApplicationProblemPlusJSONResponse) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretMetadata401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecretMetadata401ApplicationProblemPlusJSONResponse) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretMetadata403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecretMetadata403ApplicationProblemPlusJSONResponse) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretMetadata404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecretMetadata404ApplicationProblemPlusJSONResponse) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretMetadata429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecretMetadata429ApplicationProblemPlusJSONResponse) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretMetadata500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecretMetadata500ApplicationProblemPlusJSONResponse) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretMetadata503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetSecretMetadata503ApplicationProblemPlusJSONResponse) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -5050,12 +5054,12 @@ type StrictServerInterface interface {
 	// GetSecret Read a secret
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
 	GetSecret(ctx context.Context, request GetSecretRequestObject) (GetSecretResponseObject, error)
-	// HeadSecret Inspect secret state without reading its value
-	// (HEAD /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
-	HeadSecret(ctx context.Context, request HeadSecretRequestObject) (HeadSecretResponseObject, error)
 	// PutSecret Create or replace a secret
 	// (PUT /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret)
 	PutSecret(ctx context.Context, request PutSecretRequestObject) (PutSecretResponseObject, error)
+	// GetSecretMetadata Inspect secret state without reading its value
+	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret/metadata)
+	GetSecretMetadata(ctx context.Context, request GetSecretMetadataRequestObject) (GetSecretMetadataResponseObject, error)
 	// ListSecrets List secret metadata
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
 	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
@@ -5481,34 +5485,6 @@ func (sh *strictHandler) GetSecret(w http.ResponseWriter, r *http.Request, tenan
 	}
 }
 
-// HeadSecret operation middleware
-func (sh *strictHandler) HeadSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params HeadSecretParams) {
-	var request HeadSecretRequestObject
-
-	request.TenantId = tenantId
-	request.VaultId = vaultId
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.HeadSecret(ctx, request.(HeadSecretRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "HeadSecret")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(HeadSecretResponseObject); ok {
-		if err := validResponse.VisitHeadSecretResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // PutSecret operation middleware
 func (sh *strictHandler) PutSecret(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params PutSecretParams) {
 	var request PutSecretRequestObject
@@ -5537,6 +5513,34 @@ func (sh *strictHandler) PutSecret(w http.ResponseWriter, r *http.Request, tenan
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PutSecretResponseObject); ok {
 		if err := validResponse.VisitPutSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSecretMetadata operation middleware
+func (sh *strictHandler) GetSecretMetadata(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params GetSecretMetadataParams) {
+	var request GetSecretMetadataRequestObject
+
+	request.TenantId = tenantId
+	request.VaultId = vaultId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSecretMetadata(ctx, request.(GetSecretMetadataRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSecretMetadata")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSecretMetadataResponseObject); ok {
+		if err := validResponse.VisitGetSecretMetadataResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

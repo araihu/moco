@@ -31,8 +31,8 @@ edit the exploded sources instead.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.
-- A secret `digest` allows controllers to detect drift without reading or
-  logging the value.
+- `getSecretMetadata` returns a secret `digest` so controllers can detect drift
+  without reading or logging the value.
 - `429` and `503` responses include `Retry-After`; callers must apply bounded
   retries with jitter.
 

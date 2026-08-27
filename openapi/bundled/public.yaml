@@ -538,33 +538,33 @@ paths:
           $ref: '#/components/responses/internal-error'
         '503':
           $ref: '#/components/responses/service-unavailable'
-  /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret:
+  /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret/metadata:
     parameters:
       - $ref: '#/components/parameters/tenant-id'
       - $ref: '#/components/parameters/vault-id'
       - $ref: '#/components/parameters/secret-path'
       - $ref: '#/components/parameters/request-id'
-    head:
-      operationId: headSecret
+    get:
+      operationId: getSecretMetadata
       summary: Inspect secret state without reading its value
       description: |
-        Returns only ETag, version, and digest headers. Controllers should prefer
-        this operation for drift checks that do not require plaintext.
+        Returns metadata only. Controllers should prefer this operation for drift
+        checks that do not require plaintext.
       tags: [Secrets]
       parameters:
         - $ref: '#/components/parameters/if-none-match'
       responses:
         '200':
-          description: Secret metadata headers.
+          description: Secret metadata without its value.
           headers:
             ETag:
               $ref: '#/components/headers/etag'
-            X-Moco-Secret-Version:
-              $ref: '#/components/headers/secret-version'
-            X-Moco-Secret-Digest:
-              $ref: '#/components/headers/secret-digest'
             X-Request-ID:
               $ref: '#/components/headers/request-id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/secret-metadata'
         '304':
           $ref: '#/components/responses/not-modified'
         '400':
@@ -581,6 +581,12 @@ paths:
           $ref: '#/components/responses/internal-error'
         '503':
           $ref: '#/components/responses/service-unavailable'
+  /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret:
+    parameters:
+      - $ref: '#/components/parameters/tenant-id'
+      - $ref: '#/components/parameters/vault-id'
+      - $ref: '#/components/parameters/secret-path'
+      - $ref: '#/components/parameters/request-id'
     get:
       operationId: getSecret
       summary: Read a secret
@@ -1623,21 +1629,6 @@ components:
         type: string
         format: uri-reference
       example: /api/v1/tenants/11111111-1111-4111-8111-111111111111
-    secret-version:
-      description: Monotonic logical secret version.
-      required: true
-      schema:
-        type: integer
-        format: int64
-        minimum: 1
-      example: 4
-    secret-digest:
-      description: SHA-256 digest of the decoded secret value.
-      required: true
-      schema:
-        type: string
-        pattern: '^sha256:[a-f0-9]{64}$'
-      example: sha256:2bb80d537b1da3e38bd30361aa855686bde0ba53e611d8a8a5e47993629e366f
     cache-control:
       description: Cache directive for secret-bearing responses.
       required: true

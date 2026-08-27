@@ -36,6 +36,8 @@ paths:
     $ref: ./paths/vault.yaml
   /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets:
     $ref: ./paths/secrets.yaml
+  /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret/metadata:
+    $ref: ./paths/secret-metadata.yaml
   /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret:
     $ref: ./paths/secret.yaml
 components:
