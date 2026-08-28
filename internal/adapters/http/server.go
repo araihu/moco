@@ -10,8 +10,8 @@ import (
 	"mime"
 	"net/http"
 	"strings"
-	"time"
 
+	internalapi "github.com/araihu/moco/internal/adapters/http/internalapi"
 	"github.com/araihu/moco/internal/core/ports"
 	"github.com/araihu/moco/internal/core/services"
 	"github.com/google/uuid"
@@ -43,6 +43,8 @@ type HandlerOptions struct {
 	Readiness      ReadinessChecker
 	Authenticator  BearerAuthenticator
 	Authorizer     ports.Authorizer
+	Authorization  *services.AuthorizationPolicyService
+	PrincipalCheck func(string) bool
 	ServiceVersion string
 	Logger         *slog.Logger
 }
@@ -79,6 +81,9 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		tenants:        options.Tenants,
 		vaults:         options.Vaults,
 		secrets:        options.Secrets,
+		readiness:      options.Readiness,
+		authorization:  options.Authorization,
+		principalCheck: options.PrincipalCheck,
 		serviceVersion: options.ServiceVersion,
 		logger:         options.Logger,
 	}
@@ -92,22 +97,20 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 			writeProblem(w, internalProblem(requestID(r.Context())))
 		},
 	})
+	internalStrict := internalapi.NewStrictHandlerWithOptions(server, nil, internalapi.StrictHTTPServerOptions{
+		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, _ error) {
+			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_request", "The request could not be decoded."))
+		},
+		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			options.Logger.ErrorContext(r.Context(), "HTTP internal response failed",
+				"requestId", requestID(r.Context()), "error", err)
+			writeProblem(w, internalProblem(requestID(r.Context())))
+		},
+	})
 
 	mux := http.NewServeMux()
 	api := HandlerFromMux(strict, mux)
-	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
-		defer cancel()
-		if err := options.Readiness.Ping(ctx); err != nil {
-			w.Header().Set("Retry-After", "1")
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	internalapi.HandlerFromMux(internalStrict, mux)
 
 	handler := strictResourceJSON(api)
 	handler = authorizationMiddleware(options.Authorizer, options.Logger, handler)
@@ -121,6 +124,9 @@ type Server struct {
 	tenants        *services.TenantService
 	vaults         *services.VaultService
 	secrets        *services.SecretService
+	readiness      ReadinessChecker
+	authorization  *services.AuthorizationPolicyService
+	principalCheck func(string) bool
 	serviceVersion string
 	logger         *slog.Logger
 }
@@ -144,7 +150,7 @@ func requestIDs(next http.Handler) http.Handler {
 
 func bearerAuthentication(authenticator BearerAuthenticator, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isPublicAPIPath(r.URL.Path) {
+		if !isProtectedAPIPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -203,10 +209,16 @@ func authorizationMiddleware(authorizer ports.Authorizer, logger *slog.Logger, n
 }
 
 func authorizationResource(r *http.Request) (string, string, bool) {
-	if !isPublicAPIPath(r.URL.Path) {
+	if !isProtectedAPIPath(r.URL.Path) {
 		return "", "", false
 	}
 	path := r.URL.Path
+	if path == authorizationAdminPath {
+		return "*", path, r.Method == http.MethodGet || r.Method == http.MethodPut
+	}
+	if !isPublicAPIPath(path) {
+		return "", "", false
+	}
 	if path != "/api/v1" && strings.HasSuffix(path, "/") {
 		return "", "", false
 	}
@@ -253,13 +265,20 @@ func strictResourceJSON(next http.Handler) http.Handler {
 		if _, secretWrite := target.(*SecretWrite); secretWrite {
 			r.Body = http.MaxBytesReader(w, r.Body, maxSecretJSONBytes)
 			bodyReader = r.Body
+		} else if _, authorizationWrite := target.(*internalapi.AuthorizationSnapshotInput); authorizationWrite {
+			r.Body = http.MaxBytesReader(w, r.Body, maxAuthorizationJSONBytes)
+			bodyReader = r.Body
 		}
 		body, err := io.ReadAll(bodyReader)
 		defer wipeHTTPBytes(body)
 		if err != nil {
 			var tooLarge *http.MaxBytesError
 			if errors.As(err, &tooLarge) {
-				writeProblem(w, secretTooLargeProblem(requestID(r.Context())))
+				if _, authorizationWrite := target.(*internalapi.AuthorizationSnapshotInput); authorizationWrite {
+					writeProblem(w, badRequestProblem(requestID(r.Context()), "authorization_snapshot_too_large", "The authorization snapshot exceeds the supported size limit."))
+				} else {
+					writeProblem(w, secretTooLargeProblem(requestID(r.Context())))
+				}
 				return
 			}
 			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_json", "The JSON body could not be read."))
@@ -284,11 +303,23 @@ func strictResourceJSON(next http.Handler) http.Handler {
 	})
 }
 
+const (
+	authorizationAdminPath    = "/internal/v1/authorization"
+	maxAuthorizationJSONBytes = 2 << 20
+)
+
+func isProtectedAPIPath(path string) bool {
+	return isPublicAPIPath(path) || path == authorizationAdminPath
+}
+
 func isPublicAPIPath(path string) bool {
 	return path == "/api/v1" || strings.HasPrefix(path, "/api/v1/")
 }
 
 func resourceWriteTarget(r *http.Request) any {
+	if r.Method == http.MethodPut && r.URL.Path == authorizationAdminPath {
+		return &internalapi.AuthorizationSnapshotInput{}
+	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 3 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "tenants" {
 		return nil
@@ -316,7 +347,10 @@ func validResourceJSONShape(body []byte, target any, method string) bool {
 	}
 	required := []string{"name"}
 	nonNullable := []string{"name", "labels", "externalId"}
-	if _, secretWrite := target.(*SecretWrite); secretWrite {
+	if _, authorizationWrite := target.(*internalapi.AuthorizationSnapshotInput); authorizationWrite {
+		required = []string{"roleBindings", "policies"}
+		nonNullable = []string{"roleBindings", "policies"}
+	} else if _, secretWrite := target.(*SecretWrite); secretWrite {
 		required = []string{"value"}
 		nonNullable = []string{"value", "contentType"}
 	} else if method == http.MethodPut {
@@ -371,10 +405,4 @@ func writeProblem(w http.ResponseWriter, problem Problem) {
 	w.Header().Set("X-Request-ID", problem.RequestId)
 	w.WriteHeader(int(problem.Status))
 	_ = json.NewEncoder(w).Encode(problem)
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
 }

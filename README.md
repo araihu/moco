@@ -15,6 +15,7 @@ secret lifecycles:
 - HKDF-SHA-256/AES-256-GCM envelope encryption with one random wrapped data key per vault;
 - multi-principal bearer authentication from token digests and default-deny Casbin policies;
 - SQLite authorization policy snapshots with atomic replacement and coalesced reload signals;
+- restricted internal `GET`/`PUT /internal/v1/authorization` snapshot administration;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
 - creation idempotency scoped to the authenticated principal for at least 24 hours;
@@ -23,9 +24,9 @@ secret lifecycles:
 
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. Root-key rotation, external
-KMS/HSM providers, auditing, policy administration, and production deployment
-hardening are not implemented yet. Treat this as a development slice, not a
-production secret store.
+KMS/HSM providers, auditing, distributed policy change propagation, and
+production deployment hardening are not implemented yet. Treat this as a
+development slice, not a production secret store.
 
 ## Run locally
 
@@ -75,6 +76,11 @@ policies does not silently replace it. Principals and their token digests stay
 in the file because they are needed to authenticate requests. An intentionally
 empty role/policy set is also persisted and remains default-deny.
 
+The internal authorization endpoint requires an explicit Casbin policy for
+`/internal/v1/authorization` with `GET` and/or `PUT`; it is not part of the
+public API. Keep that permission on a dedicated deployment principal and
+restrict the direct deployment origin with network policy as well.
+
 Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
 tenant-scoped requests through `domain`; use the literal tenant ID for an
 isolated tenant. A global policy must explicitly use `domain: "*"`. `HEAD`
@@ -110,10 +116,10 @@ nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 - `internal/adapters/authn/`: bearer token keyring keyed by SHA-256 digests.
 - `internal/adapters/authz/`: reloadable Casbin model, policy bus, and default-deny adapter.
 
-Policy administration endpoints and distributed change propagation are the next
-authorization slice. Each configured server instance currently supervises its
-SQLite-backed policy reloader and terminates if an authoritative snapshot cannot
-be loaded or validated.
+The internal policy administration endpoint is implemented; distributed change
+propagation is the next authorization slice. Each configured server instance
+supervises its SQLite-backed policy reloader and terminates if an authoritative
+snapshot cannot be loaded or validated.
 
 ## Development
 

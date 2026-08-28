@@ -29,6 +29,7 @@ type authorizationConfiguration struct {
 type securityRuntime struct {
 	authenticator *authn.TokenAuthenticator
 	authorizer    *authz.StaticAuthorizer
+	policyService *services.AuthorizationPolicyService
 	reloader      *authz.PolicyReloader
 	bus           *authz.MemoryPolicyChangesBus
 }
@@ -64,6 +65,8 @@ func buildSecurityRuntime(ctx context.Context, configuration configuration, repo
 		authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{
 			{Subject: principalID, Domain: "*", Path: "/api/v1", Method: "GET"},
 			{Subject: principalID, Domain: "*", Path: "/api/v1/*", Method: "*"},
+			{Subject: principalID, Domain: "*", Path: "/internal/v1/authorization", Method: "GET"},
+			{Subject: principalID, Domain: "*", Path: "/internal/v1/authorization", Method: "PUT"},
 		})
 		if err != nil {
 			return securityRuntime{}, fmt.Errorf("initialize legacy authorization: %w", err)
@@ -81,6 +84,7 @@ func buildSecurityRuntime(ctx context.Context, configuration configuration, repo
 	}
 	roleBindings := access.RoleBindings
 	policies := access.Policies
+	var policyService *services.AuthorizationPolicyService
 	var reloader *authz.PolicyReloader
 	var bus *authz.MemoryPolicyChangesBus
 	if repository != nil {
@@ -89,7 +93,8 @@ func buildSecurityRuntime(ctx context.Context, configuration configuration, repo
 			return securityRuntime{}, fmt.Errorf("load persisted authorization: %w", loadErr)
 		}
 		bus = authz.NewMemoryPolicyChangesBus()
-		policyService, serviceErr := services.NewAuthorizationPolicyService(repository, bus)
+		var serviceErr error
+		policyService, serviceErr = services.NewAuthorizationPolicyService(repository, bus)
 		if serviceErr != nil {
 			bus.Close()
 			return securityRuntime{}, fmt.Errorf("initialize authorization policy service: %w", serviceErr)
@@ -141,7 +146,7 @@ func buildSecurityRuntime(ctx context.Context, configuration configuration, repo
 			return securityRuntime{}, fmt.Errorf("initialize authorization policy reloader: %w", err)
 		}
 	}
-	return securityRuntime{authenticator: authenticator, authorizer: authorizer, reloader: reloader, bus: bus}, nil
+	return securityRuntime{authenticator: authenticator, authorizer: authorizer, policyService: policyService, reloader: reloader, bus: bus}, nil
 }
 
 func validateRoleBindings(principals []authn.Credential, bindings []authz.RoleBinding) error {

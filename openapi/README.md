@@ -6,19 +6,20 @@ not assume that they run in the same cluster or network as Mocó. Every public
 operation therefore uses explicit bearer authentication and is safe to expose
 behind a TLS ingress when deployment policy permits it.
 
-`internal.yaml` contains only the minimal unauthenticated liveness and
-readiness probes needed by a process supervisor or load balancer. These probes
-reveal no configuration or dependency details. A deployment should restrict
-them with network policy instead of treating same-cluster placement as an
-authentication mechanism.
+`internal.yaml` contains the minimal unauthenticated liveness/readiness probes
+needed by a process supervisor or load balancer plus a bearer-protected
+authorization snapshot operation for the restricted deployment origin. The
+snapshot operation never exposes token digests. A deployment should restrict
+the origin with network policy as well as an explicit Casbin permission; same-
+cluster placement is not an authentication mechanism.
 
 The contracts are intentionally split into small files below `paths/` and
 `components/`. Relative `$ref` values are part of the source contract. Run
 `make spec-lint` to validate and lint both roots with the pinned Vacuum tool,
 `make spec-bundle` to rebuild the single-file distributions in `bundled/`, and
-`make api-generate` to prove that the bundled public contract produces a typed
-Go server boundary. The bundled files are generated distribution artifacts;
-edit the exploded sources instead.
+`make api-generate` to prove that the bundled public and internal contracts
+produce typed Go server boundaries. The bundled files are generated distribution
+artifacts; edit the exploded sources instead.
 
 ## Automation guarantees
 

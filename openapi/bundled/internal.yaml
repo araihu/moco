@@ -1,19 +1,24 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Minimal process probes for orchestrators and load balancers. The endpoints
-    intentionally expose no dependency, configuration, or secret details.
+    Process probes and deployment-scoped authorization administration. The
+    administration operation is intended for a restricted deployment origin;
+    it never exposes bearer token digests.
   contact:
     name: AraiHu
     url: https://github.com/araihu/moco
 servers:
   - url: /
     description: Direct deployment origin, normally restricted by network policy.
+security:
+  - bearerAuth: []
 tags:
   - name: Health
     description: Process liveness and traffic readiness probes.
+  - name: Authorization
+    description: Restricted replacement of the persisted authorization snapshot.
 paths:
   /livez:
     get:
@@ -54,7 +59,102 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/unavailable-status'
+  /internal/v1/authorization:
+    parameters:
+      - $ref: '#/components/parameters/request-id'
+    get:
+      operationId: getAuthorizationSnapshot
+      summary: Read the persisted authorization snapshot
+      description: Returns the complete role-binding and policy snapshot without token digests.
+      tags: [Authorization]
+      responses:
+        '200':
+          description: Persisted authorization snapshot.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/request-id'
+          content:
+            application/json:
+              example:
+                initialized: true
+                roleBindings:
+                  - principal: controller
+                    role: secret-reader
+                    domain: tenant-a
+                policies:
+                  - subject: secret-reader
+                    domain: tenant-a
+                    path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+                    method: GET
+              schema:
+                $ref: '#/components/schemas/authorization-snapshot'
+        '401':
+          $ref: '#/components/responses/unauthorized'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '500':
+          $ref: '#/components/responses/internal-error'
+        '503':
+          $ref: '#/components/responses/service-unavailable'
+    put:
+      operationId: replaceAuthorizationSnapshot
+      summary: Replace the persisted authorization snapshot
+      description: Atomically replaces all role bindings and policies, then signals local reloaders.
+      tags: [Authorization]
+      requestBody:
+        required: true
+        description: Complete replacement snapshot; empty arrays mean default-deny.
+        content:
+          application/json:
+            example:
+              roleBindings:
+                - principal: controller
+                  role: secret-reader
+                  domain: tenant-a
+              policies:
+                - subject: secret-reader
+                  domain: tenant-a
+                  path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+                  method: GET
+            schema:
+              $ref: '#/components/schemas/authorization-snapshot-input'
+      responses:
+        '200':
+          description: Newly persisted authorization snapshot.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/request-id'
+          content:
+            application/json:
+              example:
+                initialized: true
+                roleBindings:
+                  - principal: controller
+                    role: secret-reader
+                    domain: tenant-a
+                policies:
+                  - subject: secret-reader
+                    domain: tenant-a
+                    path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+                    method: GET
+              schema:
+                $ref: '#/components/schemas/authorization-snapshot'
+        '400':
+          $ref: '#/components/responses/bad-request'
+        '401':
+          $ref: '#/components/responses/unauthorized'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '500':
+          $ref: '#/components/responses/internal-error'
+        '503':
+          $ref: '#/components/responses/service-unavailable'
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Deployment-issued bearer credential for restricted operations.
   schemas:
     health-status:
       title: HealthStatus
@@ -82,6 +182,291 @@ components:
           enum:
             - unavailable
           example: unavailable
+    authorization-snapshot:
+      title: AuthorizationSnapshot
+      type: object
+      description: Persisted authorization state; token digests are intentionally omitted.
+      additionalProperties: false
+      required:
+        - initialized
+        - roleBindings
+        - policies
+      properties:
+        initialized:
+          type: boolean
+          readOnly: true
+          example: true
+        roleBindings:
+          type: array
+          maxItems: 10000
+          example:
+            - principal: controller
+              role: secret-reader
+              domain: tenant-a
+          items:
+            $ref: '#/components/schemas/authorization-role-binding'
+        policies:
+          type: array
+          maxItems: 10000
+          example:
+            - subject: secret-reader
+              domain: tenant-a
+              path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+              method: GET
+          items:
+            $ref: '#/components/schemas/authorization-policy'
+    authorization-snapshot-input:
+      title: AuthorizationSnapshotInput
+      type: object
+      description: Complete replacement snapshot; empty arrays intentionally mean default-deny.
+      additionalProperties: false
+      required:
+        - roleBindings
+        - policies
+      properties:
+        roleBindings:
+          type: array
+          maxItems: 10000
+          example:
+            - principal: controller
+              role: secret-reader
+              domain: tenant-a
+          items:
+            $ref: '#/components/schemas/authorization-role-binding'
+        policies:
+          type: array
+          maxItems: 10000
+          example:
+            - subject: secret-reader
+              domain: tenant-a
+              path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+              method: GET
+          items:
+            $ref: '#/components/schemas/authorization-policy'
+    authorization-role-binding:
+      title: AuthorizationRoleBinding
+      type: object
+      description: Principal-to-role binding scoped to one authorization domain.
+      additionalProperties: false
+      required:
+        - principal
+        - role
+        - domain
+      properties:
+        principal:
+          type: string
+          minLength: 1
+          maxLength: 128
+          example: controller
+        role:
+          type: string
+          minLength: 1
+          maxLength: 128
+          example: secret-reader
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 128
+          example: 11111111-1111-4111-8111-111111111111
+    authorization-policy:
+      title: AuthorizationPolicy
+      type: object
+      description: Allow policy for a role or principal, domain, path pattern, and HTTP method.
+      additionalProperties: false
+      required:
+        - subject
+        - domain
+        - path
+        - method
+      properties:
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 128
+          example: secret-reader
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 128
+          example: 11111111-1111-4111-8111-111111111111
+        path:
+          type: string
+          minLength: 7
+          maxLength: 512
+          example: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+        method:
+          type: string
+          minLength: 1
+          maxLength: 16
+          example: GET
+    problem:
+      title: Problem
+      type: object
+      description: Problem Details response compatible with RFC 9457.
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - status
+        - code
+        - requestId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: Stable documentation URI for this problem type.
+          example: https://moco.araihu.com/problems/not-found
+        title:
+          type: string
+          minLength: 1
+          example: Not Found
+        status:
+          type: integer
+          format: int32
+          minimum: 400
+          maximum: 599
+          example: 404
+        code:
+          type: string
+          minLength: 1
+          description: Stable machine-readable error code.
+          example: resource_not_found
+        detail:
+          type: string
+          description: Human-readable detail that never contains secret values.
+          example: The requested resource does not exist.
+        instance:
+          type: string
+          format: uri-reference
+          description: Occurrence identifier for support correlation.
+          example: urn:moco:request:11111111-1111-4111-8111-111111111111
+        requestId:
+          type: string
+          minLength: 1
+          description: Correlation identifier also returned in X-Request-ID.
+          example: 11111111-1111-4111-8111-111111111111
+        resourceId:
+          type: string
+          description: Existing resource ID when safely useful for conflict recovery.
+          example: 11111111-1111-4111-8111-111111111111
+        errors:
+          type: array
+          example:
+            - field: /name
+              code: invalid_format
+              message: must match the documented name format
+          items:
+            $ref: '#/components/schemas/problem-error'
+    problem-error:
+      title: ProblemError
+      type: object
+      description: Field-specific validation failure safe to expose to clients.
+      additionalProperties: false
+      required:
+        - message
+      properties:
+        field:
+          type: string
+          description: JSON Pointer or parameter name when the failure has a location.
+          example: /name
+        code:
+          type: string
+          minLength: 1
+          description: Stable machine-readable validation code.
+          example: invalid_format
+        message:
+          type: string
+          minLength: 1
+          description: Human-readable message that never contains secret values.
+          example: must match the documented name format
+  responses:
+    unauthorized:
+      description: Bearer authentication is missing or invalid.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/request-id'
+      content:
+        application/problem+json:
+          example:
+            type: https://moco.araihu.com/problems/unauthorized
+            title: Unauthorized
+            status: 401
+            code: unauthenticated
+            requestId: 11111111-1111-4111-8111-111111111111
+          schema:
+            $ref: '#/components/schemas/problem'
+    forbidden:
+      description: The authenticated principal lacks permission for the operation.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/request-id'
+      content:
+        application/problem+json:
+          example:
+            type: https://moco.araihu.com/problems/forbidden
+            title: Forbidden
+            status: 403
+            code: permission_denied
+            requestId: 11111111-1111-4111-8111-111111111111
+          schema:
+            $ref: '#/components/schemas/problem'
+    internal-error:
+      description: The server failed to complete the request.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/request-id'
+      content:
+        application/problem+json:
+          example:
+            type: https://moco.araihu.com/problems/internal-error
+            title: Internal Server Error
+            status: 500
+            code: internal_error
+            requestId: 11111111-1111-4111-8111-111111111111
+          schema:
+            $ref: '#/components/schemas/problem'
+    service-unavailable:
+      description: The service is temporarily unable to process the request.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/retry-after'
+        X-Request-ID:
+          $ref: '#/components/headers/request-id'
+      content:
+        application/problem+json:
+          example:
+            type: https://moco.araihu.com/problems/service-unavailable
+            title: Service Unavailable
+            status: 503
+            code: service_unavailable
+            requestId: 11111111-1111-4111-8111-111111111111
+          schema:
+            $ref: '#/components/schemas/problem'
+    bad-request:
+      description: Request parameters, headers, or body are invalid.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/request-id'
+      content:
+        application/problem+json:
+          example:
+            type: https://moco.araihu.com/problems/bad-request
+            title: Bad Request
+            status: 400
+            code: invalid_request
+            requestId: 11111111-1111-4111-8111-111111111111
+          schema:
+            $ref: '#/components/schemas/problem'
+  parameters:
+    request-id:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Optional caller correlation ID; the server returns the effective ID.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
   headers:
     retry-after:
       description: Delay in seconds before retrying the request.
@@ -91,3 +476,10 @@ components:
         format: int32
         minimum: 1
       example: 5
+    request-id:
+      description: Server-selected request correlation identifier.
+      required: true
+      schema:
+        type: string
+        minLength: 1
+      example: 11111111-1111-4111-8111-111111111111

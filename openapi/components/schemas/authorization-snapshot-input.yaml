@@ -1,0 +1,25 @@
+title: AuthorizationSnapshotInput
+type: object
+description: Complete replacement snapshot; empty arrays intentionally mean default-deny.
+additionalProperties: false
+required: [roleBindings, policies]
+properties:
+  roleBindings:
+    type: array
+    maxItems: 10000
+    example:
+      - principal: controller
+        role: secret-reader
+        domain: tenant-a
+    items:
+      $ref: ./authorization-role-binding.yaml
+  policies:
+    type: array
+    maxItems: 10000
+    example:
+      - subject: secret-reader
+        domain: tenant-a
+        path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+        method: GET
+    items:
+      $ref: ./authorization-policy.yaml

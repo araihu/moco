@@ -1,0 +1,29 @@
+title: AuthorizationSnapshot
+type: object
+description: Persisted authorization state; token digests are intentionally omitted.
+additionalProperties: false
+required: [initialized, roleBindings, policies]
+properties:
+  initialized:
+    type: boolean
+    readOnly: true
+    example: true
+  roleBindings:
+    type: array
+    maxItems: 10000
+    example:
+      - principal: controller
+        role: secret-reader
+        domain: tenant-a
+    items:
+      $ref: ./authorization-role-binding.yaml
+  policies:
+    type: array
+    maxItems: 10000
+    example:
+      - subject: secret-reader
+        domain: tenant-a
+        path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+        method: GET
+    items:
+      $ref: ./authorization-policy.yaml

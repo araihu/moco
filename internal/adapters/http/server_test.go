@@ -22,6 +22,7 @@ import (
 	"github.com/araihu/moco/internal/adapters/db"
 	"github.com/araihu/moco/internal/adapters/encryption"
 	httpapi "github.com/araihu/moco/internal/adapters/http"
+	internalapi "github.com/araihu/moco/internal/adapters/http/internalapi"
 	"github.com/araihu/moco/internal/core/services"
 )
 
@@ -163,6 +164,108 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	assertStatus(t, response, http.StatusNoContent)
 	response = test.request(t, http.MethodGet, alphaLocation, nil, nil, true)
 	assertStatus(t, response, http.StatusNotFound)
+}
+
+func TestAuthorizationAdministrationIsProtectedAndAtomic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := db.Open(ctx, filepath.Join(t.TempDir(), "moco.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	tenantService, err := services.NewTenantService(store, services.TenantServiceOptions{CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vaultService, err := services.NewVaultService(store, services.VaultServiceOptions{CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := encryption.NewHKDFAESGCMEnvelope(encryption.HKDFAESGCMOptions{RootKeyID: "test-root-v1", RootKey: bytes.Repeat([]byte{0x42}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(envelope.Destroy)
+	secretService, err := services.NewSecretService(store, envelope, services.SecretServiceOptions{CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("authorization-admin-token-with-32-bytes"))
+	authenticator, err := authn.NewTokenAuthenticator([]authn.Credential{{PrincipalID: "admin", TokenSHA256: hex.EncodeToString(digest[:])}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{
+		{Subject: "admin", Domain: "*", Path: "/internal/v1/authorization", Method: "GET"},
+		{Subject: "admin", Domain: "*", Path: "/internal/v1/authorization", Method: "PUT"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus := authz.NewMemoryPolicyChangesBus()
+	t.Cleanup(bus.Close)
+	authorizationService, err := services.NewAuthorizationPolicyService(store, bus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
+		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
+		Readiness: store, Authenticator: authenticator, Authorizer: authorizer,
+		Authorization: authorizationService, PrincipalCheck: authenticator.HasPrincipal,
+		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(method string, body []byte, authenticated bool) *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(ctx, method, "/internal/v1/authorization", bytes.NewReader(body))
+		if body != nil {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		if authenticated {
+			request.Header.Set("Authorization", "Bearer authorization-admin-token-with-32-bytes")
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	if response := request(http.MethodGet, nil, false); response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated admin read status = %d, want 401", response.Code)
+	}
+	response := request(http.MethodGet, nil, true)
+	if response.Code != http.StatusOK {
+		t.Fatalf("initial admin read status = %d, body=%s", response.Code, response.Body.String())
+	}
+	initial := decode[internalapi.AuthorizationSnapshot](t, &testResponse{StatusCode: response.Code, Header: response.Header(), Body: response.Body.Bytes()})
+	if initial.Initialized || len(initial.RoleBindings) != 0 || len(initial.Policies) != 0 {
+		t.Fatalf("unexpected initial authorization snapshot: %#v", initial)
+	}
+
+	valid := []byte(`{"roleBindings":[{"principal":"admin","role":"authorization-admin","domain":"*"}],"policies":[{"subject":"authorization-admin","domain":"*","path":"/internal/v1/authorization","method":"GET"},{"subject":"authorization-admin","domain":"*","path":"/internal/v1/authorization","method":"PUT"}]}`)
+	response = request(http.MethodPut, valid, true)
+	if response.Code != http.StatusOK {
+		t.Fatalf("admin replacement status = %d, body=%s", response.Code, response.Body.String())
+	}
+	replaced := decode[internalapi.AuthorizationSnapshot](t, &testResponse{StatusCode: response.Code, Header: response.Header(), Body: response.Body.Bytes()})
+	if !replaced.Initialized || len(replaced.RoleBindings) != 1 || len(replaced.Policies) != 2 {
+		t.Fatalf("unexpected replaced snapshot: %#v", replaced)
+	}
+
+	invalid := []byte(`{"roleBindings":[{"principal":"admin","role":"authorization-admin","domain":"*"}],"policies":[{"subject":"authorization-admin","domain":"*","path":"/api/v1/invalid?query","method":"GET"}]}`)
+	response = request(http.MethodPut, invalid, true)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid admin replacement status = %d, body=%s", response.Code, response.Body.String())
+	}
+	response = request(http.MethodGet, nil, true)
+	if response.Code != http.StatusOK {
+		t.Fatalf("post-failure admin read status = %d, body=%s", response.Code, response.Body.String())
+	}
+	unchanged := decode[internalapi.AuthorizationSnapshot](t, &testResponse{StatusCode: response.Code, Header: response.Header(), Body: response.Body.Bytes()})
+	if len(unchanged.RoleBindings) != 1 || len(unchanged.Policies) != 2 {
+		t.Fatalf("invalid replacement changed persisted snapshot: %#v", unchanged)
+	}
 }
 
 func TestConcurrentIdempotentCreateReturnsOneResult(t *testing.T) {

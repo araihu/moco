@@ -87,6 +87,8 @@ func run(logger *slog.Logger) error {
 		Readiness:      store,
 		Authenticator:  security.authenticator,
 		Authorizer:     security.authorizer,
+		Authorization:  security.policyService,
+		PrincipalCheck: security.authenticator.HasPrincipal,
 		ServiceVersion: version,
 		Logger:         logger,
 	})

@@ -110,6 +110,11 @@ func internalProblem(requestID string) Problem {
 	return newProblem(requestID, 500, "Internal Server Error", "internal_error", "internal-error", &detail)
 }
 
+func serviceUnavailableProblem(requestID string) Problem {
+	detail := "The service is temporarily unable to process the request."
+	return newProblem(requestID, 503, "Service Unavailable", "service_unavailable", "service-unavailable", &detail)
+}
+
 func newProblem(requestID string, status int32, title, code, problemType string, detail *string) Problem {
 	instance := "urn:moco:request:" + requestID
 	return Problem{

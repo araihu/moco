@@ -91,6 +91,20 @@ func (a *TokenAuthenticator) Authenticate(token string) (string, bool) {
 	return principal, found == 1
 }
 
+// HasPrincipal reports whether the current keyring contains a principal ID.
+// It does not expose token material and is used to validate persisted policy
+// bindings before accepting administrative changes.
+func (a *TokenAuthenticator) HasPrincipal(principalID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, credential := range a.credentials {
+		if credential.principalID == principalID {
+			return true
+		}
+	}
+	return false
+}
+
 func validIdentifier(value string) bool {
 	if len(value) < 1 || len(value) > 128 {
 		return false

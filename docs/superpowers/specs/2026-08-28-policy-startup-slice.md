@@ -4,8 +4,9 @@
 
 The server composition root now connects configured bearer principals,
 SQLite-backed authorization snapshots, and the in-process policy reloader. The
-public API contract is unchanged. Policy administration endpoints and a
-distributed change transport remain future work.
+public API contract is unchanged. Restricted snapshot administration is covered
+by the follow-up administration slice; distributed change transport remains
+future work.
 
 ## Bootstrap and authority
 
@@ -35,7 +36,7 @@ returns an error instead of serving with a stale policy.
 
 ## Deferred work
 
-Policy/principal administration endpoints, distributed bus transport, audit
-records, and token issuance/revocation are not part of this slice. Any future
-writer must use the authorization application service so persistence commits
-before reload signals are published.
+Principal administration endpoints, distributed bus transport, audit records,
+and token issuance/revocation are not part of this slice. The internal policy
+writer uses the authorization application service so persistence commits before
+reload signals are published.

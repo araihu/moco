@@ -139,5 +139,6 @@ func generatedSnapshot(source *dagger.Directory) *dagger.Directory {
 	return dag.Directory().
 		WithDirectory("openapi/bundled", source.Directory("openapi/bundled")).
 		WithFile("internal/adapters/http/moco.gen.go", source.File("internal/adapters/http/moco.gen.go")).
+		WithDirectory("internal/adapters/http/internalapi", source.Directory("internal/adapters/http/internalapi")).
 		WithDirectory("internal/adapters/db/sqlc", source.Directory("internal/adapters/db/sqlc"))
 }

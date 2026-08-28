@@ -68,6 +68,9 @@ func TestStaticAuthorizerRejectsUnsafePolicies(t *testing.T) {
 	if _, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{Subject: "reader", Domain: "*", Path: "/api/v1/tenants", Method: "GET"}}); err != nil {
 		t.Fatalf("valid policy rejected: %v", err)
 	}
+	if _, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{Subject: "admin", Domain: "*", Path: "/internal/v1/authorization", Method: "PUT"}}); err != nil {
+		t.Fatalf("internal administration policy rejected: %v", err)
+	}
 }
 
 func TestStaticAuthorizerHonorsContextCancellation(t *testing.T) {

@@ -79,8 +79,12 @@ func buildEnforcer(bindings []RoleBinding, policies []Policy) (*casbin.SyncedEnf
 		if !validIdentifier(binding.Principal) || !validIdentifier(binding.Role) || !validDomain(binding.Domain) {
 			return nil, fmt.Errorf("role binding %d contains an invalid principal, role, or domain", index)
 		}
-		if _, err := enforcer.AddGroupingPolicy(binding.Principal, binding.Role, binding.Domain); err != nil {
+		added, err := enforcer.AddGroupingPolicy(binding.Principal, binding.Role, binding.Domain)
+		if err != nil {
 			return nil, fmt.Errorf("add role binding %d: %w", index, err)
+		}
+		if !added {
+			return nil, fmt.Errorf("role binding %d is duplicated", index)
 		}
 	}
 	for index, policy := range policies {
@@ -93,8 +97,12 @@ func buildEnforcer(bindings []RoleBinding, policies []Policy) (*casbin.SyncedEnf
 		if !validMethod(policy.Method) {
 			return nil, fmt.Errorf("policy %d method must be an uppercase HTTP method or '*': %q", index, policy.Method)
 		}
-		if _, err := enforcer.AddPolicy(policy.Subject, policy.Domain, policy.Path, policy.Method); err != nil {
+		added, err := enforcer.AddPolicy(policy.Subject, policy.Domain, policy.Path, policy.Method)
+		if err != nil {
 			return nil, fmt.Errorf("add policy %d: %w", index, err)
+		}
+		if !added {
+			return nil, fmt.Errorf("policy %d is duplicated", index)
 		}
 	}
 	return enforcer, nil
@@ -153,6 +161,9 @@ func validMethod(value string) bool {
 }
 
 func validatePolicyPath(value string) error {
+	if value == "/internal/v1/authorization" {
+		return nil
+	}
 	if len(value) < len("/api/v1") || len(value) > 512 || (value != "/api/v1" && !strings.HasPrefix(value, "/api/v1/")) {
 		return errors.New("must start with /api/v1 and contain at most 512 bytes")
 	}

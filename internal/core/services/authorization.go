@@ -26,6 +26,20 @@ func NewAuthorizationPolicyService(repository ports.AuthorizationRepository, bus
 	return &AuthorizationPolicyService{repository: repository, bus: bus}, nil
 }
 
+// LoadAuthorization reads the complete authoritative snapshot. Writers should
+// use ReplaceAuthorization so every successful change publishes a reload
+// signal after persistence commits.
+func (s *AuthorizationPolicyService) LoadAuthorization(ctx context.Context) (ports.AuthorizationState, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.AuthorizationState{}, err
+	}
+	state, err := s.repository.LoadAuthorization(ctx)
+	if err != nil {
+		return ports.AuthorizationState{}, fmt.Errorf("load authorization snapshot: %w", err)
+	}
+	return state, nil
+}
+
 // ReplaceAuthorization commits a complete snapshot and then broadcasts one
 // coalesced invalidation signal. A publish failure means persistence succeeded
 // but another instance may need an out-of-band reload.

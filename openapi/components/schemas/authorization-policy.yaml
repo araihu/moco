@@ -1,0 +1,26 @@
+title: AuthorizationPolicy
+type: object
+description: Allow policy for a role or principal, domain, path pattern, and HTTP method.
+additionalProperties: false
+required: [subject, domain, path, method]
+properties:
+  subject:
+    type: string
+    minLength: 1
+    maxLength: 128
+    example: secret-reader
+  domain:
+    type: string
+    minLength: 1
+    maxLength: 128
+    example: 11111111-1111-4111-8111-111111111111
+  path:
+    type: string
+    minLength: 7
+    maxLength: 512
+    example: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+  method:
+    type: string
+    minLength: 1
+    maxLength: 16
+    example: GET

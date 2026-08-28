@@ -1,0 +1,89 @@
+parameters:
+  - $ref: ../components/parameters/request-id.yaml
+get:
+  operationId: getAuthorizationSnapshot
+  summary: Read the persisted authorization snapshot
+  description: Returns the complete role-binding and policy snapshot without token digests.
+  tags: [Authorization]
+  responses:
+    '200':
+      description: Persisted authorization snapshot.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          example:
+            initialized: true
+            roleBindings:
+              - principal: controller
+                role: secret-reader
+                domain: tenant-a
+            policies:
+              - subject: secret-reader
+                domain: tenant-a
+                path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+                method: GET
+          schema:
+            $ref: ../components/schemas/authorization-snapshot.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml
+put:
+  operationId: replaceAuthorizationSnapshot
+  summary: Replace the persisted authorization snapshot
+  description: Atomically replaces all role bindings and policies, then signals local reloaders.
+  tags: [Authorization]
+  requestBody:
+    required: true
+    description: Complete replacement snapshot; empty arrays mean default-deny.
+    content:
+      application/json:
+        example:
+          roleBindings:
+            - principal: controller
+              role: secret-reader
+              domain: tenant-a
+          policies:
+            - subject: secret-reader
+              domain: tenant-a
+              path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+              method: GET
+        schema:
+          $ref: ../components/schemas/authorization-snapshot-input.yaml
+  responses:
+    '200':
+      description: Newly persisted authorization snapshot.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          example:
+            initialized: true
+            roleBindings:
+              - principal: controller
+                role: secret-reader
+                domain: tenant-a
+            policies:
+              - subject: secret-reader
+                domain: tenant-a
+                path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+                method: GET
+          schema:
+            $ref: ../components/schemas/authorization-snapshot.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

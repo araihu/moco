@@ -1,0 +1,21 @@
+title: AuthorizationRoleBinding
+type: object
+description: Principal-to-role binding scoped to one authorization domain.
+additionalProperties: false
+required: [principal, role, domain]
+properties:
+  principal:
+    type: string
+    minLength: 1
+    maxLength: 128
+    example: controller
+  role:
+    type: string
+    minLength: 1
+    maxLength: 128
+    example: secret-reader
+  domain:
+    type: string
+    minLength: 1
+    maxLength: 128
+    example: 11111111-1111-4111-8111-111111111111

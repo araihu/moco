@@ -1,21 +1,34 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Minimal process probes for orchestrators and load balancers. The endpoints
-    intentionally expose no dependency, configuration, or secret details.
+    Process probes and deployment-scoped authorization administration. The
+    administration operation is intended for a restricted deployment origin;
+    it never exposes bearer token digests.
   contact:
     name: AraiHu
     url: https://github.com/araihu/moco
 servers:
   - url: /
     description: Direct deployment origin, normally restricted by network policy.
+security:
+  - bearerAuth: []
 tags:
   - name: Health
     description: Process liveness and traffic readiness probes.
+  - name: Authorization
+    description: Restricted replacement of the persisted authorization snapshot.
 paths:
   /livez:
     $ref: ./paths/livez.yaml
   /readyz:
     $ref: ./paths/readyz.yaml
+  /internal/v1/authorization:
+    $ref: ./paths/authorization.yaml
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Deployment-issued bearer credential for restricted operations.

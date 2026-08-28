@@ -25,7 +25,7 @@ MIGRATE_SQLITE := $(abspath $(TOOL_BIN_DIR))/migrate-sqlite
 GOVULNCHECK := $(abspath $(TOOL_BIN_DIR))/govulncheck
 endif
 
-.PHONY: workflow-lint spec-lint spec-bundle api-generate sqlc-generate db-migrate test lint vulncheck run check
+.PHONY: workflow-lint spec-lint spec-bundle api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check
 workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
 
@@ -39,6 +39,10 @@ spec-bundle:
 
 api-generate: spec-bundle
 	cd tools && GOWORK=off $(OAPI_CODEGEN) --config ../openapi/oapi-codegen.yaml ../openapi/bundled/public.yaml
+	cd tools && GOWORK=off $(OAPI_CODEGEN) --config ../openapi/internal-oapi-codegen.yaml ../openapi/bundled/internal.yaml
+
+internal-api-generate: spec-bundle
+	cd tools && GOWORK=off $(OAPI_CODEGEN) --config ../openapi/internal-oapi-codegen.yaml ../openapi/bundled/internal.yaml
 
 sqlc-generate:
 	GOWORK=off $(SQLC) generate -f sqlc.yaml
