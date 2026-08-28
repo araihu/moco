@@ -1,0 +1,25 @@
+{
+  "name": "moco",
+  "engineVersion": "v0.21.8",
+  "sdk": {
+    "source": "go"
+  },
+  "dependencies": [
+    {
+      "name": "generated",
+      "source": "github.com/araihu/dagger/modules/generated@34872ce032c8b8a543e77dedbf5c09978f65d06d",
+      "pin": "34872ce032c8b8a543e77dedbf5c09978f65d06d"
+    },
+    {
+      "name": "go-ci",
+      "source": "github.com/araihu/dagger/modules/go@34872ce032c8b8a543e77dedbf5c09978f65d06d",
+      "pin": "34872ce032c8b8a543e77dedbf5c09978f65d06d"
+    },
+    {
+      "name": "verified-download",
+      "source": "github.com/araihu/dagger/modules/verified-download@34872ce032c8b8a543e77dedbf5c09978f65d06d",
+      "pin": "34872ce032c8b8a543e77dedbf5c09978f65d06d"
+    }
+  ],
+  "source": "dagger"
+}

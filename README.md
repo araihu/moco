@@ -69,9 +69,11 @@ reloads on every instance.
 
 ## Development
 
-Tool versions are pinned in the separate `tools` module, so global installations
-are unnecessary:
+Tool versions are pinned under `tools/`, so global installations are unnecessary.
+`actionlint` has its own nested Go module to keep its YAML dependency isolated
+from Vacuum:
 
+- actionlint `v1.7.12`
 - Vacuum `v0.30.1`
 - oapi-codegen `v2.8.0`
 - sqlc `v1.31.1`
@@ -83,6 +85,7 @@ precompiled release into the ignored `tools/bin/` directory. The upstream
 installer is pinned by commit, and it verifies the release archive checksum.
 
 ```bash
+make workflow-lint
 make spec-lint
 make api-generate
 make sqlc-generate
@@ -94,8 +97,11 @@ make check
 ```
 
 `make check` runs generation, tests, `golangci-lint`, `govulncheck` source
-analysis, and vulnerability scans of every pinned tool binary. The same gate runs
-for pull requests and `main`; CI also rejects stale generated files.
+analysis, and vulnerability scans of every pinned tool binary. CI invokes the
+same gate through Dagger, explicitly builds every Go-managed tool first, and
+rejects stale generated files. The Dagger module reuses immutable shared modules
+from `araihu/dagger`; `golangci-lint` remains a checksum-verified precompiled
+binary.
 
 Public API source lives in `openapi/public.yaml`; probe-only internal operations
 live in `openapi/internal.yaml`. Both are exploded into paths and reusable

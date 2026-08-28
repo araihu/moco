@@ -2,31 +2,65 @@ name: check
 
 on:
   pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
-    branches:
-      - main
+    branches: [main]
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
+env:
+  DAGGER_NO_NAG: '1'
+
 jobs:
   check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: >-
+      ${{
+        github.event_name == 'pull_request' &&
+        contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action) &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.user.login == github.actor &&
+        github.event.pull_request.base.repo.full_name == github.repository &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.repo.fork == false &&
+        contains(fromJSON(vars.HOSTINGER_PR_ACTORS_JSON || '[]'), github.actor) &&
+        fromJSON('["self-hosted","Linux","X64","hostinger-vps-pr"]') ||
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/main' &&
+        fromJSON('["self-hosted","Linux","X64","hostinger-vps-trusted"]') ||
+        'ubuntu-24.04'
+      }}
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            tools/go.sum
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Run checks
-        run: make check
+      - name: Install exact Dagger CLI on GitHub-hosted runner
+        if: runner.environment == 'github-hosted'
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: '0.21.8'
 
-      - name: Verify generated files are current
-        run: git diff --exit-code
+      - name: Require exact Dagger CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(dagger version | awk 'NR == 1 { print $2 }')" = v0.21.8
+
+      - name: Build Go tools
+        shell: bash
+        run: dagger call build-tools entries
+
+      - name: Run required checks
+        shell: bash
+        env:
+          RUN_NONCE: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: dagger call check --run-nonce="$RUN_NONCE"
