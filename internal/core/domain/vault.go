@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// Vault is a tenant-scoped container for future encrypted secrets.
+// Vault is a tenant-scoped container for encrypted secrets.
 type Vault struct {
 	Sequence    int64             `json:"-"`
 	ID          string            `json:"id"`

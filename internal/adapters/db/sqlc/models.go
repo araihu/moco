@@ -21,6 +21,20 @@ type IdempotencyRecord struct {
 	ExpiresAt      string `json:"expires_at"`
 }
 
+type Secret struct {
+	Sequence    int64  `json:"sequence"`
+	TenantID    string `json:"tenant_id"`
+	VaultID     string `json:"vault_id"`
+	Path        string `json:"path"`
+	Salt        []byte `json:"salt"`
+	Ciphertext  []byte `json:"ciphertext"`
+	Digest      string `json:"digest"`
+	ContentType string `json:"content_type"`
+	Version     int64  `json:"version"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type Tenant struct {
 	Sequence    int64          `json:"sequence"`
 	ID          string         `json:"id"`
@@ -44,4 +58,13 @@ type Vault struct {
 	Revision    int64          `json:"revision"`
 	CreatedAt   string         `json:"created_at"`
 	UpdatedAt   string         `json:"updated_at"`
+}
+
+type VaultKey struct {
+	TenantID   string `json:"tenant_id"`
+	VaultID    string `json:"vault_id"`
+	RootKeyID  string `json:"root_key_id"`
+	Salt       []byte `json:"salt"`
+	WrappedKey []byte `json:"wrapped_key"`
+	CreatedAt  string `json:"created_at"`
 }

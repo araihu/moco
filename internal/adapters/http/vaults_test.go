@@ -98,10 +98,10 @@ func TestVaultLifecycleEndToEnd(t *testing.T) {
 	assertStatus(t, response, http.StatusConflict)
 
 	response = test.request(t, http.MethodGet, vaultLocation+"/secrets", nil, nil, true)
-	assertStatus(t, response, http.StatusServiceUnavailable)
-	unavailable := decode[httpapi.Problem](t, response)
-	if unavailable.Code != "capability_unavailable" || response.Header.Get("Retry-After") != "60" {
-		t.Fatalf("unexpected secret capability response: %#v", unavailable)
+	assertStatus(t, response, http.StatusOK)
+	secretPage := decode[httpapi.SecretList](t, response)
+	if len(secretPage.Items) != 0 || secretPage.Page.HasMore {
+		t.Fatalf("new vault unexpectedly contains secrets: %#v", secretPage)
 	}
 
 	response = test.request(t, http.MethodDelete, vaultLocation, nil, map[string]string{"If-Match": vaultETag}, true)

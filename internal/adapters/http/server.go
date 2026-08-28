@@ -24,6 +24,7 @@ type contextKey string
 const (
 	requestIDContextKey contextKey = "moco-request-id"
 	principalContextKey contextKey = "moco-principal"
+	maxSecretJSONBytes             = 2 << 20
 )
 
 // ReadinessChecker reports whether a required runtime dependency is available.
@@ -35,6 +36,7 @@ type ReadinessChecker interface {
 type HandlerOptions struct {
 	Tenants        *services.TenantService
 	Vaults         *services.VaultService
+	Secrets        *services.SecretService
 	Readiness      ReadinessChecker
 	BearerToken    string
 	ServiceVersion string
@@ -49,6 +51,9 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	}
 	if options.Vaults == nil {
 		return nil, errors.New("vault service is required")
+	}
+	if options.Secrets == nil {
+		return nil, errors.New("secret service is required")
 	}
 	if options.Readiness == nil {
 		return nil, errors.New("readiness checker is required")
@@ -66,6 +71,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	server := &Server{
 		tenants:        options.Tenants,
 		vaults:         options.Vaults,
+		secrets:        options.Secrets,
 		serviceVersion: options.ServiceVersion,
 		logger:         options.Logger,
 	}
@@ -106,6 +112,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 type Server struct {
 	tenants        *services.TenantService
 	vaults         *services.VaultService
+	secrets        *services.SecretService
 	serviceVersion string
 	logger         *slog.Logger
 }
@@ -166,13 +173,25 @@ func strictResourceJSON(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		defer wipeResourceWriteTarget(target)
 		mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mediaType != "application/json" {
 			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_content_type", "Content-Type must be application/json."))
 			return
 		}
-		body, err := io.ReadAll(r.Body)
+		bodyReader := io.Reader(r.Body)
+		if _, secretWrite := target.(*SecretWrite); secretWrite {
+			r.Body = http.MaxBytesReader(w, r.Body, maxSecretJSONBytes)
+			bodyReader = r.Body
+		}
+		body, err := io.ReadAll(bodyReader)
+		defer wipeHTTPBytes(body)
 		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeProblem(w, secretTooLargeProblem(requestID(r.Context())))
+				return
+			}
 			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_json", "The JSON body could not be read."))
 			return
 		}
@@ -187,7 +206,7 @@ func strictResourceJSON(next http.Handler) http.Handler {
 			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_json", "The request body must contain exactly one JSON value."))
 			return
 		}
-		if !validResourceJSONShape(body, r.Method) {
+		if !validResourceJSONShape(body, target, r.Method) {
 			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_json", "The JSON body is missing a required field or contains null where an object or string is required."))
 			return
 		}
@@ -213,19 +232,24 @@ func resourceWriteTarget(r *http.Request) any {
 		return &VaultCreate{}
 	case r.Method == http.MethodPut && len(parts) == 6 && parts[4] == "vaults":
 		return &VaultUpdate{}
+	case r.Method == http.MethodPut && len(parts) == 7 && parts[4] == "vaults" && parts[6] == "secret":
+		return &SecretWrite{}
 	default:
 		return nil
 	}
 }
 
-func validResourceJSONShape(body []byte, method string) bool {
+func validResourceJSONShape(body []byte, target any, method string) bool {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
 		return false
 	}
 	required := []string{"name"}
 	nonNullable := []string{"name", "labels", "externalId"}
-	if method == http.MethodPut {
+	if _, secretWrite := target.(*SecretWrite); secretWrite {
+		required = []string{"value"}
+		nonNullable = []string{"value", "contentType"}
+	} else if method == http.MethodPut {
 		required = []string{"name", "description", "labels"}
 	}
 	for _, name := range required {
@@ -239,6 +263,12 @@ func validResourceJSONShape(body []byte, method string) bool {
 		}
 	}
 	return true
+}
+
+func wipeResourceWriteTarget(target any) {
+	if secret, ok := target.(*SecretWrite); ok {
+		wipeHTTPBytes(secret.Value)
+	}
 }
 
 func validRequestID(value string) bool {

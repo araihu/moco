@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
 	"github.com/araihu/moco/internal/adapters/db"
+	"github.com/araihu/moco/internal/adapters/encryption"
 	httpapi "github.com/araihu/moco/internal/adapters/http"
 	"github.com/araihu/moco/internal/core/services"
 )
@@ -31,6 +34,15 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	envelope, err := encryption.NewHKDFAESGCMEnvelope(encryption.HKDFAESGCMOptions{
+		RootKeyID: configuration.encryptionKeyID,
+		RootKey:   configuration.encryptionKey,
+	})
+	wipeConfigurationKey(configuration.encryptionKey)
+	if err != nil {
+		return fmt.Errorf("initialize secret encryption: %w", err)
+	}
+	defer envelope.Destroy()
 
 	startupContext, cancelStartup := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelStartup()
@@ -56,9 +68,16 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize vault service: %w", err)
 	}
+	secretService, err := services.NewSecretService(store, envelope, services.SecretServiceOptions{
+		CursorHMACKey: []byte(configuration.cursorHMACKey),
+	})
+	if err != nil {
+		return fmt.Errorf("initialize secret service: %w", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants:        tenantService,
 		Vaults:         vaultService,
+		Secrets:        secretService,
 		Readiness:      store,
 		BearerToken:    configuration.bearerToken,
 		ServiceVersion: version,
@@ -101,18 +120,21 @@ func run(logger *slog.Logger) error {
 }
 
 type configuration struct {
-	address       string
-	databasePath  string
-	bearerToken   string
-	cursorHMACKey string
+	address         string
+	databasePath    string
+	bearerToken     string
+	cursorHMACKey   string
+	encryptionKeyID string
+	encryptionKey   []byte
 }
 
 func loadConfiguration() (configuration, error) {
 	config := configuration{
-		address:       environmentOrDefault("MOCO_ADDR", ":8080"),
-		databasePath:  environmentOrDefault("MOCO_DB_PATH", "./moco.db"),
-		bearerToken:   os.Getenv("MOCO_BEARER_TOKEN"),
-		cursorHMACKey: os.Getenv("MOCO_CURSOR_HMAC_KEY"),
+		address:         environmentOrDefault("MOCO_ADDR", ":8080"),
+		databasePath:    environmentOrDefault("MOCO_DB_PATH", "./moco.db"),
+		bearerToken:     os.Getenv("MOCO_BEARER_TOKEN"),
+		cursorHMACKey:   os.Getenv("MOCO_CURSOR_HMAC_KEY"),
+		encryptionKeyID: environmentOrDefault("MOCO_ENCRYPTION_KEY_ID", "local-v1"),
 	}
 	if len(config.bearerToken) < 32 {
 		return configuration{}, errors.New("MOCO_BEARER_TOKEN must contain at least 32 bytes")
@@ -120,6 +142,13 @@ func loadConfiguration() (configuration, error) {
 	if len(config.cursorHMACKey) < 32 {
 		return configuration{}, errors.New("MOCO_CURSOR_HMAC_KEY must contain at least 32 bytes")
 	}
+	encodedKey := os.Getenv("MOCO_ENCRYPTION_KEY")
+	key, err := base64.StdEncoding.Strict().DecodeString(encodedKey)
+	if err != nil || len(key) != 32 {
+		wipeConfigurationKey(key)
+		return configuration{}, errors.New("MOCO_ENCRYPTION_KEY must be standard base64 encoding of exactly 32 bytes")
+	}
+	config.encryptionKey = key
 	return config, nil
 }
 
@@ -128,4 +157,9 @@ func environmentOrDefault(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func wipeConfigurationKey(value []byte) {
+	clear(value)
+	runtime.KeepAlive(value)
 }

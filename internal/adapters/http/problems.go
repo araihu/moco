@@ -15,6 +15,9 @@ type mappedProblem struct {
 }
 
 func mapProblem(requestID string, err error) mappedProblem {
+	if errors.Is(err, domain.ErrSecretTooLarge) {
+		return mappedProblem{problem: secretTooLargeProblem(requestID)}
+	}
 	var validation *domain.ValidationError
 	if errors.As(err, &validation) {
 		violations := make([]ProblemError, 0, len(validation.Violations))
@@ -44,6 +47,10 @@ func mapProblem(requestID string, err error) mappedProblem {
 	}
 	if errors.Is(err, ports.ErrVaultNotFound) {
 		detail := "The requested vault does not exist in this tenant."
+		return mappedProblem{problem: newProblem(requestID, 404, "Not Found", "resource_not_found", "not-found", &detail)}
+	}
+	if errors.Is(err, ports.ErrSecretNotFound) {
+		detail := "The requested secret does not exist in this vault."
 		return mappedProblem{problem: newProblem(requestID, 404, "Not Found", "resource_not_found", "not-found", &detail)}
 	}
 	if errors.Is(err, ports.ErrIdempotencyConflict) {
@@ -79,6 +86,11 @@ func mapProblem(requestID string, err error) mappedProblem {
 	return mappedProblem{problem: internalProblem(requestID)}
 }
 
+func secretTooLargeProblem(requestID string) Problem {
+	detail := "The secret request exceeds the supported size limit."
+	return newProblem(requestID, 413, "Payload Too Large", "secret_too_large", "payload-too-large", &detail)
+}
+
 func badRequestProblem(requestID, code, detail string) Problem {
 	return newProblem(requestID, 400, "Bad Request", code, "bad-request", &detail)
 }
@@ -91,14 +103,6 @@ func unauthorizedProblem(requestID string) Problem {
 func internalProblem(requestID string) Problem {
 	detail := "The request could not be completed."
 	return newProblem(requestID, 500, "Internal Server Error", "internal_error", "internal-error", &detail)
-}
-
-func unavailableProblem(requestID string) ServiceUnavailableApplicationProblemPlusJSONResponse {
-	detail := "This capability is not available in the running server version."
-	return ServiceUnavailableApplicationProblemPlusJSONResponse{
-		Body:    newProblem(requestID, 503, "Service Unavailable", "capability_unavailable", "service-unavailable", &detail),
-		Headers: ServiceUnavailableResponseHeaders{RetryAfter: 60, XRequestID: requestID},
-	}
 }
 
 func newProblem(requestID string, status int32, title, code, problemType string, detail *string) Problem {
@@ -141,6 +145,12 @@ func notFoundResponse(problem Problem) NotFoundApplicationProblemPlusJSONRespons
 func preconditionResponse(problem Problem, etag string) PreconditionFailedApplicationProblemPlusJSONResponse {
 	return PreconditionFailedApplicationProblemPlusJSONResponse{
 		Body: problem, Headers: PreconditionFailedResponseHeaders{ETag: etag, XRequestID: problem.RequestId},
+	}
+}
+
+func payloadTooLargeResponse(problem Problem) PayloadTooLargeApplicationProblemPlusJSONResponse {
+	return PayloadTooLargeApplicationProblemPlusJSONResponse{
+		Body: problem, Headers: PayloadTooLargeResponseHeaders{XRequestID: problem.RequestId},
 	}
 }
 

@@ -208,7 +208,7 @@ func (s *VaultService) Update(ctx context.Context, tenantID, id string, input do
 	return vault, VaultETag(vault), nil
 }
 
-// Delete removes an empty vault; cascade is reserved for the secret slice.
+// Delete removes an empty vault or explicitly cascades its encrypted secrets.
 func (s *VaultService) Delete(ctx context.Context, tenantID, id string, ifMatch *string, cascade bool) error {
 	expectedRevision, err := s.expectedVaultRevision(ctx, tenantID, id, ifMatch)
 	if err != nil {

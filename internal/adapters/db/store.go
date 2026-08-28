@@ -398,15 +398,26 @@ func (s *Store) UpdateVault(ctx context.Context, tenantID, id string, input doma
 	return vaultFromRow(row)
 }
 
-// DeleteVault removes one vault. It is empty until the secret slice lands.
+// DeleteVault removes one vault, refusing implicit deletion of child secrets.
 func (s *Store) DeleteVault(ctx context.Context, tenantID, id string, expectedRevision *int64, cascade bool) error {
-	_ = cascade
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin vault deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
 	var rows int64
-	var err error
-	if expectedRevision == nil {
-		rows, err = s.queries.DeleteVault(ctx, sqlc.DeleteVaultParams{TenantID: tenantID, ID: id})
-	} else {
-		rows, err = s.queries.DeleteVaultIfRevision(ctx, sqlc.DeleteVaultIfRevisionParams{
+	switch {
+	case cascade && expectedRevision == nil:
+		rows, err = queries.DeleteVault(ctx, sqlc.DeleteVaultParams{TenantID: tenantID, ID: id})
+	case cascade:
+		rows, err = queries.DeleteVaultIfRevision(ctx, sqlc.DeleteVaultIfRevisionParams{
+			TenantID: tenantID, ID: id, ExpectedRevision: *expectedRevision,
+		})
+	case expectedRevision == nil:
+		rows, err = queries.DeleteVaultIfEmpty(ctx, sqlc.DeleteVaultIfEmptyParams{TenantID: tenantID, ID: id})
+	default:
+		rows, err = queries.DeleteVaultIfRevisionAndEmpty(ctx, sqlc.DeleteVaultIfRevisionAndEmptyParams{
 			TenantID: tenantID, ID: id, ExpectedRevision: *expectedRevision,
 		})
 	}
@@ -414,18 +425,262 @@ func (s *Store) DeleteVault(ctx context.Context, tenantID, id string, expectedRe
 		return fmt.Errorf("delete vault: %w", err)
 	}
 	if rows == 1 {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit vault deletion: %w", err)
+		}
 		return nil
 	}
-	if expectedRevision != nil {
-		_, getErr := s.queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: id})
-		if getErr == nil {
-			return ports.ErrTenantPrecondition
+	current, getErr := queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: id})
+	if errors.Is(getErr, sql.ErrNoRows) {
+		return ports.ErrVaultNotFound
+	}
+	if getErr != nil {
+		return fmt.Errorf("resolve vault deletion: %w", getErr)
+	}
+	if expectedRevision != nil && current.Revision != *expectedRevision {
+		return ports.ErrTenantPrecondition
+	}
+	children, err := queries.CountVaultSecrets(ctx, sqlc.CountVaultSecretsParams{TenantID: tenantID, VaultID: id})
+	if err != nil {
+		return fmt.Errorf("count vault secrets: %w", err)
+	}
+	if children > 0 {
+		return ports.ErrResourceHasChildren
+	}
+	return errors.New("vault deletion affected no rows")
+}
+
+// GetVaultKey retrieves one wrapped vault data key.
+func (s *Store) GetVaultKey(ctx context.Context, tenantID, vaultID string) (ports.WrappedVaultKey, error) {
+	row, err := s.queries.GetVaultKey(ctx, sqlc.GetVaultKeyParams{TenantID: tenantID, VaultID: vaultID})
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, vaultErr := s.queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: vaultID}); errors.Is(vaultErr, sql.ErrNoRows) {
+			return ports.WrappedVaultKey{}, ports.ErrVaultNotFound
+		} else if vaultErr != nil {
+			return ports.WrappedVaultKey{}, fmt.Errorf("resolve missing vault key: %w", vaultErr)
 		}
-		if !errors.Is(getErr, sql.ErrNoRows) {
-			return fmt.Errorf("resolve vault delete precondition: %w", getErr)
+		return ports.WrappedVaultKey{}, ports.ErrVaultKeyNotFound
+	}
+	if err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("get vault key: %w", err)
+	}
+	return vaultKeyFromRow(row)
+}
+
+// CreateVaultKey atomically installs a wrapped key or returns the concurrent winner.
+func (s *Store) CreateVaultKey(ctx context.Context, tenantID, vaultID string, candidate ports.WrappedVaultKey) (ports.WrappedVaultKey, error) {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("begin vault key creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	if _, err := queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: vaultID}); errors.Is(err, sql.ErrNoRows) {
+		return ports.WrappedVaultKey{}, ports.ErrVaultNotFound
+	} else if err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("get keyed vault: %w", err)
+	}
+	if _, err := queries.InsertVaultKey(ctx, sqlc.InsertVaultKeyParams{
+		TenantID: tenantID, VaultID: vaultID, RootKeyID: candidate.RootKeyID,
+		Salt: candidate.Salt, WrappedKey: candidate.Ciphertext,
+		CreatedAt: formatDatabaseTime(candidate.CreatedAt),
+	}); err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("insert vault key: %w", err)
+	}
+	row, err := queries.GetVaultKey(ctx, sqlc.GetVaultKeyParams{TenantID: tenantID, VaultID: vaultID})
+	if err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("read installed vault key: %w", err)
+	}
+	key, err := vaultKeyFromRow(row)
+	if err != nil {
+		return ports.WrappedVaultKey{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("commit vault key creation: %w", err)
+	}
+	return key, nil
+}
+
+// PutSecret atomically creates, replaces, or replays one encrypted value.
+func (s *Store) PutSecret(ctx context.Context, command ports.PutSecretCommand) (ports.PutSecretResult, error) {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return ports.PutSecretResult{}, fmt.Errorf("begin secret write: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	if _, err := queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: command.TenantID, ID: command.VaultID}); errors.Is(err, sql.ErrNoRows) {
+		return ports.PutSecretResult{}, ports.ErrVaultNotFound
+	} else if err != nil {
+		return ports.PutSecretResult{}, fmt.Errorf("get secret vault: %w", err)
+	}
+	row, err := putSecretRow(ctx, queries, command)
+	if errors.Is(err, sql.ErrNoRows) {
+		currentRow, currentErr := queries.GetSecretMetadata(ctx, sqlc.GetSecretMetadataParams{
+			TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
+		})
+		if errors.Is(currentErr, sql.ErrNoRows) {
+			return ports.PutSecretResult{}, ports.ErrSecretNotFound
+		}
+		if currentErr != nil {
+			return ports.PutSecretResult{}, fmt.Errorf("resolve secret write: %w", currentErr)
+		}
+		current, convertErr := secretMetadataFromGetRow(currentRow)
+		if convertErr != nil {
+			return ports.PutSecretResult{}, convertErr
+		}
+		if command.CreateOnly || (command.ExpectedVersion != nil && current.Version != *command.ExpectedVersion) {
+			return ports.PutSecretResult{}, ports.ErrSecretPrecondition
+		}
+		if current.Digest != command.Digest || current.ContentType != command.ContentType {
+			return ports.PutSecretResult{}, errors.New("secret write affected no rows")
+		}
+		if err := tx.Commit(); err != nil {
+			return ports.PutSecretResult{}, fmt.Errorf("commit idempotent secret write: %w", err)
+		}
+		return ports.PutSecretResult{Metadata: current}, nil
+	}
+	if err != nil {
+		return ports.PutSecretResult{}, fmt.Errorf("persist encrypted secret: %w", err)
+	}
+	metadata, err := secretMetadataFromSecret(row)
+	if err != nil {
+		return ports.PutSecretResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ports.PutSecretResult{}, fmt.Errorf("commit secret write: %w", err)
+	}
+	return ports.PutSecretResult{Metadata: metadata, Created: metadata.Version == 1}, nil
+}
+
+// GetSecret retrieves encrypted value material and its wrapped vault key.
+func (s *Store) GetSecret(ctx context.Context, tenantID, vaultID, path string) (ports.StoredSecret, error) {
+	row, err := s.queries.GetSecretRecord(ctx, sqlc.GetSecretRecordParams{TenantID: tenantID, VaultID: vaultID, Path: path})
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, metadataErr := s.queries.GetSecretMetadata(ctx, sqlc.GetSecretMetadataParams{TenantID: tenantID, VaultID: vaultID, Path: path}); metadataErr == nil {
+			return ports.StoredSecret{}, errors.New("persisted secret has no vault key")
+		} else if !errors.Is(metadataErr, sql.ErrNoRows) {
+			return ports.StoredSecret{}, fmt.Errorf("resolve missing secret record: %w", metadataErr)
+		}
+		return ports.StoredSecret{}, s.resolveMissingSecret(ctx, s.queries, tenantID, vaultID)
+	}
+	if err != nil {
+		return ports.StoredSecret{}, fmt.Errorf("get encrypted secret: %w", err)
+	}
+	return storedSecretFromRow(row)
+}
+
+// GetSecretMetadata retrieves metadata without selecting ciphertext.
+func (s *Store) GetSecretMetadata(ctx context.Context, tenantID, vaultID, path string) (domain.SecretMetadata, error) {
+	row, err := s.queries.GetSecretMetadata(ctx, sqlc.GetSecretMetadataParams{TenantID: tenantID, VaultID: vaultID, Path: path})
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.SecretMetadata{}, s.resolveMissingSecret(ctx, s.queries, tenantID, vaultID)
+	}
+	if err != nil {
+		return domain.SecretMetadata{}, fmt.Errorf("get secret metadata: %w", err)
+	}
+	return secretMetadataFromGetRow(row)
+}
+
+// MaxSecretSequence returns a list snapshot upper bound or a missing-vault error.
+func (s *Store) MaxSecretSequence(ctx context.Context, tenantID, vaultID string) (int64, error) {
+	bound, err := s.queries.SecretSnapshotUpperBound(ctx, sqlc.SecretSnapshotUpperBoundParams{TenantID: tenantID, VaultID: vaultID})
+	if err != nil {
+		return 0, fmt.Errorf("get maximum secret sequence: %w", err)
+	}
+	if bound.VaultExists == 0 {
+		return 0, ports.ErrVaultNotFound
+	}
+	return bound.MaxSequence, nil
+}
+
+// ListSecretMetadata returns a metadata-only page within one vault snapshot.
+func (s *Store) ListSecretMetadata(ctx context.Context, query ports.ListSecretsQuery) ([]domain.SecretMetadata, error) {
+	tx, err := s.database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin secret list: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	bound, err := queries.SecretSnapshotUpperBound(ctx, sqlc.SecretSnapshotUpperBoundParams{TenantID: query.TenantID, VaultID: query.VaultID})
+	if err != nil {
+		return nil, fmt.Errorf("verify secret vault: %w", err)
+	}
+	if bound.VaultExists == 0 {
+		return nil, ports.ErrVaultNotFound
+	}
+	rows, err := queries.ListSecretMetadataPage(ctx, sqlc.ListSecretMetadataPageParams{
+		TenantID: query.TenantID, VaultID: query.VaultID,
+		AfterSequence: query.AfterSequence, SnapshotSequence: query.SnapshotSequence,
+		Prefix: optionalArgument(query.Prefix), PageSize: int64(query.PageSize),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list secret metadata: %w", err)
+	}
+	items := make([]domain.SecretMetadata, 0, len(rows))
+	for _, row := range rows {
+		metadata, err := secretMetadataFromListRow(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, metadata)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit secret list snapshot: %w", err)
+	}
+	return items, nil
+}
+
+// DeleteSecret removes one path, optionally at one exact version.
+func (s *Store) DeleteSecret(ctx context.Context, tenantID, vaultID, path string, expectedVersion *int64) error {
+	var rows int64
+	var err error
+	if expectedVersion == nil {
+		rows, err = s.queries.DeleteSecret(ctx, sqlc.DeleteSecretParams{TenantID: tenantID, VaultID: vaultID, Path: path})
+	} else {
+		rows, err = s.queries.DeleteSecretIfVersion(ctx, sqlc.DeleteSecretIfVersionParams{
+			TenantID: tenantID, VaultID: vaultID, Path: path, ExpectedVersion: *expectedVersion,
+		})
+	}
+	if err != nil {
+		return fmt.Errorf("delete secret: %w", err)
+	}
+	if rows == 1 {
+		return nil
+	}
+	if expectedVersion != nil {
+		if _, getErr := s.queries.GetSecretMetadata(ctx, sqlc.GetSecretMetadataParams{TenantID: tenantID, VaultID: vaultID, Path: path}); getErr == nil {
+			return ports.ErrSecretPrecondition
+		} else if !errors.Is(getErr, sql.ErrNoRows) {
+			return fmt.Errorf("resolve secret delete precondition: %w", getErr)
 		}
 	}
-	return ports.ErrVaultNotFound
+	return s.resolveMissingSecret(ctx, s.queries, tenantID, vaultID)
+}
+
+func putSecretRow(ctx context.Context, queries *sqlc.Queries, command ports.PutSecretCommand) (sqlc.Secret, error) {
+	if command.CreateOnly {
+		return queries.InsertSecret(ctx, sqlc.InsertSecretParams{
+			TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
+			Salt: command.Value.Salt, Ciphertext: command.Value.Ciphertext,
+			Digest: command.Digest, ContentType: command.ContentType,
+			CreatedAt: formatDatabaseTime(command.UpdatedAt), UpdatedAt: formatDatabaseTime(command.UpdatedAt),
+		})
+	}
+	if command.ExpectedVersion != nil {
+		return queries.UpdateSecretIfVersion(ctx, sqlc.UpdateSecretIfVersionParams{
+			Salt: command.Value.Salt, Ciphertext: command.Value.Ciphertext,
+			Digest: command.Digest, ContentType: command.ContentType,
+			UpdatedAt: formatDatabaseTime(command.UpdatedAt), TenantID: command.TenantID,
+			VaultID: command.VaultID, Path: command.Path, ExpectedVersion: *command.ExpectedVersion,
+		})
+	}
+	return queries.UpsertSecret(ctx, sqlc.UpsertSecretParams{
+		TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
+		Salt: command.Value.Salt, Ciphertext: command.Value.Ciphertext,
+		Digest: command.Digest, ContentType: command.ContentType,
+		CreatedAt: formatDatabaseTime(command.UpdatedAt), UpdatedAt: formatDatabaseTime(command.UpdatedAt),
+	})
 }
 
 func claimIdempotency(ctx context.Context, queries *sqlc.Queries, command ports.CreateTenantCommand) (ports.CreateTenantResult, bool, error) {
@@ -571,6 +826,99 @@ func vaultFromRow(row sqlc.Vault) (domain.Vault, error) {
 		Description: pointerFromNull(row.Description), ExternalID: pointerFromNull(row.ExternalID),
 		Labels: labels, Revision: row.Revision, CreatedAt: createdAt, UpdatedAt: updatedAt,
 	}, nil
+}
+
+func vaultKeyFromRow(row sqlc.GetVaultKeyRow) (ports.WrappedVaultKey, error) {
+	createdAt, err := time.Parse(databaseTimeFormat, row.CreatedAt)
+	if err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("parse vault key creation time: %w", err)
+	}
+	return ports.WrappedVaultKey{
+		RootKeyID:  row.RootKeyID,
+		Salt:       append([]byte(nil), row.Salt...),
+		Ciphertext: append([]byte(nil), row.WrappedKey...),
+		CreatedAt:  createdAt,
+	}, nil
+}
+
+func storedSecretFromRow(row sqlc.GetSecretRecordRow) (ports.StoredSecret, error) {
+	metadata, err := secretMetadata(
+		row.Sequence, row.TenantID, row.VaultID, row.Path, row.Digest,
+		row.ContentType, row.Version, row.CreatedAt, row.UpdatedAt,
+	)
+	if err != nil {
+		return ports.StoredSecret{}, err
+	}
+	keyCreatedAt, err := time.Parse(databaseTimeFormat, row.KeyCreatedAt)
+	if err != nil {
+		return ports.StoredSecret{}, fmt.Errorf("parse vault key creation time: %w", err)
+	}
+	return ports.StoredSecret{
+		Metadata: metadata,
+		Value: ports.EncryptedSecretValue{
+			Salt:       append([]byte(nil), row.SecretSalt...),
+			Ciphertext: append([]byte(nil), row.Ciphertext...),
+		},
+		VaultKey: ports.WrappedVaultKey{
+			RootKeyID:  row.RootKeyID,
+			Salt:       append([]byte(nil), row.KeySalt...),
+			Ciphertext: append([]byte(nil), row.WrappedKey...),
+			CreatedAt:  keyCreatedAt,
+		},
+	}, nil
+}
+
+func secretMetadataFromSecret(row sqlc.Secret) (domain.SecretMetadata, error) {
+	return secretMetadata(
+		row.Sequence, row.TenantID, row.VaultID, row.Path, row.Digest,
+		row.ContentType, row.Version, row.CreatedAt, row.UpdatedAt,
+	)
+}
+
+func secretMetadataFromGetRow(row sqlc.GetSecretMetadataRow) (domain.SecretMetadata, error) {
+	return secretMetadata(
+		row.Sequence, row.TenantID, row.VaultID, row.Path, row.Digest,
+		row.ContentType, row.Version, row.CreatedAt, row.UpdatedAt,
+	)
+}
+
+func secretMetadataFromListRow(row sqlc.ListSecretMetadataPageRow) (domain.SecretMetadata, error) {
+	return secretMetadata(
+		row.Sequence, row.TenantID, row.VaultID, row.Path, row.Digest,
+		row.ContentType, row.Version, row.CreatedAt, row.UpdatedAt,
+	)
+}
+
+func secretMetadata(
+	sequence int64,
+	tenantID, vaultID, path, digest, contentType string,
+	version int64,
+	createdAtValue, updatedAtValue string,
+) (domain.SecretMetadata, error) {
+	createdAt, err := time.Parse(databaseTimeFormat, createdAtValue)
+	if err != nil {
+		return domain.SecretMetadata{}, fmt.Errorf("parse secret creation time: %w", err)
+	}
+	updatedAt, err := time.Parse(databaseTimeFormat, updatedAtValue)
+	if err != nil {
+		return domain.SecretMetadata{}, fmt.Errorf("parse secret update time: %w", err)
+	}
+	return domain.SecretMetadata{
+		Sequence: sequence, TenantID: tenantID, VaultID: vaultID, Path: path,
+		Digest: digest, ContentType: contentType, Version: version,
+		CreatedAt: createdAt, UpdatedAt: updatedAt,
+	}, nil
+}
+
+func (s *Store) resolveMissingSecret(ctx context.Context, queries *sqlc.Queries, tenantID, vaultID string) error {
+	_, err := queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: vaultID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ports.ErrVaultNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("resolve missing secret scope: %w", err)
+	}
+	return ports.ErrSecretNotFound
 }
 
 func mapTenantConflict(ctx context.Context, queries *sqlc.Queries, name string, externalID *string, original error) error {

@@ -16,7 +16,7 @@ func (s *Server) GetServiceInfo(ctx context.Context, _ GetServiceInfoRequestObje
 		Body: ServiceInfo{
 			ApiVersion:     V1,
 			ServiceVersion: s.serviceVersion,
-			Capabilities:   []string{"tenants", "vaults", "conditional-writes"},
+			Capabilities:   []string{"tenants", "vaults", "secrets", "conditional-writes"},
 		},
 		Headers: GetServiceInfo200ResponseHeaders{XRequestID: id},
 	}, nil

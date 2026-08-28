@@ -83,6 +83,29 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 
 -- name: DeleteVaultIfRevision :execrows
 DELETE FROM vaults
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
+WHERE vaults.tenant_id = sqlc.arg(tenant_id)
+  AND vaults.id = sqlc.arg(id)
   AND revision = sqlc.arg(expected_revision);
+
+-- name: DeleteVaultIfEmpty :execrows
+DELETE FROM vaults
+WHERE vaults.tenant_id = sqlc.arg(tenant_id)
+  AND vaults.id = sqlc.arg(id)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM secrets
+      WHERE secrets.tenant_id = vaults.tenant_id
+        AND secrets.vault_id = vaults.id
+  );
+
+-- name: DeleteVaultIfRevisionAndEmpty :execrows
+DELETE FROM vaults
+WHERE vaults.tenant_id = sqlc.arg(tenant_id)
+  AND vaults.id = sqlc.arg(id)
+  AND vaults.revision = sqlc.arg(expected_revision)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM secrets
+      WHERE secrets.tenant_id = vaults.tenant_id
+        AND secrets.vault_id = vaults.id
+  );

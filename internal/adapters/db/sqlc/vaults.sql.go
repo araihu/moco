@@ -29,10 +29,35 @@ func (q *Queries) DeleteVault(ctx context.Context, arg DeleteVaultParams) (int64
 	return result.RowsAffected()
 }
 
+const deleteVaultIfEmpty = `-- name: DeleteVaultIfEmpty :execrows
+DELETE FROM vaults
+WHERE vaults.tenant_id = ?1
+  AND vaults.id = ?2
+  AND NOT EXISTS (
+      SELECT 1
+      FROM secrets
+      WHERE secrets.tenant_id = vaults.tenant_id
+        AND secrets.vault_id = vaults.id
+  )
+`
+
+type DeleteVaultIfEmptyParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteVaultIfEmpty(ctx context.Context, arg DeleteVaultIfEmptyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteVaultIfEmpty, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteVaultIfRevision = `-- name: DeleteVaultIfRevision :execrows
 DELETE FROM vaults
-WHERE tenant_id = ?1
-  AND id = ?2
+WHERE vaults.tenant_id = ?1
+  AND vaults.id = ?2
   AND revision = ?3
 `
 
@@ -44,6 +69,33 @@ type DeleteVaultIfRevisionParams struct {
 
 func (q *Queries) DeleteVaultIfRevision(ctx context.Context, arg DeleteVaultIfRevisionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteVaultIfRevision, arg.TenantID, arg.ID, arg.ExpectedRevision)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteVaultIfRevisionAndEmpty = `-- name: DeleteVaultIfRevisionAndEmpty :execrows
+DELETE FROM vaults
+WHERE vaults.tenant_id = ?1
+  AND vaults.id = ?2
+  AND vaults.revision = ?3
+  AND NOT EXISTS (
+      SELECT 1
+      FROM secrets
+      WHERE secrets.tenant_id = vaults.tenant_id
+        AND secrets.vault_id = vaults.id
+  )
+`
+
+type DeleteVaultIfRevisionAndEmptyParams struct {
+	TenantID         string `json:"tenant_id"`
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expected_revision"`
+}
+
+func (q *Queries) DeleteVaultIfRevisionAndEmpty(ctx context.Context, arg DeleteVaultIfRevisionAndEmptyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteVaultIfRevisionAndEmpty, arg.TenantID, arg.ID, arg.ExpectedRevision)
 	if err != nil {
 		return 0, err
 	}

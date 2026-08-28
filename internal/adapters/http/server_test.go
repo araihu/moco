@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/araihu/moco/internal/adapters/db"
+	"github.com/araihu/moco/internal/adapters/encryption"
 	httpapi "github.com/araihu/moco/internal/adapters/http"
 	"github.com/araihu/moco/internal/core/services"
 )
@@ -54,7 +55,7 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	}, false)
 	assertStatus(t, response, http.StatusOK)
 	info := decode[httpapi.ServiceInfo](t, response)
-	if !slices.Equal(info.Capabilities, []string{"tenants", "vaults", "conditional-writes"}) {
+	if !slices.Equal(info.Capabilities, []string{"tenants", "vaults", "secrets", "conditional-writes"}) {
 		t.Fatalf("unexpected capabilities: %v", info.Capabilities)
 	}
 
@@ -284,8 +285,22 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	if err != nil {
 		t.Fatalf("create vault service: %v", err)
 	}
+	envelope, err := encryption.NewHKDFAESGCMEnvelope(encryption.HKDFAESGCMOptions{
+		RootKeyID: "test-root-v1", RootKey: bytes.Repeat([]byte{0x42}, 32),
+	})
+	if err != nil {
+		t.Fatalf("create secret cipher: %v", err)
+	}
+	secretService, err := services.NewSecretService(store, envelope, services.SecretServiceOptions{
+		CursorHMACKey: options.CursorHMACKey,
+		Clock:         options.Clock,
+	})
+	if err != nil {
+		t.Fatalf("create secret service: %v", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
-		Tenants: tenantService, Vaults: vaultService, Readiness: store, BearerToken: testBearerToken,
+		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
+		Readiness: store, BearerToken: testBearerToken,
 		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

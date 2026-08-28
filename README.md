@@ -7,27 +7,34 @@ encryption.
 ## Current status
 
 The public and internal OpenAPI contracts are source-controlled and validated.
-The current executable vertical slices implement tenant and vault lifecycles:
+The current executable vertical slices implement tenant, vault, and encrypted
+secret lifecycles:
 
 - bearer-authenticated tenant and tenant-scoped vault create, list, get, replace, and delete;
+- path-based secret create/replace, value read, metadata read/list, and conditional delete;
+- HKDF-SHA-256/AES-256-GCM envelope encryption with one random wrapped data key per vault;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
 - creation idempotency scoped to the authenticated principal for at least 24 hours;
 - HMAC-authenticated, expiring cursors over stable insertion snapshots;
 - unauthenticated `/livez` and `/readyz` process probes.
 
-Secret routes remain in the contract but return a typed
-`503 capability_unavailable`; they are not advertised by `GET /api/v1`. Encryption,
-Casbin authorization, multi-principal authentication, and production deployment
-are not implemented yet. Do not use this slice to store secrets.
+Secret metadata operations never select or return ciphertext or plaintext, and
+secret-bearing reads use `Cache-Control: no-store`. Root-key rotation, external
+KMS/HSM providers, auditing, Casbin authorization, multi-principal
+authentication, and production deployment hardening are not implemented yet.
+Treat this as a development slice, not a production secret store.
 
 ## Run locally
 
-Go 1.27.0 is required. Supply two independent, high-entropy deployment secrets:
+Go 1.27.0 is required. Supply independent high-entropy credentials plus one
+base64-encoded 256-bit encryption key:
 
 ```bash
 export MOCO_BEARER_TOKEN="$(openssl rand -hex 32)"
 export MOCO_CURSOR_HMAC_KEY="$(openssl rand -hex 32)"
+export MOCO_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export MOCO_ENCRYPTION_KEY_ID="local-v1"
 make run
 ```
 
@@ -35,6 +42,11 @@ The server listens on `:8080` and stores data in `./moco.db` by default. Overrid
 those values with `MOCO_ADDR` and `MOCO_DB_PATH`. Startup automatically applies
 embedded migrations. The listener is plain HTTP; terminate TLS in front of it
 before sending bearer credentials across a network.
+
+`MOCO_ENCRYPTION_KEY_ID` is stored with wrapped vault keys and defaults to
+`local-v1`. Keep the exact encryption key with database backups. Changing either
+the key bytes or its identifier makes existing secrets intentionally unreadable;
+online root-key rotation is a later slice.
 
 Example tenant creation:
 
@@ -50,7 +62,7 @@ curl --fail-with-body \
 ## Architecture
 
 Mocó uses ports and adapters. `internal/core` contains domain validation, port
-contracts, and transport-independent tenant services. It imports neither HTTP
+contracts, and transport-independent application services. It imports neither HTTP
 nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 `cmd/moco-server` is the composition root.
 
@@ -60,6 +72,7 @@ nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 - `db/queries/`: sqlc query sources.
 - `internal/core/`: domain types, ports, and application services.
 - `internal/adapters/db/`: SQLite/sqlc repository.
+- `internal/adapters/encryption/`: HKDF-SHA-256/AES-256-GCM envelope encryption adapter.
 - `internal/adapters/http/`: generated strict contract and handwritten adapter.
 - `internal/adapters/authz/`: reserved for the future Casbin adapter.
 
@@ -110,7 +123,7 @@ checked in for deterministic review.
 
 ## Secret addressing
 
-The deferred secret API uses S3-like logical paths in query parameters. Item
+The secret API uses S3-like logical paths in query parameters. Item
 operations use `/secret?path=prod/db/password`; metadata listing uses
 `/secrets?prefix=prod/db/`. Paths forbid empty, `.`, and `..` segments, and
 metadata operations never return values.
