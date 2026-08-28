@@ -7,16 +7,16 @@ encryption.
 ## Current status
 
 The public and internal OpenAPI contracts are source-controlled and validated.
-The first executable vertical slice implements the complete tenant lifecycle:
+The current executable vertical slices implement tenant and vault lifecycles:
 
-- bearer-authenticated tenant create, list, get, replace, and delete;
+- bearer-authenticated tenant and tenant-scoped vault create, list, get, replace, and delete;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
 - creation idempotency scoped to the authenticated principal for at least 24 hours;
 - HMAC-authenticated, expiring cursors over stable insertion snapshots;
 - unauthenticated `/livez` and `/readyz` process probes.
 
-Vault and secret routes remain in the contract but return a typed
+Secret routes remain in the contract but return a typed
 `503 capability_unavailable`; they are not advertised by `GET /api/v1`. Encryption,
 Casbin authorization, multi-principal authentication, and production deployment
 are not implemented yet. Do not use this slice to store secrets.
@@ -72,10 +72,12 @@ reloads on every instance.
 Tool versions are pinned in the separate `tools` module, so global installations
 are unnecessary:
 
-- Vacuum `v0.30.0`
+- Vacuum `v0.30.1`
 - oapi-codegen `v2.8.0`
 - sqlc `v1.31.1`
-- golang-migrate `v4.19.1`
+- golangci-lint `v2.13.2`
+- govulncheck `v1.7.0`
+- a SQLite-only migration runner backed by golang-migrate `v4.19.1`
 
 ```bash
 make spec-lint
@@ -83,8 +85,14 @@ make api-generate
 make sqlc-generate
 make db-migrate DB_PATH=./moco.db
 make test
+make lint
+make vulncheck
 make check
 ```
+
+`make check` runs generation, tests, `golangci-lint`, `govulncheck` source
+analysis, and vulnerability scans of every pinned tool binary. The same gate runs
+for pull requests and `main`; CI also rejects stale generated files.
 
 Public API source lives in `openapi/public.yaml`; probe-only internal operations
 live in `openapi/internal.yaml`. Both are exploded into paths and reusable
