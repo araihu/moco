@@ -247,15 +247,13 @@ func (s *TenantService) Update(ctx context.Context, id string, input domain.Tena
 	return tenant, TenantETag(tenant), nil
 }
 
-// Delete removes a tenant. The cascade flag is reserved for the vault slice;
-// every tenant is necessarily empty in the current schema.
+// Delete removes an empty tenant or cascades its children when explicitly requested.
 func (s *TenantService) Delete(ctx context.Context, id string, ifMatch *string, cascade bool) error {
-	_ = cascade
 	expectedRevision, err := s.expectedRevision(ctx, id, ifMatch)
 	if err != nil {
 		return err
 	}
-	err = s.repository.DeleteTenant(ctx, id, expectedRevision)
+	err = s.repository.DeleteTenant(ctx, id, expectedRevision, cascade)
 	if errors.Is(err, ports.ErrTenantPrecondition) {
 		return s.currentPrecondition(ctx, id)
 	}

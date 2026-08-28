@@ -15,6 +15,10 @@ var (
 	ErrTenantPrecondition = errors.New("tenant revision precondition failed")
 	// ErrIdempotencyConflict means a key was reused with a different request.
 	ErrIdempotencyConflict = errors.New("idempotency key reused with a different request")
+	// ErrVaultNotFound means the tenant-scoped vault ID is absent.
+	ErrVaultNotFound = errors.New("vault not found")
+	// ErrResourceHasChildren prevents accidental cascading deletion.
+	ErrResourceHasChildren = errors.New("resource has children")
 )
 
 // TenantConflictError identifies a conflicting resource without leaking inputs.
@@ -58,5 +62,5 @@ type TenantRepository interface {
 	MaxTenantSequence(context.Context) (int64, error)
 	ListTenants(context.Context, ListTenantsQuery) ([]domain.Tenant, error)
 	UpdateTenant(context.Context, string, domain.TenantUpdate, *int64, time.Time) (domain.Tenant, error)
-	DeleteTenant(context.Context, string, *int64) error
+	DeleteTenant(context.Context, string, *int64, bool) error
 }

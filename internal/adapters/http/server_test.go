@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -26,6 +27,12 @@ type fixture struct {
 	token  string
 }
 
+type testResponse struct {
+	StatusCode int
+	Header     http.Header
+	Body       []byte
+}
+
 func TestTenantLifecycleEndToEnd(t *testing.T) {
 	t.Parallel()
 	test := newFixture(t, services.TenantServiceOptions{
@@ -34,7 +41,6 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 
 	response := test.request(t, http.MethodGet, "/livez", nil, nil, false)
 	assertStatus(t, response, http.StatusOK)
-	response.Body.Close()
 
 	response = test.request(t, http.MethodGet, "/api/v1", nil, nil, false)
 	assertStatus(t, response, http.StatusUnauthorized)
@@ -48,7 +54,7 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	}, false)
 	assertStatus(t, response, http.StatusOK)
 	info := decode[httpapi.ServiceInfo](t, response)
-	if !slices.Equal(info.Capabilities, []string{"tenants", "conditional-writes"}) {
+	if !slices.Equal(info.Capabilities, []string{"tenants", "vaults", "conditional-writes"}) {
 		t.Fatalf("unexpected capabilities: %v", info.Capabilities)
 	}
 
@@ -60,7 +66,6 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	}
 	response = test.request(t, http.MethodPost, "/api/v1/tenants", []byte(`{"name":"null-labels","labels":null}`), nil, true)
 	assertStatus(t, response, http.StatusBadRequest)
-	response.Body.Close()
 
 	alphaBody := []byte(`{"name":"alpha","description":"first tenant","externalId":"kubernetes://cluster-a/alpha","labels":{"owner":"platform"}}`)
 	createHeaders := map[string]string{"Idempotency-Key": "tenant-alpha-key", "X-Request-ID": "create-alpha"}
@@ -101,7 +106,6 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	tamperedCursor := *firstPage.Page.NextCursor + "x"
 	response = test.request(t, http.MethodGet, "/api/v1/tenants?cursor="+tamperedCursor, nil, nil, true)
 	assertStatus(t, response, http.StatusBadRequest)
-	response.Body.Close()
 	test.createTenant(t, "gamma")
 	response = test.request(t, http.MethodGet, "/api/v1/tenants?limit=200&cursor="+*firstPage.Page.NextCursor, nil, nil, true)
 	assertStatus(t, response, http.StatusOK)
@@ -115,19 +119,16 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	if response.Header.Get("ETag") != alphaETag {
 		t.Fatalf("GET ETag mismatch: %q", response.Header.Get("ETag"))
 	}
-	response.Body.Close()
 
 	response = test.request(t, http.MethodGet, alphaLocation, nil, map[string]string{"If-None-Match": alphaETag}, true)
 	assertStatus(t, response, http.StatusNotModified)
-	if body, _ := io.ReadAll(response.Body); len(body) != 0 {
-		t.Fatalf("304 returned a body: %q", body)
+	if len(response.Body) != 0 {
+		t.Fatalf("304 returned a body: %q", response.Body)
 	}
-	response.Body.Close()
 
 	updateBody := []byte(`{"name":"alpha-updated","description":null,"labels":{"owner":"runtime"}}`)
 	response = test.request(t, http.MethodPut, alphaLocation, []byte(`{"name":"missing-description","labels":{}}`), nil, true)
 	assertStatus(t, response, http.StatusBadRequest)
-	response.Body.Close()
 	response = test.request(t, http.MethodPut, alphaLocation, updateBody, map[string]string{"If-Match": `"stale"`}, true)
 	assertStatus(t, response, http.StatusPreconditionFailed)
 	stale := decode[httpapi.Problem](t, response)
@@ -151,23 +152,12 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("unexpected uniqueness conflict: %#v", conflict)
 	}
 
-	vaultPath := alphaLocation + "/vaults"
-	response = test.request(t, http.MethodGet, vaultPath, nil, nil, true)
-	assertStatus(t, response, http.StatusServiceUnavailable)
-	unavailable := decode[httpapi.Problem](t, response)
-	if unavailable.Code != "capability_unavailable" || response.Header.Get("Retry-After") != "60" {
-		t.Fatalf("unexpected deferred capability response: %#v", unavailable)
-	}
-
 	response = test.request(t, http.MethodDelete, alphaLocation, nil, map[string]string{"If-Match": alphaETag}, true)
 	assertStatus(t, response, http.StatusPreconditionFailed)
-	response.Body.Close()
 	response = test.request(t, http.MethodDelete, alphaLocation, nil, map[string]string{"If-Match": updatedETag}, true)
 	assertStatus(t, response, http.StatusNoContent)
-	response.Body.Close()
 	response = test.request(t, http.MethodGet, alphaLocation, nil, nil, true)
 	assertStatus(t, response, http.StatusNotFound)
-	response.Body.Close()
 }
 
 func TestConcurrentIdempotentCreateReturnsOneResult(t *testing.T) {
@@ -194,9 +184,10 @@ func TestConcurrentIdempotentCreateReturnsOneResult(t *testing.T) {
 				results <- result{err: err}
 				return
 			}
-			defer response.Body.Close()
 			var tenant httpapi.Tenant
-			err = json.NewDecoder(response.Body).Decode(&tenant)
+			decodeErr := json.NewDecoder(response.Body).Decode(&tenant)
+			closeErr := response.Body.Close()
+			err = errors.Join(decodeErr, closeErr)
 			results <- result{status: response.StatusCode, tenant: tenant, err: err}
 		}()
 	}
@@ -228,7 +219,6 @@ func TestConcurrentConditionalUpdateAllowsOneWinner(t *testing.T) {
 	path := "/api/v1/tenants/" + tenant.Id.String()
 	response := test.request(t, http.MethodGet, path, nil, nil, true)
 	etag := response.Header.Get("ETag")
-	response.Body.Close()
 
 	statuses := make(chan int, 2)
 	var wait sync.WaitGroup
@@ -239,7 +229,6 @@ func TestConcurrentConditionalUpdateAllowsOneWinner(t *testing.T) {
 			body, _ := json.Marshal(map[string]any{"name": name, "description": nil, "labels": map[string]string{}})
 			result := test.request(t, http.MethodPut, path, body, map[string]string{"If-Match": etag}, true)
 			statuses <- result.StatusCode
-			result.Body.Close()
 		}()
 	}
 	wait.Wait()
@@ -288,8 +277,15 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	if err != nil {
 		t.Fatalf("create tenant service: %v", err)
 	}
+	vaultService, err := services.NewVaultService(store, services.VaultServiceOptions{
+		CursorHMACKey: options.CursorHMACKey,
+		Clock:         options.Clock,
+	})
+	if err != nil {
+		t.Fatalf("create vault service: %v", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
-		Tenants: tenantService, Readiness: store, BearerToken: testBearerToken,
+		Tenants: tenantService, Vaults: vaultService, Readiness: store, BearerToken: testBearerToken,
 		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -305,20 +301,30 @@ func (f fixture) createTenant(t *testing.T, name string) httpapi.Tenant {
 	body, _ := json.Marshal(map[string]any{"name": name, "labels": map[string]string{}})
 	response := f.request(t, http.MethodPost, "/api/v1/tenants", body, nil, true)
 	assertStatus(t, response, http.StatusCreated)
-	return decode[httpapi.Tenant](t, response)
+	tenant := decode[httpapi.Tenant](t, response)
+	return tenant
 }
 
-func (f fixture) request(t *testing.T, method, path string, body []byte, headers map[string]string, authenticated bool) *http.Response {
+func (f fixture) request(t *testing.T, method, path string, body []byte, headers map[string]string, authenticated bool) *testResponse {
 	t.Helper()
 	response, err := f.rawRequest(method, path, body, headers, authenticated)
 	if err != nil {
 		t.Fatalf("perform request: %v", err)
 	}
-	return response
+	payload, readErr := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+	if err := errors.Join(readErr, closeErr); err != nil {
+		t.Fatalf("consume response: %v", err)
+	}
+	return &testResponse{
+		StatusCode: response.StatusCode,
+		Header:     response.Header.Clone(),
+		Body:       payload,
+	}
 }
 
 func (f fixture) rawRequest(method, path string, body []byte, headers map[string]string, authenticated bool) (*http.Response, error) {
-	request, err := http.NewRequest(method, f.server.URL+path, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(context.Background(), method, f.server.URL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -334,21 +340,18 @@ func (f fixture) rawRequest(method, path string, body []byte, headers map[string
 	return f.server.Client().Do(request)
 }
 
-func assertStatus(t *testing.T, response *http.Response, expected int) {
+func assertStatus(t *testing.T, response *testResponse, expected int) {
 	t.Helper()
 	if response.StatusCode == expected {
 		return
 	}
-	body, _ := io.ReadAll(response.Body)
-	response.Body.Close()
-	t.Fatalf("expected HTTP %d, got %d: %s", expected, response.StatusCode, body)
+	t.Fatalf("expected HTTP %d, got %d: %s", expected, response.StatusCode, response.Body)
 }
 
-func decode[T any](t *testing.T, response *http.Response) T {
+func decode[T any](t *testing.T, response *testResponse) T {
 	t.Helper()
-	defer response.Body.Close()
 	var value T
-	if err := json.NewDecoder(response.Body).Decode(&value); err != nil {
+	if err := json.Unmarshal(response.Body, &value); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	return value

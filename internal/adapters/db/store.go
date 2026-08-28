@@ -21,6 +21,7 @@ import (
 
 const (
 	createTenantOperation = "createTenant"
+	createVaultOperation  = "createVault"
 	databaseTimeFormat    = "2006-01-02T15:04:05.000000000Z"
 )
 
@@ -197,15 +198,25 @@ func (s *Store) UpdateTenant(ctx context.Context, id string, input domain.Tenant
 }
 
 // DeleteTenant removes one tenant, optionally at one exact revision.
-func (s *Store) DeleteTenant(ctx context.Context, id string, expectedRevision *int64) error {
-	var (
-		rows int64
-		err  error
-	)
-	if expectedRevision == nil {
-		rows, err = s.queries.DeleteTenant(ctx, id)
-	} else {
-		rows, err = s.queries.DeleteTenantIfRevision(ctx, sqlc.DeleteTenantIfRevisionParams{
+func (s *Store) DeleteTenant(ctx context.Context, id string, expectedRevision *int64, cascade bool) error {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tenant deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	var rows int64
+	switch {
+	case cascade && expectedRevision == nil:
+		rows, err = queries.DeleteTenant(ctx, id)
+	case cascade:
+		rows, err = queries.DeleteTenantIfRevision(ctx, sqlc.DeleteTenantIfRevisionParams{
+			ID: id, ExpectedRevision: *expectedRevision,
+		})
+	case expectedRevision == nil:
+		rows, err = queries.DeleteTenantIfEmpty(ctx, id)
+	default:
+		rows, err = queries.DeleteTenantIfRevisionAndEmpty(ctx, sqlc.DeleteTenantIfRevisionAndEmptyParams{
 			ID: id, ExpectedRevision: *expectedRevision,
 		})
 	}
@@ -213,18 +224,208 @@ func (s *Store) DeleteTenant(ctx context.Context, id string, expectedRevision *i
 		return fmt.Errorf("delete tenant: %w", err)
 	}
 	if rows == 1 {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit tenant deletion: %w", err)
+		}
+		return nil
+	}
+	current, getErr := queries.GetTenant(ctx, id)
+	if errors.Is(getErr, sql.ErrNoRows) {
+		return ports.ErrTenantNotFound
+	}
+	if getErr != nil {
+		return fmt.Errorf("resolve tenant deletion: %w", getErr)
+	}
+	if expectedRevision != nil && current.Revision != *expectedRevision {
+		return ports.ErrTenantPrecondition
+	}
+	children, err := queries.CountTenantVaults(ctx, id)
+	if err != nil {
+		return fmt.Errorf("count tenant vaults: %w", err)
+	}
+	if children > 0 {
+		return ports.ErrResourceHasChildren
+	}
+	return errors.New("tenant deletion affected no rows")
+}
+
+// CreateVault atomically stores a vault and its optional idempotency result.
+func (s *Store) CreateVault(ctx context.Context, command ports.CreateVaultCommand) (ports.CreateVaultResult, error) {
+	if command.IdempotencyKey != "" {
+		if err := s.queries.DeleteExpiredIdempotencyRecords(ctx, formatDatabaseTime(command.Vault.CreatedAt)); err != nil {
+			return ports.CreateVaultResult{}, fmt.Errorf("expire idempotency records: %w", err)
+		}
+	}
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return ports.CreateVaultResult{}, fmt.Errorf("begin vault creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	if command.IdempotencyKey != "" {
+		result, claimed, err := claimVaultIdempotency(ctx, queries, command)
+		if err != nil {
+			return ports.CreateVaultResult{}, err
+		}
+		if !claimed {
+			return result, nil
+		}
+	}
+	if _, err := queries.GetTenant(ctx, command.Vault.TenantID); errors.Is(err, sql.ErrNoRows) {
+		return ports.CreateVaultResult{}, ports.ErrTenantNotFound
+	} else if err != nil {
+		return ports.CreateVaultResult{}, fmt.Errorf("get vault tenant: %w", err)
+	}
+	labelsJSON, err := json.Marshal(command.Vault.Labels)
+	if err != nil {
+		return ports.CreateVaultResult{}, fmt.Errorf("encode vault labels: %w", err)
+	}
+	row, err := queries.InsertVault(ctx, sqlc.InsertVaultParams{
+		ID: command.Vault.ID, TenantID: command.Vault.TenantID,
+		Name: command.Vault.Name, Description: nullableString(command.Vault.Description),
+		ExternalID: nullableString(command.Vault.ExternalID), LabelsJson: string(labelsJSON),
+		Revision:  command.Vault.Revision,
+		CreatedAt: formatDatabaseTime(command.Vault.CreatedAt), UpdatedAt: formatDatabaseTime(command.Vault.UpdatedAt),
+	})
+	if err != nil {
+		return ports.CreateVaultResult{}, mapVaultConflict(ctx, queries, command.Vault.TenantID, command.Vault.Name, command.Vault.ExternalID, err)
+	}
+	vault, err := vaultFromRow(row)
+	if err != nil {
+		return ports.CreateVaultResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ports.CreateVaultResult{}, fmt.Errorf("commit vault creation: %w", err)
+	}
+	return ports.CreateVaultResult{Vault: vault, ETag: command.ResponseETag}, nil
+}
+
+// GetVault retrieves one vault within its tenant.
+func (s *Store) GetVault(ctx context.Context, tenantID, id string) (domain.Vault, error) {
+	row, err := s.queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: id})
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Vault{}, ports.ErrVaultNotFound
+	}
+	if err != nil {
+		return domain.Vault{}, fmt.Errorf("get vault: %w", err)
+	}
+	return vaultFromRow(row)
+}
+
+// MaxVaultSequence returns a snapshot upper bound or a missing-tenant error.
+func (s *Store) MaxVaultSequence(ctx context.Context, tenantID string) (int64, error) {
+	bound, err := s.queries.VaultSnapshotUpperBound(ctx, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("get maximum vault sequence: %w", err)
+	}
+	if bound.TenantExists == 0 {
+		return 0, ports.ErrTenantNotFound
+	}
+	return bound.MaxSequence, nil
+}
+
+// ListVaults returns one ordered page within a tenant snapshot.
+func (s *Store) ListVaults(ctx context.Context, query ports.ListVaultsQuery) ([]domain.Vault, error) {
+	tx, err := s.database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin vault list: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	bound, err := queries.VaultSnapshotUpperBound(ctx, query.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("verify vault tenant: %w", err)
+	}
+	if bound.TenantExists == 0 {
+		return nil, ports.ErrTenantNotFound
+	}
+	rows, err := queries.ListVaultsPage(ctx, sqlc.ListVaultsPageParams{
+		TenantID: query.TenantID, AfterSequence: query.AfterSequence,
+		SnapshotSequence: query.SnapshotSequence, Name: optionalArgument(query.Name),
+		ExternalID: optionalArgument(query.ExternalID), PageSize: int64(query.PageSize),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list vaults: %w", err)
+	}
+	vaults := make([]domain.Vault, 0, len(rows))
+	for _, row := range rows {
+		vault, err := vaultFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		vaults = append(vaults, vault)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit vault list snapshot: %w", err)
+	}
+	return vaults, nil
+}
+
+// UpdateVault replaces mutable vault fields, optionally at one revision.
+func (s *Store) UpdateVault(ctx context.Context, tenantID, id string, input domain.VaultUpdate, expectedRevision *int64, updatedAt time.Time) (domain.Vault, error) {
+	labelsJSON, err := json.Marshal(input.Labels)
+	if err != nil {
+		return domain.Vault{}, fmt.Errorf("encode vault labels: %w", err)
+	}
+	var row sqlc.Vault
+	if expectedRevision == nil {
+		row, err = s.queries.UpdateVault(ctx, sqlc.UpdateVaultParams{
+			Name: input.Name, Description: nullableString(input.Description), LabelsJson: string(labelsJSON),
+			UpdatedAt: formatDatabaseTime(updatedAt), TenantID: tenantID, ID: id,
+		})
+	} else {
+		row, err = s.queries.UpdateVaultIfRevision(ctx, sqlc.UpdateVaultIfRevisionParams{
+			Name: input.Name, Description: nullableString(input.Description), LabelsJson: string(labelsJSON),
+			UpdatedAt: formatDatabaseTime(updatedAt), TenantID: tenantID, ID: id,
+			ExpectedRevision: *expectedRevision,
+		})
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		if expectedRevision != nil {
+			_, getErr := s.queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: id})
+			if getErr == nil {
+				return domain.Vault{}, ports.ErrTenantPrecondition
+			}
+			if !errors.Is(getErr, sql.ErrNoRows) {
+				return domain.Vault{}, fmt.Errorf("resolve vault update precondition: %w", getErr)
+			}
+		}
+		return domain.Vault{}, ports.ErrVaultNotFound
+	}
+	if err != nil {
+		return domain.Vault{}, mapVaultConflict(ctx, s.queries, tenantID, input.Name, nil, err)
+	}
+	return vaultFromRow(row)
+}
+
+// DeleteVault removes one vault. It is empty until the secret slice lands.
+func (s *Store) DeleteVault(ctx context.Context, tenantID, id string, expectedRevision *int64, cascade bool) error {
+	_ = cascade
+	var rows int64
+	var err error
+	if expectedRevision == nil {
+		rows, err = s.queries.DeleteVault(ctx, sqlc.DeleteVaultParams{TenantID: tenantID, ID: id})
+	} else {
+		rows, err = s.queries.DeleteVaultIfRevision(ctx, sqlc.DeleteVaultIfRevisionParams{
+			TenantID: tenantID, ID: id, ExpectedRevision: *expectedRevision,
+		})
+	}
+	if err != nil {
+		return fmt.Errorf("delete vault: %w", err)
+	}
+	if rows == 1 {
 		return nil
 	}
 	if expectedRevision != nil {
-		_, getErr := s.queries.GetTenant(ctx, id)
+		_, getErr := s.queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: id})
 		if getErr == nil {
 			return ports.ErrTenantPrecondition
 		}
 		if !errors.Is(getErr, sql.ErrNoRows) {
-			return fmt.Errorf("resolve tenant delete precondition: %w", getErr)
+			return fmt.Errorf("resolve vault delete precondition: %w", getErr)
 		}
 	}
-	return ports.ErrTenantNotFound
+	return ports.ErrVaultNotFound
 }
 
 func claimIdempotency(ctx context.Context, queries *sqlc.Queries, command ports.CreateTenantCommand) (ports.CreateTenantResult, bool, error) {
@@ -280,6 +481,52 @@ func replayIdempotency(record sqlc.IdempotencyRecord, requestHash string) (ports
 	return ports.CreateTenantResult{Tenant: tenant, ETag: record.ResponseEtag, Replayed: true}, nil
 }
 
+func claimVaultIdempotency(ctx context.Context, queries *sqlc.Queries, command ports.CreateVaultCommand) (ports.CreateVaultResult, bool, error) {
+	key := sqlc.GetIdempotencyRecordParams{
+		PrincipalID: command.PrincipalID, Operation: createVaultOperation, IdempotencyKey: command.IdempotencyKey,
+	}
+	if record, err := queries.GetIdempotencyRecord(ctx, key); err == nil {
+		result, err := replayVaultIdempotency(record, command.RequestHash)
+		return result, false, err
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return ports.CreateVaultResult{}, false, fmt.Errorf("read vault idempotency record: %w", err)
+	}
+	responseJSON, err := json.Marshal(command.Vault)
+	if err != nil {
+		return ports.CreateVaultResult{}, false, fmt.Errorf("encode vault idempotency response: %w", err)
+	}
+	rows, err := queries.InsertIdempotencyRecord(ctx, sqlc.InsertIdempotencyRecordParams{
+		PrincipalID: key.PrincipalID, Operation: key.Operation, IdempotencyKey: key.IdempotencyKey,
+		RequestHash: command.RequestHash, StatusCode: 201, ResourceID: command.Vault.ID,
+		ResponseJson: responseJSON, ResponseEtag: command.ResponseETag,
+		CreatedAt: formatDatabaseTime(command.Vault.CreatedAt), ExpiresAt: formatDatabaseTime(command.IdempotencyExpiresAt),
+	})
+	if err != nil {
+		return ports.CreateVaultResult{}, false, fmt.Errorf("claim vault idempotency key: %w", err)
+	}
+	if rows == 1 {
+		return ports.CreateVaultResult{}, true, nil
+	}
+	record, err := queries.GetIdempotencyRecord(ctx, key)
+	if err != nil {
+		return ports.CreateVaultResult{}, false, fmt.Errorf("read concurrently claimed vault idempotency record: %w", err)
+	}
+	result, err := replayVaultIdempotency(record, command.RequestHash)
+	return result, false, err
+}
+
+func replayVaultIdempotency(record sqlc.IdempotencyRecord, requestHash string) (ports.CreateVaultResult, error) {
+	if record.RequestHash != requestHash {
+		return ports.CreateVaultResult{}, ports.ErrIdempotencyConflict
+	}
+	var vault domain.Vault
+	if err := json.Unmarshal(record.ResponseJson, &vault); err != nil {
+		return ports.CreateVaultResult{}, fmt.Errorf("decode vault idempotency response: %w", err)
+	}
+	vault.Labels = domain.CloneLabels(vault.Labels)
+	return ports.CreateVaultResult{Vault: vault, ETag: record.ResponseEtag, Replayed: true}, nil
+}
+
 func tenantFromRow(row sqlc.Tenant) (domain.Tenant, error) {
 	createdAt, err := time.Parse(databaseTimeFormat, row.CreatedAt)
 	if err != nil {
@@ -306,6 +553,26 @@ func tenantFromRow(row sqlc.Tenant) (domain.Tenant, error) {
 	}, nil
 }
 
+func vaultFromRow(row sqlc.Vault) (domain.Vault, error) {
+	createdAt, err := time.Parse(databaseTimeFormat, row.CreatedAt)
+	if err != nil {
+		return domain.Vault{}, fmt.Errorf("parse vault creation time: %w", err)
+	}
+	updatedAt, err := time.Parse(databaseTimeFormat, row.UpdatedAt)
+	if err != nil {
+		return domain.Vault{}, fmt.Errorf("parse vault update time: %w", err)
+	}
+	labels := map[string]string{}
+	if err := json.Unmarshal([]byte(row.LabelsJson), &labels); err != nil {
+		return domain.Vault{}, fmt.Errorf("decode vault labels: %w", err)
+	}
+	return domain.Vault{
+		Sequence: row.Sequence, ID: row.ID, TenantID: row.TenantID, Name: row.Name,
+		Description: pointerFromNull(row.Description), ExternalID: pointerFromNull(row.ExternalID),
+		Labels: labels, Revision: row.Revision, CreatedAt: createdAt, UpdatedAt: updatedAt,
+	}, nil
+}
+
 func mapTenantConflict(ctx context.Context, queries *sqlc.Queries, name string, externalID *string, original error) error {
 	resourceID, err := queries.FindTenantConflict(ctx, sqlc.FindTenantConflictParams{
 		Name: name, ExternalID: optionalArgument(externalID),
@@ -314,6 +581,19 @@ func mapTenantConflict(ctx context.Context, queries *sqlc.Queries, name string, 
 		return &ports.TenantConflictError{ResourceID: resourceID}
 	}
 	return fmt.Errorf("persist tenant: %w", original)
+}
+
+func mapVaultConflict(ctx context.Context, queries *sqlc.Queries, tenantID, name string, externalID *string, original error) error {
+	resourceID, err := queries.FindVaultConflict(ctx, sqlc.FindVaultConflictParams{
+		TenantID: tenantID, Name: name, ExternalID: optionalArgument(externalID),
+	})
+	if err == nil {
+		return &ports.VaultConflictError{ResourceID: resourceID}
+	}
+	if _, tenantErr := queries.GetTenant(ctx, tenantID); errors.Is(tenantErr, sql.ErrNoRows) {
+		return ports.ErrTenantNotFound
+	}
+	return fmt.Errorf("persist vault: %w", original)
 }
 
 func migrateDatabase(dsn, name string) error {

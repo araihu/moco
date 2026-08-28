@@ -32,3 +32,16 @@ type Tenant struct {
 	CreatedAt   string         `json:"created_at"`
 	UpdatedAt   string         `json:"updated_at"`
 }
+
+type Vault struct {
+	Sequence    int64          `json:"sequence"`
+	ID          string         `json:"id"`
+	TenantID    string         `json:"tenant_id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	ExternalID  sql.NullString `json:"external_id"`
+	LabelsJson  string         `json:"labels_json"`
+	Revision    int64          `json:"revision"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+}

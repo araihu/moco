@@ -34,6 +34,7 @@ type ReadinessChecker interface {
 // HandlerOptions contains all dependencies and deployment credentials.
 type HandlerOptions struct {
 	Tenants        *services.TenantService
+	Vaults         *services.VaultService
 	Readiness      ReadinessChecker
 	BearerToken    string
 	ServiceVersion string
@@ -45,6 +46,9 @@ type HandlerOptions struct {
 func NewHandler(options HandlerOptions) (http.Handler, error) {
 	if options.Tenants == nil {
 		return nil, errors.New("tenant service is required")
+	}
+	if options.Vaults == nil {
+		return nil, errors.New("vault service is required")
 	}
 	if options.Readiness == nil {
 		return nil, errors.New("readiness checker is required")
@@ -61,6 +65,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 
 	server := &Server{
 		tenants:        options.Tenants,
+		vaults:         options.Vaults,
 		serviceVersion: options.ServiceVersion,
 		logger:         options.Logger,
 	}
@@ -91,7 +96,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	handler := strictTenantJSON(mux)
+	handler := strictResourceJSON(mux)
 	handler = bearerAuthentication(options.BearerToken, handler)
 	handler = requestIDs(handler)
 	return handler, nil
@@ -100,6 +105,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 // Server implements the generated strict server contract.
 type Server struct {
 	tenants        *services.TenantService
+	vaults         *services.VaultService
 	serviceVersion string
 	logger         *slog.Logger
 }
@@ -153,9 +159,10 @@ func bearerAuthentication(expectedToken string, next http.Handler) http.Handler 
 	})
 }
 
-func strictTenantJSON(next http.Handler) http.Handler {
+func strictResourceJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isTenantWrite(r) {
+		target := resourceWriteTarget(r)
+		if target == nil {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -172,12 +179,6 @@ func strictTenantJSON(next http.Handler) http.Handler {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		decoder := json.NewDecoder(bytes.NewReader(body))
 		decoder.DisallowUnknownFields()
-		var target any
-		if r.Method == http.MethodPost {
-			target = &TenantCreate{}
-		} else {
-			target = &TenantUpdate{}
-		}
 		if err := decoder.Decode(target); err != nil {
 			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_json", "The JSON body is malformed or contains unknown fields."))
 			return
@@ -186,7 +187,7 @@ func strictTenantJSON(next http.Handler) http.Handler {
 			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_json", "The request body must contain exactly one JSON value."))
 			return
 		}
-		if !validTenantJSONShape(body, r.Method) {
+		if !validResourceJSONShape(body, r.Method) {
 			writeProblem(w, badRequestProblem(requestID(r.Context()), "invalid_json", "The JSON body is missing a required field or contains null where an object or string is required."))
 			return
 		}
@@ -198,18 +199,26 @@ func isPublicAPIPath(path string) bool {
 	return path == "/api/v1" || strings.HasPrefix(path, "/api/v1/")
 }
 
-func isTenantWrite(r *http.Request) bool {
-	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/tenants" {
-		return true
-	}
-	if r.Method != http.MethodPut {
-		return false
-	}
+func resourceWriteTarget(r *http.Request) any {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	return len(parts) == 4 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants"
+	if len(parts) < 3 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "tenants" {
+		return nil
+	}
+	switch {
+	case r.Method == http.MethodPost && len(parts) == 3:
+		return &TenantCreate{}
+	case r.Method == http.MethodPut && len(parts) == 4:
+		return &TenantUpdate{}
+	case r.Method == http.MethodPost && len(parts) == 5 && parts[4] == "vaults":
+		return &VaultCreate{}
+	case r.Method == http.MethodPut && len(parts) == 6 && parts[4] == "vaults":
+		return &VaultUpdate{}
+	default:
+		return nil
+	}
 }
 
-func validTenantJSONShape(body []byte, method string) bool {
+func validResourceJSONShape(body []byte, method string) bool {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
 		return false

@@ -10,6 +10,19 @@ import (
 	"database/sql"
 )
 
+const countTenantVaults = `-- name: CountTenantVaults :one
+SELECT CAST(COUNT(*) AS INTEGER)
+FROM vaults
+WHERE tenant_id = ?
+`
+
+func (q *Queries) CountTenantVaults(ctx context.Context, tenantID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countTenantVaults, tenantID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteExpiredIdempotencyRecords = `-- name: DeleteExpiredIdempotencyRecords :exec
 DELETE FROM idempotency_records
 WHERE expires_at <= ?
@@ -33,6 +46,22 @@ func (q *Queries) DeleteTenant(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected()
 }
 
+const deleteTenantIfEmpty = `-- name: DeleteTenantIfEmpty :execrows
+DELETE FROM tenants
+WHERE tenants.id = ?
+  AND NOT EXISTS (
+      SELECT 1 FROM vaults WHERE vaults.tenant_id = tenants.id
+  )
+`
+
+func (q *Queries) DeleteTenantIfEmpty(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteTenantIfEmpty, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteTenantIfRevision = `-- name: DeleteTenantIfRevision :execrows
 DELETE FROM tenants
 WHERE id = ?1
@@ -46,6 +75,28 @@ type DeleteTenantIfRevisionParams struct {
 
 func (q *Queries) DeleteTenantIfRevision(ctx context.Context, arg DeleteTenantIfRevisionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteTenantIfRevision, arg.ID, arg.ExpectedRevision)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteTenantIfRevisionAndEmpty = `-- name: DeleteTenantIfRevisionAndEmpty :execrows
+DELETE FROM tenants
+WHERE tenants.id = ?1
+  AND tenants.revision = ?2
+  AND NOT EXISTS (
+      SELECT 1 FROM vaults WHERE vaults.tenant_id = tenants.id
+  )
+`
+
+type DeleteTenantIfRevisionAndEmptyParams struct {
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expected_revision"`
+}
+
+func (q *Queries) DeleteTenantIfRevisionAndEmpty(ctx context.Context, arg DeleteTenantIfRevisionAndEmptyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteTenantIfRevisionAndEmpty, arg.ID, arg.ExpectedRevision)
 	if err != nil {
 		return 0, err
 	}

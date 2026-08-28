@@ -42,6 +42,10 @@ func mapProblem(requestID string, err error) mappedProblem {
 		detail := "The requested tenant does not exist."
 		return mappedProblem{problem: newProblem(requestID, 404, "Not Found", "resource_not_found", "not-found", &detail)}
 	}
+	if errors.Is(err, ports.ErrVaultNotFound) {
+		detail := "The requested vault does not exist in this tenant."
+		return mappedProblem{problem: newProblem(requestID, 404, "Not Found", "resource_not_found", "not-found", &detail)}
+	}
 	if errors.Is(err, ports.ErrIdempotencyConflict) {
 		detail := "The idempotency key was already used with a different request."
 		return mappedProblem{problem: newProblem(requestID, 409, "Conflict", "idempotency_key_conflict", "conflict", &detail)}
@@ -53,9 +57,20 @@ func mapProblem(requestID string, err error) mappedProblem {
 		problem.ResourceId = &conflict.ResourceID
 		return mappedProblem{problem: problem}
 	}
+	var vaultConflict *ports.VaultConflictError
+	if errors.As(err, &vaultConflict) {
+		detail := "A vault with the same tenant-scoped unique identity already exists."
+		problem := newProblem(requestID, 409, "Conflict", "resource_conflict", "conflict", &detail)
+		problem.ResourceId = &vaultConflict.ResourceID
+		return mappedProblem{problem: problem}
+	}
+	if errors.Is(err, ports.ErrResourceHasChildren) {
+		detail := "The resource has children; retry with cascade=true to delete them."
+		return mappedProblem{problem: newProblem(requestID, 409, "Conflict", "resource_has_children", "conflict", &detail)}
+	}
 	var precondition *services.PreconditionError
 	if errors.As(err, &precondition) {
-		detail := "The supplied ETag does not match the current tenant revision."
+		detail := "The supplied ETag does not match the current resource revision."
 		return mappedProblem{
 			problem: newProblem(requestID, 412, "Precondition Failed", "etag_mismatch", "precondition-failed", &detail),
 			etag:    precondition.CurrentETag,

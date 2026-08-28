@@ -74,6 +74,26 @@ DELETE FROM tenants
 WHERE id = sqlc.arg(id)
   AND revision = sqlc.arg(expected_revision);
 
+-- name: DeleteTenantIfEmpty :execrows
+DELETE FROM tenants
+WHERE tenants.id = ?
+  AND NOT EXISTS (
+      SELECT 1 FROM vaults WHERE vaults.tenant_id = tenants.id
+  );
+
+-- name: DeleteTenantIfRevisionAndEmpty :execrows
+DELETE FROM tenants
+WHERE tenants.id = sqlc.arg(id)
+  AND tenants.revision = sqlc.arg(expected_revision)
+  AND NOT EXISTS (
+      SELECT 1 FROM vaults WHERE vaults.tenant_id = tenants.id
+  );
+
+-- name: CountTenantVaults :one
+SELECT CAST(COUNT(*) AS INTEGER)
+FROM vaults
+WHERE tenant_id = ?;
+
 -- name: DeleteExpiredIdempotencyRecords :exec
 DELETE FROM idempotency_records
 WHERE expires_at <= ?;

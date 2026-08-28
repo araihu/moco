@@ -50,8 +50,15 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize tenant service: %w", err)
 	}
+	vaultService, err := services.NewVaultService(store, services.VaultServiceOptions{
+		CursorHMACKey: []byte(configuration.cursorHMACKey),
+	})
+	if err != nil {
+		return fmt.Errorf("initialize vault service: %w", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants:        tenantService,
+		Vaults:         vaultService,
 		Readiness:      store,
 		BearerToken:    configuration.bearerToken,
 		ServiceVersion: version,
