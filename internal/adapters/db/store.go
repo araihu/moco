@@ -31,6 +31,8 @@ type Store struct {
 	queries  *sqlc.Queries
 }
 
+var _ ports.AuthorizationRepository = (*Store)(nil)
+
 // Open opens a SQLite file, applies embedded migrations, and verifies it.
 func Open(ctx context.Context, path string) (*Store, error) {
 	dsn, err := sqliteDSN(path)
@@ -58,6 +60,75 @@ func (s *Store) Close() error { return s.database.Close() }
 
 // Ping verifies that the database remains available.
 func (s *Store) Ping(ctx context.Context) error { return s.database.PingContext(ctx) }
+
+// LoadAuthorization reads the complete authoritative policy snapshot in a
+// deterministic order for reproducible Casbin reloads.
+func (s *Store) LoadAuthorization(ctx context.Context) (ports.AuthorizationState, error) {
+	bindings, err := s.queries.ListAuthorizationRoleBindings(ctx)
+	if err != nil {
+		return ports.AuthorizationState{}, fmt.Errorf("list authorization role bindings: %w", err)
+	}
+	policies, err := s.queries.ListAuthorizationPolicies(ctx)
+	if err != nil {
+		return ports.AuthorizationState{}, fmt.Errorf("list authorization policies: %w", err)
+	}
+	state := ports.AuthorizationState{
+		RoleBindings: make([]ports.AuthorizationRoleBinding, 0, len(bindings)),
+		Policies:     make([]ports.AuthorizationPolicy, 0, len(policies)),
+	}
+	for _, binding := range bindings {
+		state.RoleBindings = append(state.RoleBindings, ports.AuthorizationRoleBinding{
+			Principal: binding.PrincipalID,
+			Role:      binding.Role,
+			Domain:    binding.Domain,
+		})
+	}
+	for _, policy := range policies {
+		state.Policies = append(state.Policies, ports.AuthorizationPolicy{
+			Subject: policy.Subject,
+			Domain:  policy.Domain,
+			Path:    policy.Path,
+			Method:  policy.Method,
+		})
+	}
+	return state, nil
+}
+
+// ReplaceAuthorization atomically replaces the complete policy snapshot.
+// Publication of a change signal is deliberately owned by the application
+// service so callers can guarantee commit-before-publish ordering.
+func (s *Store) ReplaceAuthorization(ctx context.Context, state ports.AuthorizationState) error {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin authorization replacement: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	if err := queries.DeleteAuthorizationPolicies(ctx); err != nil {
+		return fmt.Errorf("clear authorization policies: %w", err)
+	}
+	if err := queries.DeleteAuthorizationRoleBindings(ctx); err != nil {
+		return fmt.Errorf("clear authorization role bindings: %w", err)
+	}
+	for index, policy := range state.Policies {
+		if err := queries.InsertAuthorizationPolicy(ctx, sqlc.InsertAuthorizationPolicyParams{
+			Subject: policy.Subject, Domain: policy.Domain, Path: policy.Path, Method: policy.Method,
+		}); err != nil {
+			return fmt.Errorf("insert authorization policy %d: %w", index, err)
+		}
+	}
+	for index, binding := range state.RoleBindings {
+		if err := queries.InsertAuthorizationRoleBinding(ctx, sqlc.InsertAuthorizationRoleBindingParams{
+			PrincipalID: binding.Principal, Role: binding.Role, Domain: binding.Domain,
+		}); err != nil {
+			return fmt.Errorf("insert authorization role binding %d: %w", index, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit authorization replacement: %w", err)
+	}
+	return nil
+}
 
 // CreateTenant atomically stores a tenant and its optional idempotency result.
 func (s *Store) CreateTenant(ctx context.Context, command ports.CreateTenantCommand) (ports.CreateTenantResult, error) {

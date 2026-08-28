@@ -57,6 +57,33 @@ func TestTokenAuthenticatorRejectsAmbiguousConfiguration(t *testing.T) {
 	}
 }
 
+func TestTokenAuthenticatorReloadsAtomically(t *testing.T) {
+	t.Parallel()
+	first := "first-bearer-token-with-at-least-32-bytes"
+	second := "second-bearer-token-with-at-least-32-bytes"
+	authenticator, err := authn.NewTokenAuthenticator([]authn.Credential{{
+		PrincipalID: "first", TokenSHA256: digest(first),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := authenticator.Reload([]authn.Credential{{PrincipalID: "second", TokenSHA256: digest(second)}}); err != nil {
+		t.Fatal(err)
+	}
+	if principal, ok := authenticator.Authenticate(first); ok || principal != "" {
+		t.Fatalf("old credential remained active as %q, %t", principal, ok)
+	}
+	if principal, ok := authenticator.Authenticate(second); !ok || principal != "second" {
+		t.Fatalf("reloaded credential resolved to %q, %t", principal, ok)
+	}
+	if err := authenticator.Reload([]authn.Credential{{PrincipalID: "bad", TokenSHA256: "invalid"}}); err == nil {
+		t.Fatal("invalid reload unexpectedly succeeded")
+	}
+	if principal, ok := authenticator.Authenticate(second); !ok || principal != "second" {
+		t.Fatalf("failed reload discarded previous keyring: %q, %t", principal, ok)
+	}
+}
+
 func digest(token string) string {
 	value := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(value[:])

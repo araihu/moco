@@ -8,6 +8,19 @@ import (
 	"database/sql"
 )
 
+type AuthorizationPolicy struct {
+	Subject string `json:"subject"`
+	Domain  string `json:"domain"`
+	Path    string `json:"path"`
+	Method  string `json:"method"`
+}
+
+type AuthorizationRoleBinding struct {
+	PrincipalID string `json:"principal_id"`
+	Role        string `json:"role"`
+	Domain      string `json:"domain"`
+}
+
 type IdempotencyRecord struct {
 	PrincipalID    string `json:"principal_id"`
 	Operation      string `json:"operation"`

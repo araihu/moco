@@ -8,14 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+
+	"github.com/araihu/moco/internal/core/ports"
 )
 
 // Credential identifies a principal by the SHA-256 digest of its bearer token.
 // The clear token is intentionally not part of the configuration shape.
-type Credential struct {
-	PrincipalID string `json:"id"`
-	TokenSHA256 string `json:"tokenSha256"`
-}
+type Credential = ports.AuthorizationPrincipal
 
 type credential struct {
 	principalID string
@@ -24,6 +24,7 @@ type credential struct {
 
 // TokenAuthenticator verifies bearer tokens without retaining clear tokens.
 type TokenAuthenticator struct {
+	mu          sync.RWMutex
 	credentials []credential
 }
 
@@ -61,11 +62,25 @@ func NewTokenAuthenticator(values []Credential) (*TokenAuthenticator, error) {
 	return &TokenAuthenticator{credentials: credentials}, nil
 }
 
+// Reload replaces the keyring only after the complete candidate is valid.
+func (a *TokenAuthenticator) Reload(values []Credential) error {
+	candidate, err := NewTokenAuthenticator(values)
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.credentials = candidate.credentials
+	a.mu.Unlock()
+	return nil
+}
+
 // Authenticate returns the configured principal for one bearer token.
 func (a *TokenAuthenticator) Authenticate(token string) (string, bool) {
 	digest := sha256.Sum256([]byte(token))
 	principal := ""
 	found := 0
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	for _, credential := range a.credentials {
 		matched := subtle.ConstantTimeCompare(digest[:], credential.digest[:])
 		if matched == 1 {

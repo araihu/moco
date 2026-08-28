@@ -82,3 +82,35 @@ func TestStaticAuthorizerHonorsContextCancellation(t *testing.T) {
 		t.Fatal("canceled authorization unexpectedly succeeded")
 	}
 }
+
+func TestStaticAuthorizerReloadsAtomically(t *testing.T) {
+	t.Parallel()
+	authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{
+		Subject: "reader", Domain: "*", Path: "/api/v1", Method: "GET",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := authorizer.Reload(nil, []authz.Policy{{
+		Subject: "reader", Domain: "*", Path: "/api/v1/tenants", Method: "GET",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := authorizer.Authorize(t.Context(), "reader", "*", "/api/v1", "GET")
+	if err != nil || allowed {
+		t.Fatalf("old policy remained active: allowed=%t err=%v", allowed, err)
+	}
+	allowed, err = authorizer.Authorize(t.Context(), "reader", "*", "/api/v1/tenants", "GET")
+	if err != nil || !allowed {
+		t.Fatalf("reloaded policy denied: allowed=%t err=%v", allowed, err)
+	}
+	if err := authorizer.Reload(nil, []authz.Policy{{
+		Subject: "reader", Domain: "*", Path: "/api/v1/unsafe?query", Method: "GET",
+	}}); err == nil {
+		t.Fatal("invalid reload unexpectedly succeeded")
+	}
+	allowed, err = authorizer.Authorize(t.Context(), "reader", "*", "/api/v1/tenants", "GET")
+	if err != nil || !allowed {
+		t.Fatalf("failed reload discarded previous policy: allowed=%t err=%v", allowed, err)
+	}
+}

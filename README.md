@@ -14,6 +14,7 @@ secret lifecycles:
 - path-based secret create/replace, value read, metadata read/list, and conditional delete;
 - HKDF-SHA-256/AES-256-GCM envelope encryption with one random wrapped data key per vault;
 - multi-principal bearer authentication from token digests and default-deny Casbin policies;
+- SQLite authorization policy snapshots with atomic replacement and coalesced reload signals;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
 - creation idempotency scoped to the authenticated principal for at least 24 hours;
@@ -22,8 +23,8 @@ secret lifecycles:
 
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. Root-key rotation, external
-KMS/HSM providers, auditing, dynamic/persisted policy administration, and
-production deployment hardening are not implemented yet. Treat this as a
+KMS/HSM providers, auditing, policy administration and startup policy wiring,
+and production deployment hardening are not implemented yet. Treat this as a
 development slice, not a production secret store.
 
 ## Run locally
@@ -100,10 +101,11 @@ nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 - `internal/adapters/encryption/`: HKDF-SHA-256/AES-256-GCM envelope encryption adapter.
 - `internal/adapters/http/`: generated strict contract and handwritten adapter.
 - `internal/adapters/authn/`: bearer token keyring keyed by SHA-256 digests.
-- `internal/adapters/authz/`: static Casbin model and default-deny policy adapter.
+- `internal/adapters/authz/`: reloadable Casbin model, policy bus, and default-deny adapter.
 
-Dynamic policy persistence, commit-before-publish through `PolicyChangesBus`,
-and authoritative reloads on every instance are the next authorization slice.
+Policy administration endpoints, startup selection between file and persisted
+policies, and authoritative reload supervision on every server instance are the
+next authorization slice.
 
 ## Development
 

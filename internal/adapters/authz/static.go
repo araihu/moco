@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/araihu/moco/internal/core/ports"
 	"github.com/casbin/casbin/v2"
@@ -29,23 +30,15 @@ m = (r.sub == p.sub || g(r.sub, p.sub, r.dom) || g(r.sub, p.sub, "*")) && (p.dom
 `
 
 // RoleBinding assigns one configured principal to a role.
-type RoleBinding struct {
-	Principal string `json:"principal"`
-	Role      string `json:"role"`
-	Domain    string `json:"domain"`
-}
+type RoleBinding = ports.AuthorizationRoleBinding
 
 // Policy grants one role or principal access to a path pattern and method.
-type Policy struct {
-	Subject string `json:"subject"`
-	Domain  string `json:"domain"`
-	Path    string `json:"path"`
-	Method  string `json:"method"`
-}
+type Policy = ports.AuthorizationPolicy
 
-// StaticAuthorizer evaluates an immutable in-memory policy set. Dynamic
-// persistence and PolicyChangesBus reloads are intentionally a later slice.
+// StaticAuthorizer evaluates an in-memory policy set and supports atomic
+// replacement when the authoritative persisted snapshot changes.
 type StaticAuthorizer struct {
+	mu       sync.RWMutex
 	enforcer *casbin.SyncedEnforcer
 }
 
@@ -54,6 +47,26 @@ var _ ports.Authorizer = (*StaticAuthorizer)(nil)
 // NewStaticAuthorizer builds a default-deny Casbin enforcer from validated
 // role bindings and allow policies.
 func NewStaticAuthorizer(bindings []RoleBinding, policies []Policy) (*StaticAuthorizer, error) {
+	enforcer, err := buildEnforcer(bindings, policies)
+	if err != nil {
+		return nil, err
+	}
+	return &StaticAuthorizer{enforcer: enforcer}, nil
+}
+
+// Reload atomically swaps in a validated policy snapshot.
+func (a *StaticAuthorizer) Reload(bindings []RoleBinding, policies []Policy) error {
+	enforcer, err := buildEnforcer(bindings, policies)
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.enforcer = enforcer
+	a.mu.Unlock()
+	return nil
+}
+
+func buildEnforcer(bindings []RoleBinding, policies []Policy) (*casbin.SyncedEnforcer, error) {
 	parsedModel, err := model.NewModelFromString(modelText)
 	if err != nil {
 		return nil, fmt.Errorf("parse authorization model: %w", err)
@@ -84,7 +97,7 @@ func NewStaticAuthorizer(bindings []RoleBinding, policies []Policy) (*StaticAuth
 			return nil, fmt.Errorf("add policy %d: %w", index, err)
 		}
 	}
-	return &StaticAuthorizer{enforcer: enforcer}, nil
+	return enforcer, nil
 }
 
 // Authorize evaluates one request. Empty values fail closed without invoking
@@ -96,6 +109,8 @@ func (a *StaticAuthorizer) Authorize(ctx context.Context, principal, domain, res
 	if principal == "" || domain == "" || resource == "" || action == "" {
 		return false, nil
 	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	allowed, err := a.enforcer.Enforce(principal, domain, resource, action)
 	if err != nil {
 		return false, fmt.Errorf("evaluate authorization policy: %w", err)
