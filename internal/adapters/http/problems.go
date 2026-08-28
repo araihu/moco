@@ -100,6 +100,11 @@ func unauthorizedProblem(requestID string) Problem {
 	return newProblem(requestID, 401, "Unauthorized", "unauthorized", "unauthorized", &detail)
 }
 
+func forbiddenProblem(requestID string) Problem {
+	detail := "The authenticated principal is not authorized for this operation."
+	return newProblem(requestID, 403, "Forbidden", "forbidden", "forbidden", &detail)
+}
+
 func internalProblem(requestID string) Problem {
 	detail := "The request could not be completed."
 	return newProblem(requestID, 500, "Internal Server Error", "internal_error", "internal-error", &detail)

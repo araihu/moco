@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/araihu/moco/internal/adapters/authn"
 	"github.com/araihu/moco/internal/adapters/db"
 	"github.com/araihu/moco/internal/adapters/encryption"
 	httpapi "github.com/araihu/moco/internal/adapters/http"
@@ -74,12 +75,17 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize secret service: %w", err)
 	}
+	authenticator, authorizer, err := buildSecurity(configuration)
+	if err != nil {
+		return fmt.Errorf("initialize access control: %w", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants:        tenantService,
 		Vaults:         vaultService,
 		Secrets:        secretService,
 		Readiness:      store,
-		BearerToken:    configuration.bearerToken,
+		Authenticator:  authenticator,
+		Authorizer:     authorizer,
 		ServiceVersion: version,
 		Logger:         logger,
 	})
@@ -124,6 +130,7 @@ type configuration struct {
 	databasePath    string
 	bearerToken     string
 	cursorHMACKey   string
+	authConfigPath  string
 	encryptionKeyID string
 	encryptionKey   []byte
 }
@@ -134,9 +141,13 @@ func loadConfiguration() (configuration, error) {
 		databasePath:    environmentOrDefault("MOCO_DB_PATH", "./moco.db"),
 		bearerToken:     os.Getenv("MOCO_BEARER_TOKEN"),
 		cursorHMACKey:   os.Getenv("MOCO_CURSOR_HMAC_KEY"),
+		authConfigPath:  os.Getenv("MOCO_AUTH_CONFIG"),
 		encryptionKeyID: environmentOrDefault("MOCO_ENCRYPTION_KEY_ID", "local-v1"),
 	}
-	if len(config.bearerToken) < 32 {
+	if config.authConfigPath != "" && config.bearerToken != "" {
+		return configuration{}, errors.New("MOCO_AUTH_CONFIG and MOCO_BEARER_TOKEN are mutually exclusive")
+	}
+	if config.authConfigPath == "" && len(config.bearerToken) < 32 {
 		return configuration{}, errors.New("MOCO_BEARER_TOKEN must contain at least 32 bytes")
 	}
 	if len(config.cursorHMACKey) < 32 {
@@ -151,6 +162,8 @@ func loadConfiguration() (configuration, error) {
 	config.encryptionKey = key
 	return config, nil
 }
+
+var _ httpapi.BearerAuthenticator = (*authn.TokenAuthenticator)(nil)
 
 func environmentOrDefault(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {

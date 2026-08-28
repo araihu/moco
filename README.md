@@ -13,6 +13,7 @@ secret lifecycles:
 - bearer-authenticated tenant and tenant-scoped vault create, list, get, replace, and delete;
 - path-based secret create/replace, value read, metadata read/list, and conditional delete;
 - HKDF-SHA-256/AES-256-GCM envelope encryption with one random wrapped data key per vault;
+- multi-principal bearer authentication from token digests and default-deny Casbin policies;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
 - creation idempotency scoped to the authenticated principal for at least 24 hours;
@@ -21,9 +22,9 @@ secret lifecycles:
 
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. Root-key rotation, external
-KMS/HSM providers, auditing, Casbin authorization, multi-principal
-authentication, and production deployment hardening are not implemented yet.
-Treat this as a development slice, not a production secret store.
+KMS/HSM providers, auditing, dynamic/persisted policy administration, and
+production deployment hardening are not implemented yet. Treat this as a
+development slice, not a production secret store.
 
 ## Run locally
 
@@ -47,6 +48,30 @@ before sending bearer credentials across a network.
 `local-v1`. Keep the exact encryption key with database backups. Changing either
 the key bytes or its identifier makes existing secrets intentionally unreadable;
 online root-key rotation is a later slice.
+
+The local `MOCO_BEARER_TOKEN` mode creates one backwards-compatible principal
+with full API access. Multi-principal deployments set `MOCO_AUTH_CONFIG` to a
+JSON file containing only SHA-256 token digests, role bindings, and allow
+policies, and leave `MOCO_BEARER_TOKEN` unset:
+
+```json
+{
+  "principals": [{"id": "controller", "tokenSha256": "<64 lowercase hex characters>"}],
+  "roleBindings": [{"principal": "controller", "role": "secret-reader", "domain": "11111111-1111-4111-8111-111111111111"}],
+  "policies": [{
+    "subject": "secret-reader",
+    "domain": "11111111-1111-4111-8111-111111111111",
+    "path": "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret",
+    "method": "GET"
+  }]
+}
+```
+
+Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
+tenant-scoped requests through `domain`; use the literal tenant ID for an
+isolated tenant. A global policy must explicitly use `domain: "*"`. `HEAD`
+requests consume the corresponding `GET` permission. Generate a digest without
+putting the clear token in the file: `printf %s "$TOKEN" | sha256sum`.
 
 Example tenant creation:
 
@@ -74,11 +99,11 @@ nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 - `internal/adapters/db/`: SQLite/sqlc repository.
 - `internal/adapters/encryption/`: HKDF-SHA-256/AES-256-GCM envelope encryption adapter.
 - `internal/adapters/http/`: generated strict contract and handwritten adapter.
-- `internal/adapters/authz/`: reserved for the future Casbin adapter.
+- `internal/adapters/authn/`: bearer token keyring keyed by SHA-256 digests.
+- `internal/adapters/authz/`: static Casbin model and default-deny policy adapter.
 
-The planned Casbin adapter will load persisted rules through sqlc, commit policy
-changes before publishing to `PolicyChangesBus`, and trigger authoritative policy
-reloads on every instance.
+Dynamic policy persistence, commit-before-publish through `PolicyChangesBus`,
+and authoritative reloads on every instance are the next authorization slice.
 
 ## Development
 
@@ -91,6 +116,7 @@ from Vacuum:
 - oapi-codegen `v2.8.0`
 - sqlc `v1.31.1`
 - govulncheck `v1.7.0`
+- Casbin `v2.135.0`
 - a SQLite-only migration runner backed by golang-migrate `v4.19.1`
 
 golangci-lint `v2.13.2` is the exception: `make lint` downloads its official

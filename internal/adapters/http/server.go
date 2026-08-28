@@ -3,9 +3,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/araihu/moco/internal/core/ports"
 	"github.com/araihu/moco/internal/core/services"
 	"github.com/google/uuid"
 )
@@ -27,6 +25,11 @@ const (
 	maxSecretJSONBytes             = 2 << 20
 )
 
+// BearerAuthenticator resolves a bearer credential to a stable principal ID.
+type BearerAuthenticator interface {
+	Authenticate(string) (string, bool)
+}
+
 // ReadinessChecker reports whether a required runtime dependency is available.
 type ReadinessChecker interface {
 	Ping(context.Context) error
@@ -38,7 +41,8 @@ type HandlerOptions struct {
 	Vaults         *services.VaultService
 	Secrets        *services.SecretService
 	Readiness      ReadinessChecker
-	BearerToken    string
+	Authenticator  BearerAuthenticator
+	Authorizer     ports.Authorizer
 	ServiceVersion string
 	Logger         *slog.Logger
 }
@@ -55,11 +59,14 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	if options.Secrets == nil {
 		return nil, errors.New("secret service is required")
 	}
+	if options.Authenticator == nil {
+		return nil, errors.New("bearer authenticator is required")
+	}
+	if options.Authorizer == nil {
+		return nil, errors.New("authorizer is required")
+	}
 	if options.Readiness == nil {
 		return nil, errors.New("readiness checker is required")
-	}
-	if len(options.BearerToken) < 32 {
-		return nil, errors.New("bearer token must contain at least 32 bytes")
 	}
 	if options.ServiceVersion == "" {
 		options.ServiceVersion = "dev"
@@ -87,7 +94,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	})
 
 	mux := http.NewServeMux()
-	HandlerFromMux(strict, mux)
+	api := HandlerFromMux(strict, mux)
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -102,8 +109,9 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	handler := strictResourceJSON(mux)
-	handler = bearerAuthentication(options.BearerToken, handler)
+	handler := strictResourceJSON(api)
+	handler = authorizationMiddleware(options.Authorizer, options.Logger, handler)
+	handler = bearerAuthentication(options.Authenticator, handler)
 	handler = requestIDs(handler)
 	return handler, nil
 }
@@ -134,9 +142,7 @@ func requestIDs(next http.Handler) http.Handler {
 	})
 }
 
-func bearerAuthentication(expectedToken string, next http.Handler) http.Handler {
-	expectedDigest := sha256.Sum256([]byte(expectedToken))
-	principal := base64.RawURLEncoding.EncodeToString(expectedDigest[:])
+func bearerAuthentication(authenticator BearerAuthenticator, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isPublicAPIPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
@@ -155,8 +161,8 @@ func bearerAuthentication(expectedToken string, next http.Handler) http.Handler 
 			return
 		}
 		provided := parts[1]
-		providedDigest := sha256.Sum256([]byte(provided))
-		if provided == "" || subtle.ConstantTimeCompare(providedDigest[:], expectedDigest[:]) != 1 {
+		principal, authenticated := authenticator.Authenticate(provided)
+		if provided == "" || !authenticated || principal == "" {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeProblem(w, unauthorizedProblem(requestID(r.Context())))
 			return
@@ -165,6 +171,70 @@ func bearerAuthentication(expectedToken string, next http.Handler) http.Handler 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+func authorizationMiddleware(authorizer ports.Authorizer, logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		domain, resource, enforce := authorizationResource(r)
+		if !enforce {
+			next.ServeHTTP(w, r)
+			return
+		}
+		principal := principalID(r.Context())
+		if principal == "" {
+			writeProblem(w, unauthorizedProblem(requestID(r.Context())))
+			return
+		}
+		action := r.Method
+		if action == http.MethodHead {
+			action = http.MethodGet
+		}
+		allowed, err := authorizer.Authorize(r.Context(), principal, domain, resource, action)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "authorization failed", "requestId", requestID(r.Context()), "error", err)
+			writeProblem(w, internalProblem(requestID(r.Context())))
+			return
+		}
+		if !allowed {
+			writeProblem(w, forbiddenProblem(requestID(r.Context())))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func authorizationResource(r *http.Request) (string, string, bool) {
+	if !isPublicAPIPath(r.URL.Path) {
+		return "", "", false
+	}
+	path := r.URL.Path
+	if path != "/api/v1" && strings.HasSuffix(path, "/") {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	method := r.Method
+	switch {
+	case path == "/api/v1":
+		return "*", path, isReadMethod(method)
+	case path == "/api/v1/tenants":
+		return "*", path, isReadMethod(method) || method == http.MethodPost
+	case len(parts) == 4 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "":
+		return parts[3], path, isReadMethod(method) || method == http.MethodPut || method == http.MethodDelete
+	case len(parts) == 5 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "" && parts[4] == "vaults":
+		return parts[3], path, isReadMethod(method) || method == http.MethodPost
+	case len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "" && parts[4] == "vaults":
+		return parts[3], path, isReadMethod(method) || method == http.MethodPut || method == http.MethodDelete
+	case len(parts) == 7 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "" && parts[4] == "vaults" && parts[6] == "secrets":
+		return parts[3], path, isReadMethod(method)
+	case len(parts) == 7 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "" && parts[4] == "vaults" && parts[6] == "secret":
+		return parts[3], path, isReadMethod(method) || method == http.MethodPut || method == http.MethodDelete
+	case len(parts) == 8 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "" && parts[4] == "vaults" && parts[6] == "secret" && parts[7] == "metadata":
+		return parts[3], path, isReadMethod(method)
+	default:
+		return "", "", false
+	}
+}
+
+func isReadMethod(method string) bool { return method == http.MethodGet || method == http.MethodHead }
 
 func strictResourceJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

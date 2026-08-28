@@ -3,6 +3,8 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/araihu/moco/internal/adapters/authn"
+	"github.com/araihu/moco/internal/adapters/authz"
 	"github.com/araihu/moco/internal/adapters/db"
 	"github.com/araihu/moco/internal/adapters/encryption"
 	httpapi "github.com/araihu/moco/internal/adapters/http"
@@ -298,9 +302,23 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	if err != nil {
 		t.Fatalf("create secret service: %v", err)
 	}
+	digest := sha256.Sum256([]byte(testBearerToken))
+	authenticator, err := authn.NewTokenAuthenticator([]authn.Credential{{
+		PrincipalID: "fixture-principal", TokenSHA256: hex.EncodeToString(digest[:]),
+	}})
+	if err != nil {
+		t.Fatalf("create test authenticator: %v", err)
+	}
+	authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{
+		{Subject: "fixture-principal", Domain: "*", Path: "/api/v1", Method: "GET"},
+		{Subject: "fixture-principal", Domain: "*", Path: "/api/v1/*", Method: "*"},
+	})
+	if err != nil {
+		t.Fatalf("create test authorizer: %v", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
-		Readiness: store, BearerToken: testBearerToken,
+		Readiness: store, Authenticator: authenticator, Authorizer: authorizer,
 		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
