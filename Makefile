@@ -1,6 +1,9 @@
 GO := go
 DB_PATH ?= ./moco.db
 TOOL_BUILD_ENV := GOWORK=off GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=20
+GOLANGCI_LINT_VERSION := 2.13.2
+GOLANGCI_LINT_INSTALLER_COMMIT := 27774aaf853a4fd21f1dd5e69439459dc1b26e68
+GOLANGCI_LINT := tools/bin/golangci-lint-v$(GOLANGCI_LINT_VERSION)/golangci-lint
 
 .PHONY: spec-lint spec-bundle api-generate sqlc-generate db-migrate test lint vulncheck run check
 spec-lint:
@@ -24,18 +27,24 @@ test:
 	GOWORK=off $(GO) test ./... -count=1
 	GOWORK=off $(GO) -C tools test ./... -count=1
 
-lint:
-	GOWORK=off $$($(TOOL_BUILD_ENV) $(GO) -C tools tool -n golangci-lint) run --config .golangci.yml ./...
-	cd tools && GOWORK=off $$($(TOOL_BUILD_ENV) $(GO) tool -n golangci-lint) run --config ../.golangci.yml ./...
+$(GOLANGCI_LINT):
+	@set -eu; installer="$$(mktemp)"; trap 'rm -f "$$installer"' EXIT; \
+	curl --fail --silent --show-error --location --output "$$installer" https://raw.githubusercontent.com/golangci/golangci-lint/$(GOLANGCI_LINT_INSTALLER_COMMIT)/install.sh; \
+	sh "$$installer" -b $(dir $@) v$(GOLANGCI_LINT_VERSION)
 
-vulncheck:
+lint: $(GOLANGCI_LINT)
+	GOWORK=off $(abspath $(GOLANGCI_LINT)) run --config .golangci.yml ./...
+	cd tools && GOWORK=off $(abspath $(GOLANGCI_LINT)) run --config ../.golangci.yml ./...
+
+vulncheck: $(GOLANGCI_LINT)
 	GOWORK=off $$($(TOOL_BUILD_ENV) $(GO) -C tools tool -n govulncheck) -test ./...
 	GOWORK=off $$($(TOOL_BUILD_ENV) $(GO) -C tools tool -n govulncheck) -C tools -test ./...
 	@set -eu; scanner="$$($(TOOL_BUILD_ENV) $(GO) -C tools tool -n govulncheck)"; \
-	for tool in vacuum oapi-codegen sqlc migrate-sqlite golangci-lint govulncheck; do \
+	for tool in vacuum oapi-codegen sqlc migrate-sqlite govulncheck; do \
 		binary="$$($(TOOL_BUILD_ENV) $(GO) -C tools tool -n "$$tool")"; \
 		GOWORK=off "$$scanner" -mode=binary "$$binary"; \
-	done
+	done; \
+	GOWORK=off "$$scanner" -mode=binary "$(abspath $(GOLANGCI_LINT))"
 
 run:
 	GOWORK=off $(GO) run ./cmd/moco-server

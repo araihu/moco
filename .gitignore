@@ -2,3 +2,4 @@
 moco.db
 moco.db-shm
 moco.db-wal
+tools/bin/

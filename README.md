@@ -75,9 +75,12 @@ are unnecessary:
 - Vacuum `v0.30.1`
 - oapi-codegen `v2.8.0`
 - sqlc `v1.31.1`
-- golangci-lint `v2.13.2`
 - govulncheck `v1.7.0`
 - a SQLite-only migration runner backed by golang-migrate `v4.19.1`
+
+golangci-lint `v2.13.2` is the exception: `make lint` downloads its official
+precompiled release into the ignored `tools/bin/` directory. The upstream
+installer is pinned by commit, and it verifies the release archive checksum.
 
 ```bash
 make spec-lint
