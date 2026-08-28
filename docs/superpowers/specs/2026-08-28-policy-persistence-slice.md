@@ -5,8 +5,9 @@
 This slice adds the persistence and reload primitives for the static Casbin
 policy model. Role bindings and allow policies are stored as one replaceable
 SQLite snapshot, and an application service publishes a change signal only
-after the repository transaction commits. Administrative HTTP operations and
-startup selection between file-backed and persisted state remain a later slice.
+after the repository transaction commits. Administrative HTTP operations remain
+a later slice; startup selection and bootstrap are covered by the follow-up
+startup slice.
 
 ## Persistence contract
 
@@ -31,7 +32,8 @@ reloader reports the error.
 
 ## Deferred work
 
-This slice does not add policy/principal administration endpoints, startup
-selection or bootstrap from the persisted snapshot, distributed bus transport,
-audit records, or token issuance/revocation. Those pieces must preserve the
+This slice does not add policy/principal administration endpoints, distributed
+bus transport, audit records, or token issuance/revocation. Startup selection
+and bootstrap are specified in
+`2026-08-28-policy-startup-slice.md`. Those pieces must preserve the
 tenant-domain invariant and commit-before-publish ordering.

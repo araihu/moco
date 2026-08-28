@@ -27,6 +27,19 @@ func (q *Queries) DeleteAuthorizationRoleBindings(ctx context.Context) error {
 	return err
 }
 
+const getAuthorizationPolicyState = `-- name: GetAuthorizationPolicyState :one
+SELECT initialized
+FROM authorization_policy_state
+WHERE id = 1
+`
+
+func (q *Queries) GetAuthorizationPolicyState(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getAuthorizationPolicyState)
+	var initialized int64
+	err := row.Scan(&initialized)
+	return initialized, err
+}
+
 const insertAuthorizationPolicy = `-- name: InsertAuthorizationPolicy :exec
 INSERT INTO authorization_policies (subject, domain, path, method)
 VALUES (?, ?, ?, ?)
@@ -126,4 +139,15 @@ func (q *Queries) ListAuthorizationRoleBindings(ctx context.Context) ([]Authoriz
 		return nil, err
 	}
 	return items, nil
+}
+
+const markAuthorizationPolicyStateInitialized = `-- name: MarkAuthorizationPolicyStateInitialized :exec
+UPDATE authorization_policy_state
+SET initialized = 1
+WHERE id = 1
+`
+
+func (q *Queries) MarkAuthorizationPolicyStateInitialized(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, markAuthorizationPolicyStateInitialized)
+	return err
 }

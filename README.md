@@ -23,9 +23,9 @@ secret lifecycles:
 
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. Root-key rotation, external
-KMS/HSM providers, auditing, policy administration and startup policy wiring,
-and production deployment hardening are not implemented yet. Treat this as a
-development slice, not a production secret store.
+KMS/HSM providers, auditing, policy administration, and production deployment
+hardening are not implemented yet. Treat this as a development slice, not a
+production secret store.
 
 ## Run locally
 
@@ -68,6 +68,13 @@ policies, and leave `MOCO_BEARER_TOKEN` unset:
 }
 ```
 
+On the first start with `MOCO_AUTH_CONFIG`, role bindings and policies are
+validated and persisted as one SQLite snapshot. Once initialized, that
+snapshot is authoritative across restarts; changing the file's role bindings or
+policies does not silently replace it. Principals and their token digests stay
+in the file because they are needed to authenticate requests. An intentionally
+empty role/policy set is also persisted and remains default-deny.
+
 Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
 tenant-scoped requests through `domain`; use the literal tenant ID for an
 isolated tenant. A global policy must explicitly use `domain: "*"`. `HEAD`
@@ -103,9 +110,10 @@ nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 - `internal/adapters/authn/`: bearer token keyring keyed by SHA-256 digests.
 - `internal/adapters/authz/`: reloadable Casbin model, policy bus, and default-deny adapter.
 
-Policy administration endpoints, startup selection between file and persisted
-policies, and authoritative reload supervision on every server instance are the
-next authorization slice.
+Policy administration endpoints and distributed change propagation are the next
+authorization slice. Each configured server instance currently supervises its
+SQLite-backed policy reloader and terminates if an authoritative snapshot cannot
+be loaded or validated.
 
 ## Development
 

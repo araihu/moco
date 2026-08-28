@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"github.com/araihu/moco/internal/adapters/authn"
 	"github.com/araihu/moco/internal/adapters/authz"
 	"github.com/araihu/moco/internal/core/ports"
+	"github.com/araihu/moco/internal/core/services"
 )
 
 const maxAuthorizationConfigBytes = 1 << 20
@@ -24,7 +26,31 @@ type authorizationConfiguration struct {
 	Policies     []authz.Policy      `json:"policies"`
 }
 
+type securityRuntime struct {
+	authenticator *authn.TokenAuthenticator
+	authorizer    *authz.StaticAuthorizer
+	reloader      *authz.PolicyReloader
+	bus           *authz.MemoryPolicyChangesBus
+}
+
+func (runtime securityRuntime) close() {
+	if runtime.bus != nil {
+		runtime.bus.Close()
+	}
+}
+
 func buildSecurity(configuration configuration) (*authn.TokenAuthenticator, ports.Authorizer, error) {
+	runtime, err := buildSecurityRuntime(context.Background(), configuration, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return runtime.authenticator, runtime.authorizer, nil
+}
+
+func buildSecurityRuntime(ctx context.Context, configuration configuration, repository ports.AuthorizationRepository) (securityRuntime, error) {
+	if err := ctx.Err(); err != nil {
+		return securityRuntime{}, err
+	}
 	if configuration.authConfigPath == "" {
 		digest := sha256.Sum256([]byte(configuration.bearerToken))
 		principalID := base64.RawURLEncoding.EncodeToString(digest[:])
@@ -33,40 +59,102 @@ func buildSecurity(configuration configuration) (*authn.TokenAuthenticator, port
 			TokenSHA256: hex.EncodeToString(digest[:]),
 		}})
 		if err != nil {
-			return nil, nil, fmt.Errorf("initialize legacy bearer authentication: %w", err)
+			return securityRuntime{}, fmt.Errorf("initialize legacy bearer authentication: %w", err)
 		}
 		authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{
 			{Subject: principalID, Domain: "*", Path: "/api/v1", Method: "GET"},
 			{Subject: principalID, Domain: "*", Path: "/api/v1/*", Method: "*"},
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("initialize legacy authorization: %w", err)
+			return securityRuntime{}, fmt.Errorf("initialize legacy authorization: %w", err)
 		}
-		return authenticator, authorizer, nil
+		return securityRuntime{authenticator: authenticator, authorizer: authorizer}, nil
 	}
 
 	access, err := loadAuthorizationConfiguration(configuration.authConfigPath)
 	if err != nil {
-		return nil, nil, err
+		return securityRuntime{}, err
 	}
 	authenticator, err := authn.NewTokenAuthenticator(access.Principals)
 	if err != nil {
-		return nil, nil, fmt.Errorf("initialize configured bearer authentication: %w", err)
+		return securityRuntime{}, fmt.Errorf("initialize configured bearer authentication: %w", err)
 	}
-	knownPrincipals := make(map[string]struct{}, len(access.Principals))
-	for _, principal := range access.Principals {
-		knownPrincipals[principal.PrincipalID] = struct{}{}
-	}
-	for index, binding := range access.RoleBindings {
-		if _, ok := knownPrincipals[binding.Principal]; !ok {
-			return nil, nil, fmt.Errorf("authorization role binding %d references unknown principal %q", index, binding.Principal)
+	roleBindings := access.RoleBindings
+	policies := access.Policies
+	var reloader *authz.PolicyReloader
+	var bus *authz.MemoryPolicyChangesBus
+	if repository != nil {
+		state, loadErr := repository.LoadAuthorization(ctx)
+		if loadErr != nil {
+			return securityRuntime{}, fmt.Errorf("load persisted authorization: %w", loadErr)
+		}
+		bus = authz.NewMemoryPolicyChangesBus()
+		policyService, serviceErr := services.NewAuthorizationPolicyService(repository, bus)
+		if serviceErr != nil {
+			bus.Close()
+			return securityRuntime{}, fmt.Errorf("initialize authorization policy service: %w", serviceErr)
+		}
+		if !state.Initialized {
+			if err := validateRoleBindings(access.Principals, roleBindings); err != nil {
+				bus.Close()
+				return securityRuntime{}, err
+			}
+			// Validate the file-provided candidate before it can be persisted.
+			// This keeps a malformed deployment from poisoning the snapshot.
+			if _, err := authz.NewStaticAuthorizer(roleBindings, policies); err != nil {
+				bus.Close()
+				return securityRuntime{}, fmt.Errorf("initialize configured authorization: %w", err)
+			}
+			seed := ports.AuthorizationState{RoleBindings: roleBindings, Policies: policies}
+			if replaceErr := policyService.ReplaceAuthorization(ctx, seed); replaceErr != nil {
+				bus.Close()
+				return securityRuntime{}, fmt.Errorf("bootstrap persisted authorization: %w", replaceErr)
+			}
+			state, loadErr = repository.LoadAuthorization(ctx)
+			if loadErr != nil {
+				bus.Close()
+				return securityRuntime{}, fmt.Errorf("reload bootstrapped authorization: %w", loadErr)
+			}
+		}
+		roleBindings = state.RoleBindings
+		policies = state.Policies
+		if err := validateRoleBindings(access.Principals, roleBindings); err != nil {
+			bus.Close()
+			return securityRuntime{}, fmt.Errorf("validate persisted authorization: %w", err)
+		}
+	} else {
+		if err := validateRoleBindings(access.Principals, roleBindings); err != nil {
+			return securityRuntime{}, err
 		}
 	}
-	authorizer, err := authz.NewStaticAuthorizer(access.RoleBindings, access.Policies)
+	authorizer, err := authz.NewStaticAuthorizer(roleBindings, policies)
 	if err != nil {
-		return nil, nil, fmt.Errorf("initialize configured authorization: %w", err)
+		if bus != nil {
+			bus.Close()
+		}
+		return securityRuntime{}, fmt.Errorf("initialize configured authorization: %w", err)
 	}
-	return authenticator, authorizer, nil
+	if repository != nil {
+		reloader, err = authz.NewPolicyReloader(authorizer, repository, bus)
+		if err != nil {
+			bus.Close()
+			return securityRuntime{}, fmt.Errorf("initialize authorization policy reloader: %w", err)
+		}
+	}
+	return securityRuntime{authenticator: authenticator, authorizer: authorizer, reloader: reloader, bus: bus}, nil
+}
+
+func validateRoleBindings(principals []authn.Credential, bindings []authz.RoleBinding) error {
+	knownPrincipals := make(map[string]struct{}, len(principals))
+	for _, principal := range principals {
+		knownPrincipals[principal.PrincipalID] = struct{}{}
+	}
+	for index, binding := range bindings {
+		if _, ok := knownPrincipals[binding.Principal]; !ok {
+			return fmt.Errorf("authorization role binding %d references unknown principal %q", index, binding.Principal)
+		}
+	}
+	return nil
 }
 
 func loadAuthorizationConfiguration(path string) (authorizationConfiguration, error) {

@@ -8,6 +8,11 @@ SELECT subject, domain, path, method
 FROM authorization_policies
 ORDER BY subject, domain, path, method;
 
+-- name: GetAuthorizationPolicyState :one
+SELECT initialized
+FROM authorization_policy_state
+WHERE id = 1;
+
 -- name: DeleteAuthorizationRoleBindings :exec
 DELETE FROM authorization_role_bindings;
 
@@ -21,3 +26,8 @@ VALUES (?, ?, ?);
 -- name: InsertAuthorizationPolicy :exec
 INSERT INTO authorization_policies (subject, domain, path, method)
 VALUES (?, ?, ?, ?);
+
+-- name: MarkAuthorizationPolicyStateInitialized :exec
+UPDATE authorization_policy_state
+SET initialized = 1
+WHERE id = 1;

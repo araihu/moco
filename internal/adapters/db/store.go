@@ -64,6 +64,10 @@ func (s *Store) Ping(ctx context.Context) error { return s.database.PingContext(
 // LoadAuthorization reads the complete authoritative policy snapshot in a
 // deterministic order for reproducible Casbin reloads.
 func (s *Store) LoadAuthorization(ctx context.Context) (ports.AuthorizationState, error) {
+	initialized, err := s.queries.GetAuthorizationPolicyState(ctx)
+	if err != nil {
+		return ports.AuthorizationState{}, fmt.Errorf("read authorization policy state: %w", err)
+	}
 	bindings, err := s.queries.ListAuthorizationRoleBindings(ctx)
 	if err != nil {
 		return ports.AuthorizationState{}, fmt.Errorf("list authorization role bindings: %w", err)
@@ -73,6 +77,7 @@ func (s *Store) LoadAuthorization(ctx context.Context) (ports.AuthorizationState
 		return ports.AuthorizationState{}, fmt.Errorf("list authorization policies: %w", err)
 	}
 	state := ports.AuthorizationState{
+		Initialized:  initialized == 1,
 		RoleBindings: make([]ports.AuthorizationRoleBinding, 0, len(bindings)),
 		Policies:     make([]ports.AuthorizationPolicy, 0, len(policies)),
 	}
@@ -123,6 +128,9 @@ func (s *Store) ReplaceAuthorization(ctx context.Context, state ports.Authorizat
 		}); err != nil {
 			return fmt.Errorf("insert authorization role binding %d: %w", index, err)
 		}
+	}
+	if err := queries.MarkAuthorizationPolicyStateInitialized(ctx); err != nil {
+		return fmt.Errorf("mark authorization policy state initialized: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit authorization replacement: %w", err)

@@ -31,6 +31,7 @@ type AuthorizationPolicy struct {
 
 // AuthorizationState is the authoritative persisted policy snapshot.
 type AuthorizationState struct {
+	Initialized  bool
 	RoleBindings []AuthorizationRoleBinding
 	Policies     []AuthorizationPolicy
 }

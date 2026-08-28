@@ -2,16 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/araihu/moco/internal/adapters/authn"
 	"github.com/araihu/moco/internal/adapters/authz"
+	"github.com/araihu/moco/internal/core/ports"
 )
 
 func TestLoadConfigurationDecodesEncryptionKey(t *testing.T) {
@@ -129,4 +132,113 @@ func TestLoadAuthorizationConfigurationRejectsMalformedDocuments(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildSecurityRuntimeBootstrapsAndUsesPersistedSnapshot(t *testing.T) {
+	t.Parallel()
+	token := "controller-token-with-at-least-32-bytes"
+	digest := sha256.Sum256([]byte(token))
+	access := authorizationConfiguration{
+		Principals:   []authn.Credential{{PrincipalID: "controller", TokenSHA256: hex.EncodeToString(digest[:])}},
+		RoleBindings: []authz.RoleBinding{{Principal: "controller", Role: "secret-reader", Domain: "tenant-a"}},
+		Policies:     []authz.Policy{{Subject: "secret-reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", Method: "GET"}},
+	}
+	path := writeAuthorizationConfig(t, access)
+	repository := &runtimeAuthorizationRepository{}
+	runtime, err := buildSecurityRuntime(context.Background(), configuration{authConfigPath: path}, repository)
+	if err != nil {
+		t.Fatalf("bootstrap configured security: %v", err)
+	}
+	if runtime.reloader == nil || runtime.bus == nil {
+		t.Fatal("persisted security runtime did not initialize reload lifecycle")
+	}
+	if repository.replaceCalls != 1 || !repository.state.Initialized {
+		t.Fatalf("bootstrap state = %#v, replacements = %d", repository.state, repository.replaceCalls)
+	}
+	allowed, err := runtime.authorizer.Authorize(context.Background(), "controller", "tenant-a", "/api/v1/tenants/t/vaults/v/secret", "GET")
+	if err != nil || !allowed {
+		t.Fatalf("bootstrapped policy denied: allowed=%t, err=%v", allowed, err)
+	}
+	runtime.close()
+
+	// A restart must use the initialized snapshot, not silently replace it
+	// with a changed deployment file.
+	access.Policies = []authz.Policy{{Subject: "secret-reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", Method: "PUT"}}
+	if err := os.WriteFile(path, mustMarshalJSON(t, access), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := buildSecurityRuntime(context.Background(), configuration{authConfigPath: path}, repository)
+	if err != nil {
+		t.Fatalf("restart configured security: %v", err)
+	}
+	t.Cleanup(restarted.close)
+	if repository.replaceCalls != 1 {
+		t.Fatalf("initialized snapshot was unexpectedly reseeded: %d replacements", repository.replaceCalls)
+	}
+	allowed, err = restarted.authorizer.Authorize(context.Background(), "controller", "tenant-a", "/api/v1/tenants/t/vaults/v/secret", "GET")
+	if err != nil || !allowed {
+		t.Fatalf("persisted policy was not retained: allowed=%t, err=%v", allowed, err)
+	}
+	allowed, err = restarted.authorizer.Authorize(context.Background(), "controller", "tenant-a", "/api/v1/tenants/t/vaults/v/secret", "PUT")
+	if err != nil || allowed {
+		t.Fatalf("changed file policy unexpectedly replaced snapshot: allowed=%t, err=%v", allowed, err)
+	}
+}
+
+func TestBuildSecurityRuntimeRejectsInvalidBootstrapWithoutPersisting(t *testing.T) {
+	t.Parallel()
+	token := "controller-token-with-at-least-32-bytes"
+	digest := sha256.Sum256([]byte(token))
+	access := authorizationConfiguration{
+		Principals: []authn.Credential{{PrincipalID: "controller", TokenSHA256: hex.EncodeToString(digest[:])}},
+		Policies:   []authz.Policy{{Subject: "controller", Domain: "tenant-a", Path: "/api/v1/unsafe?query", Method: "GET"}},
+	}
+	repository := &runtimeAuthorizationRepository{}
+	path := writeAuthorizationConfig(t, access)
+	if _, err := buildSecurityRuntime(context.Background(), configuration{authConfigPath: path}, repository); err == nil {
+		t.Fatal("invalid bootstrap policy unexpectedly accepted")
+	}
+	if repository.replaceCalls != 0 || repository.state.Initialized {
+		t.Fatalf("invalid bootstrap changed repository: %#v, replacements=%d", repository.state, repository.replaceCalls)
+	}
+}
+
+func writeAuthorizationConfig(t *testing.T, access authorizationConfiguration) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "access.json")
+	if err := os.WriteFile(path, mustMarshalJSON(t, access), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func mustMarshalJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+type runtimeAuthorizationRepository struct {
+	state        ports.AuthorizationState
+	replaceCalls int
+}
+
+func (repository *runtimeAuthorizationRepository) LoadAuthorization(context.Context) (ports.AuthorizationState, error) {
+	return repository.state, nil
+}
+
+func (repository *runtimeAuthorizationRepository) ReplaceAuthorization(_ context.Context, state ports.AuthorizationState) error {
+	if repository.state.Initialized {
+		return errors.New("initialized snapshot unexpectedly replaced")
+	}
+	repository.state = ports.AuthorizationState{
+		Initialized:  true,
+		RoleBindings: append([]ports.AuthorizationRoleBinding(nil), state.RoleBindings...),
+		Policies:     append([]ports.AuthorizationPolicy(nil), state.Policies...),
+	}
+	repository.replaceCalls++
+	return nil
 }

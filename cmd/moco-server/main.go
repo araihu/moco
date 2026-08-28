@@ -75,17 +75,18 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize secret service: %w", err)
 	}
-	authenticator, authorizer, err := buildSecurity(configuration)
+	security, err := buildSecurityRuntime(startupContext, configuration, store)
 	if err != nil {
 		return fmt.Errorf("initialize access control: %w", err)
 	}
+	defer security.close()
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants:        tenantService,
 		Vaults:         vaultService,
 		Secrets:        secretService,
 		Readiness:      store,
-		Authenticator:  authenticator,
-		Authorizer:     authorizer,
+		Authenticator:  security.authenticator,
+		Authorizer:     security.authorizer,
 		ServiceVersion: version,
 		Logger:         logger,
 	})
@@ -104,6 +105,14 @@ func run(logger *slog.Logger) error {
 	shutdownContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	serverErrors := make(chan error, 1)
+	policyErrors := make(chan error, 1)
+	if security.reloader != nil {
+		go func() {
+			if err := security.reloader.Run(shutdownContext); err != nil && !errors.Is(err, context.Canceled) {
+				policyErrors <- err
+			}
+		}()
+	}
 	go func() {
 		logger.Info("Mocó server listening", "address", configuration.address, "version", version)
 		serverErrors <- server.ListenAndServe()
@@ -115,6 +124,17 @@ func run(logger *slog.Logger) error {
 			return nil
 		}
 		return fmt.Errorf("serve HTTP: %w", err)
+	case err := <-policyErrors:
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		shutdownErr := server.Shutdown(ctx)
+		if shutdownErr != nil {
+			return errors.Join(
+				fmt.Errorf("authorization policy reloader stopped: %w", err),
+				fmt.Errorf("graceful shutdown after authorization failure: %w", shutdownErr),
+			)
+		}
+		return fmt.Errorf("authorization policy reloader stopped: %w", err)
 	case <-shutdownContext.Done():
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

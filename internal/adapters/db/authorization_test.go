@@ -17,7 +17,15 @@ func TestAuthorizationSnapshotPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	initial, err := store.LoadAuthorization(ctx)
+	if err != nil {
+		t.Fatalf("load initial authorization: %v", err)
+	}
+	if initial.Initialized {
+		t.Fatalf("new database authorization unexpectedly initialized: %#v", initial)
+	}
 	state := ports.AuthorizationState{
+		Initialized:  true,
 		RoleBindings: []ports.AuthorizationRoleBinding{{Principal: "controller", Role: "reader", Domain: "tenant-a"}},
 		Policies:     []ports.AuthorizationPolicy{{Subject: "reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}", Method: "GET"}},
 	}
@@ -57,6 +65,7 @@ func TestAuthorizationSnapshotReplacementRollsBackOnDuplicate(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	original := ports.AuthorizationState{
+		Initialized:  true,
 		RoleBindings: []ports.AuthorizationRoleBinding{{Principal: "controller", Role: "reader", Domain: "tenant-a"}},
 		Policies:     []ports.AuthorizationPolicy{{Subject: "reader", Domain: "tenant-a", Path: "/api/v1", Method: "GET"}},
 	}

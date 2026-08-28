@@ -15,6 +15,11 @@ type AuthorizationPolicy struct {
 	Method  string `json:"method"`
 }
 
+type AuthorizationPolicyState struct {
+	ID          int64 `json:"id"`
+	Initialized int64 `json:"initialized"`
+}
+
 type AuthorizationRoleBinding struct {
 	PrincipalID string `json:"principal_id"`
 	Role        string `json:"role"`
