@@ -135,6 +135,11 @@ type AuditRetentionResult struct {
 	// Example: 50
 	Deleted int32 `json:"deleted"`
 
+	// DryRun True when the request only measured the matching count and made no deletion.
+	//
+	// Example: false
+	DryRun bool `json:"dryRun"`
+
 	// HasMore Whether another bounded retention request is needed for the cutoff.
 	//
 	// Example: true
@@ -345,6 +350,9 @@ type AuditAfterSequence = int64
 // AuditBefore Example: 2026-08-01T00:00:00Z
 type AuditBefore = time.Time
 
+// AuditDryRun defines model for audit-dry-run.
+type AuditDryRun = bool
+
 // EncryptionAfterTenantId defines model for encryption-after-tenant-id.
 type EncryptionAfterTenantId = string
 
@@ -392,11 +400,14 @@ type ListAuditEventsParams struct {
 
 // PurgeAuditEventsParams defines parameters for PurgeAuditEvents.
 type PurgeAuditEventsParams struct {
-	// Before Delete events strictly older than this UTC cutoff. Repeat the same cutoff until the response reports complete=true.
+	// Before Delete events strictly older than this UTC cutoff. The cutoff must be at least one hour old for deletion. Repeat the same cutoff until the response reports complete=true; use dryRun=true to preview without deleting.
 	Before AuditBefore `form:"before" json:"before"`
 
 	// Limit Maximum number of items to return.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// DryRun Preview the current matching count without deleting events. A dry-run result is informational and must not be repeated as a convergence loop.
+	DryRun *AuditDryRun `form:"dryRun,omitempty" json:"dryRun,omitempty"`
 
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
 	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
@@ -567,6 +578,19 @@ func (siw *ServerInterfaceWrapper) PurgeAuditEvents(w http.ResponseWriter, r *ht
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "dryRun" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dryRun", r.URL.Query(), &params.DryRun, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dryRun"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dryRun", Err: err})
 		}
 		return
 	}

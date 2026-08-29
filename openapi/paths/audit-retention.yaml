@@ -3,11 +3,12 @@ parameters:
 post:
   operationId: purgeAuditEvents
   summary: Purge one bounded audit-retention page
-  description: Deletes at most 200 audit events strictly older than the required cutoff. This is local deployment maintenance, not a public resource mutation. Repeat the same cutoff until complete is true and remaining is zero; the count is not a snapshot and newly inserted events can change it. Sequence numbers remain monotonic, the public resource-watch revision is unchanged, and event contents, credentials, plaintext secret paths, and key material are never accepted or returned. The endpoint requires an explicit exact-path POST policy and should be restricted to a deployment origin.
+  description: Deletes at most 200 audit events strictly older than the required cutoff; destructive requests require a cutoff at least one hour old. This is local deployment maintenance, not a public resource mutation. Set dryRun=true to preview the current matching count without deleting anything, including with a more recent past cutoff; a dry-run result is informational, not a convergence loop. For a delete, repeat the same cutoff until complete is true and remaining is zero; the count is not a snapshot and newly inserted events can change it. Sequence numbers remain monotonic, the public resource-watch revision is unchanged, and event contents, credentials, plaintext secret paths, and key material are never accepted or returned. The endpoint requires an explicit exact-path POST policy and should be restricted to a deployment origin.
   tags: [Audit]
   parameters:
     - $ref: ../components/parameters/audit-before.yaml
     - $ref: ../components/parameters/limit.yaml
+    - $ref: ../components/parameters/audit-dry-run.yaml
   responses:
     '200':
       description: Bounded retention result.
@@ -22,6 +23,7 @@ post:
             remaining: 12
             hasMore: true
             complete: false
+            dryRun: false
           schema:
             $ref: ../components/schemas/audit-retention-result.yaml
     '400':

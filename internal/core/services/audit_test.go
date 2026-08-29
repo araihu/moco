@@ -98,11 +98,42 @@ func TestAuditRetentionServiceRejectsUnsafeRequests(t *testing.T) {
 	for _, request := range []services.AuditRetentionRequest{
 		{Limit: 1},
 		{Before: now.Add(time.Minute), Limit: 1},
+		{Before: now.Add(-30 * time.Minute), Limit: 1},
 		{Before: now, Limit: services.MaxAuditPageSize + 1},
 	} {
 		if _, err := service.Purge(context.Background(), request); err == nil {
 			t.Fatalf("unsafe retention request %#v unexpectedly accepted", request)
 		}
+	}
+}
+
+func TestAuditRetentionServiceDryRunDoesNotDelete(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 29, 13, 0, 0, 0, time.UTC)
+	repository := &fakeAuditRetentionRepository{remaining: 3}
+	service, err := services.NewAuditRetentionService(repository, services.AuditRetentionServiceOptions{Clock: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Purge(context.Background(), services.AuditRetentionRequest{
+		Before: now.Add(-30 * time.Minute), Limit: 2, DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.DryRun || result.Deleted != 0 || result.Remaining != 3 || !result.HasMore || result.Complete {
+		t.Fatalf("dry-run result = %#v", result)
+	}
+	if repository.lastQuery.PageSize != 0 {
+		t.Fatalf("dry-run unexpectedly purged with query %#v", repository.lastQuery)
+	}
+}
+
+func TestNewAuditRetentionServiceRejectsNegativeMinimumAge(t *testing.T) {
+	t.Parallel()
+	negative := -time.Second
+	if _, err := services.NewAuditRetentionService(&fakeAuditRetentionRepository{}, services.AuditRetentionServiceOptions{MinimumAge: negative}); err == nil {
+		t.Fatal("negative minimum age unexpectedly accepted")
 	}
 }
 

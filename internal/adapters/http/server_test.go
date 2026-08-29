@@ -269,14 +269,27 @@ func TestAuditRetentionEndpointIsBoundedAndProtected(t *testing.T) {
 	response := test.request(t, http.MethodPost, "/internal/v1/audit/retention?before=2026-08-01T00:00:00Z&limit=2", nil, nil, true)
 	assertStatus(t, response, http.StatusOK)
 	result := decode[internalapi.AuditRetentionResult](t, response)
-	if !result.Complete || result.HasMore || result.Remaining != 0 || result.Deleted != 0 || !result.Before.Equal(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)) {
+	if !result.Complete || result.HasMore || result.Remaining != 0 || result.Deleted != 0 || result.DryRun || !result.Before.Equal(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("unexpected retention result: %#v", result)
+	}
+	response = test.request(t, http.MethodPost, "/internal/v1/audit/retention?before=2026-08-01T00:00:00Z&dryRun=true", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	dryRun := decode[internalapi.AuditRetentionResult](t, response)
+	if !dryRun.DryRun || dryRun.Deleted != 0 || !dryRun.Complete {
+		t.Fatalf("unexpected dry-run retention result: %#v", dryRun)
 	}
 	response = test.request(t, http.MethodPost, "/internal/v1/audit/retention?before=2999-01-01T00:00:00Z", nil, nil, true)
 	assertStatus(t, response, http.StatusBadRequest)
 	problem := decode[httpapi.Problem](t, response)
 	if problem.Code != "invalid_audit_cutoff" {
 		t.Fatalf("unexpected future cutoff problem: %#v", problem)
+	}
+	recentCutoff := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+	response = test.request(t, http.MethodPost, "/internal/v1/audit/retention?before="+recentCutoff, nil, nil, true)
+	assertStatus(t, response, http.StatusBadRequest)
+	problem = decode[httpapi.Problem](t, response)
+	if problem.Code != "audit_cutoff_too_recent" {
+		t.Fatalf("unexpected recent cutoff problem: %#v", problem)
 	}
 	response = test.request(t, http.MethodPost, "/internal/v1/audit/retention?before=2026-08-01T00:00:00Z", nil, nil, false)
 	assertStatus(t, response, http.StatusUnauthorized)

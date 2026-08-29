@@ -70,10 +70,12 @@ artifacts; edit the exploded sources instead.
   is complete. A stale epoch is rejected with `409` and requires a deployment
   restart/reload before retrying.
 - `POST /internal/v1/audit/retention` deletes at most 200 ledger rows strictly
-  before an operator-supplied cutoff. Repeat the same cutoff until
-  `complete=true` and `remaining=0`; the count is a current diagnostic, not a
-  snapshot. Sequence allocation and the public watch revision are unaffected,
-  and the operation requires its own exact-path `POST` policy.
+  before an operator-supplied cutoff at least one hour old. `dryRun=true`
+  previews the count without deleting and must not be used as a convergence
+  loop. For deletion, repeat the same cutoff until `complete=true` and
+  `remaining=0`; the count is a current diagnostic, not a snapshot. Sequence
+  allocation and the public watch revision are unaffected, and the operation
+  requires its own exact-path `POST` policy.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.

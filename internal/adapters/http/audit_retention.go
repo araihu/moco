@@ -23,8 +23,13 @@ func (s *Server) PurgeAuditEvents(ctx context.Context, request internalapi.Purge
 	if request.Params.Before.IsZero() {
 		return purgeAuditEventsBadRequest(ctx, "invalid_audit_cutoff", "before must be a valid date-time."), nil
 	}
-	if request.Params.Before.After(time.Now().UTC()) {
+	now := time.Now().UTC()
+	if request.Params.Before.After(now) {
 		return purgeAuditEventsBadRequest(ctx, "invalid_audit_cutoff", "before must not be in the future."), nil
+	}
+	dryRun := request.Params.DryRun != nil && *request.Params.DryRun
+	if !dryRun && request.Params.Before.After(now.Add(-s.auditRetention.MinimumAge())) {
+		return purgeAuditEventsBadRequest(ctx, "audit_cutoff_too_recent", "before is too recent for the configured retention safety buffer."), nil
 	}
 	limit := services.DefaultAuditPageSize
 	if request.Params.Limit != nil {
@@ -33,7 +38,7 @@ func (s *Server) PurgeAuditEvents(ctx context.Context, request internalapi.Purge
 			return purgeAuditEventsBadRequest(ctx, "invalid_limit", "limit must be between 1 and 200."), nil
 		}
 	}
-	result, err := s.auditRetention.Purge(ctx, services.AuditRetentionRequest{Before: request.Params.Before, Limit: limit})
+	result, err := s.auditRetention.Purge(ctx, services.AuditRetentionRequest{Before: request.Params.Before, Limit: limit, DryRun: dryRun})
 	if err != nil {
 		mapped := s.problem(ctx, "purgeAuditEvents", err)
 		return internalapi.PurgeAuditEvents500ApplicationProblemPlusJSONResponse{
@@ -50,6 +55,7 @@ func (s *Server) PurgeAuditEvents(ctx context.Context, request internalapi.Purge
 			Remaining: result.Remaining,
 			HasMore:   result.HasMore,
 			Complete:  result.Complete,
+			DryRun:    result.DryRun,
 		},
 		Headers: internalapi.PurgeAuditEvents200ResponseHeaders{XRequestID: requestID(ctx)},
 	}, nil

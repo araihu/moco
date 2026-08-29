@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     Process probes, deployment-scoped authorization administration, and a
     restricted request audit ledger for security observability. The audit

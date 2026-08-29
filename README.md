@@ -124,12 +124,15 @@ the already-produced response; retention and export remain deployment
 responsibilities.
 
 The internal audit-retention endpoint requires its own explicit `POST` policy
-for `/internal/v1/audit/retention`. Supply a past RFC3339 cutoff and repeat the
-bounded request until `complete` is true and `remaining` is zero. Retention
-deletes only ledger rows older than the cutoff, preserves monotonic sequence
-allocation, and does not advance the public resource-watch revision. The
-response is a current diagnostic rather than a snapshot; keep the operation on
-the deployment origin and export any retained data before purging it.
+for `/internal/v1/audit/retention`. For deletion, supply a cutoff at least one
+hour old and repeat the bounded request until `complete` is true and `remaining`
+is zero. Set `dryRun=true` first to preview the current matching count (even
+with a more recent past cutoff); a dry run never deletes and is not a
+convergence loop. Retention deletes only ledger rows older than the cutoff,
+preserves monotonic sequence allocation, and does not advance the public
+resource-watch revision. The response is a current diagnostic rather than a
+snapshot; keep the operation on the deployment origin and export any retained
+data before purging it.
 
 For offline backup, run `moco-audit-export` against the SQLite file. It opens the
 database read-only, captures the current highest audit sequence as a finite

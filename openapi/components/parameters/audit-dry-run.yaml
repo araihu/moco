@@ -1,0 +1,7 @@
+name: dryRun
+in: query
+required: false
+description: Preview the current matching count without deleting events. A dry-run result is informational and must not be repeated as a convergence loop.
+schema:
+  type: boolean
+  default: false
