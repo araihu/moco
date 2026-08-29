@@ -19,6 +19,7 @@ secret lifecycles:
 - restricted internal `GET`/`PUT /internal/v1/authorization` snapshot administration;
 - restricted internal `GET /internal/v1/audit` request metadata ledger;
 - restricted internal `POST /internal/v1/audit/retention` bounded local ledger retention;
+- local read-only `moco-audit-export` JSONL snapshots for offline backup/export;
 - restricted internal `POST /internal/v1/encryption/rotation` bounded root-key rewrap batches;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
@@ -30,7 +31,7 @@ secret lifecycles:
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. External KMS/HSM providers,
 cross-host policy transport when instances do not share the SQLite store, audit
-export, and production deployment hardening are not implemented yet.
+shipping, and production deployment hardening are not implemented yet.
 Treat this as a development slice, not a production secret store.
 
 ## Run locally
@@ -130,6 +131,20 @@ allocation, and does not advance the public resource-watch revision. The
 response is a current diagnostic rather than a snapshot; keep the operation on
 the deployment origin and export any retained data before purging it.
 
+For offline backup, run `moco-audit-export` against the SQLite file. It opens the
+database read-only, captures the current highest audit sequence as a finite
+snapshot boundary, streams one metadata object per JSONL line, and writes a new
+destination with mode `0600` without overwriting an existing file. Use
+`--after-sequence` to resume after a previous export; rows appended after the
+snapshot boundary are intentionally left for the next run. `-output -` streams
+JSONL to stdout and leaves the caller responsible for protecting the pipe.
+
+```bash
+go run ./cmd/moco-audit-export \
+  --database ./moco.db \
+  --output ./audit-$(date -u +%Y%m%dT%H%M%SZ).jsonl
+```
+
 The internal encryption rotation endpoint requires its own explicit `POST`
 policy for `/internal/v1/encryption/rotation`. It is a maintenance operation,
 not a public resource API; restrict it to a dedicated operator principal and
@@ -166,6 +181,7 @@ nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 `cmd/moco-server` is the composition root.
 
 - `openapi/`: exploded public/internal contracts, lint rules, and bundles.
+- `cmd/moco-audit-export/`: read-only offline JSONL audit exporter.
 - `tools/`: isolated Go module with pinned development binaries.
 - `db/migrations/`: SQLite migrations embedded into the server.
 - `db/queries/`: sqlc query sources.

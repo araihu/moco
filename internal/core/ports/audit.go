@@ -38,6 +38,14 @@ type AuditRepository interface {
 	ListAuditEvents(context.Context, ListAuditEventsQuery) ([]AuditEvent, error)
 }
 
+// AuditExportRepository provides the read-only sequence boundary needed to
+// export a finite ledger snapshot. It is deliberately separate from the
+// append and retention capabilities.
+type AuditExportRepository interface {
+	ListAuditEvents(context.Context, ListAuditEventsQuery) ([]AuditEvent, error)
+	CurrentAuditSequence(context.Context) (int64, error)
+}
+
 // AuditRetentionRepository owns bounded local retention maintenance. It is
 // deliberately separate from AuditRepository so ordinary request auditing and
 // reads do not require a destructive capability.

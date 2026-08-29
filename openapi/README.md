@@ -16,6 +16,10 @@ key material. A deployment should restrict the origin with network policy as
 well as explicit Casbin permissions; same-cluster placement is not an
 authentication mechanism.
 
+The offline `moco-audit-export` command is intentionally outside OpenAPI: it
+opens the local SQLite file read-only and writes JSONL to a deployment-owned
+filesystem destination without a network hop.
+
 The contracts are intentionally split into small files below `paths/` and
 `components/`. Relative `$ref` values are part of the source contract. Run
 `make spec-lint` to validate and lint both roots with the pinned Vacuum tool,

@@ -23,6 +23,18 @@ func (q *Queries) CountAuditEventsBefore(ctx context.Context, beforeOccurredAt s
 	return count, err
 }
 
+const currentAuditSequence = `-- name: CurrentAuditSequence :one
+SELECT CAST(COALESCE(MAX(sequence), 0) AS INTEGER)
+FROM audit_events
+`
+
+func (q *Queries) CurrentAuditSequence(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, currentAuditSequence)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const insertAuditEvent = `-- name: InsertAuditEvent :one
 INSERT INTO audit_events (
     occurred_at,

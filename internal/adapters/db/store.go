@@ -34,6 +34,7 @@ type Store struct {
 var _ ports.AuthorizationRepository = (*Store)(nil)
 var _ ports.ResourceVersionReader = (*Store)(nil)
 var _ ports.AuditRepository = (*Store)(nil)
+var _ ports.AuditExportRepository = (*Store)(nil)
 var _ ports.AuditRetentionRepository = (*Store)(nil)
 var _ ports.VaultKeyRotationRepository = (*Store)(nil)
 var _ ports.EncryptionKeyStateRepository = (*Store)(nil)
@@ -56,6 +57,27 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := database.PingContext(ctx); err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("ping SQLite database: %w", err)
+	}
+	return &Store{database: database, queries: sqlc.New(database)}, nil
+}
+
+// OpenReadOnly opens an existing SQLite file without applying migrations or
+// enabling write-oriented journal settings. It is intended for offline
+// maintenance such as audit export.
+func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
+	dsn, err := sqliteReadOnlyDSN(path)
+	if err != nil {
+		return nil, err
+	}
+	database, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open SQLite database read-only: %w", err)
+	}
+	database.SetMaxOpenConns(1)
+	database.SetMaxIdleConns(1)
+	if err := database.PingContext(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("ping SQLite database read-only: %w", err)
 	}
 	return &Store{database: database, queries: sqlc.New(database)}, nil
 }
@@ -161,6 +183,16 @@ func (s *Store) ListAuditEvents(ctx context.Context, query ports.ListAuditEvents
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+// CurrentAuditSequence returns the highest assigned audit sequence without
+// changing the ledger. Exporters use it as a finite snapshot upper bound.
+func (s *Store) CurrentAuditSequence(ctx context.Context) (int64, error) {
+	sequence, err := s.queries.CurrentAuditSequence(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("read current audit sequence: %w", err)
+	}
+	return sequence, nil
 }
 
 // PurgeAuditEvents deletes one bounded set of events strictly before the
@@ -1409,6 +1441,14 @@ func migrateDatabase(dsn, name string) error {
 }
 
 func sqliteDSN(path string) (string, error) {
+	return sqliteDSNWithMode(path, false)
+}
+
+func sqliteReadOnlyDSN(path string) (string, error) {
+	return sqliteDSNWithMode(path, true)
+}
+
+func sqliteDSNWithMode(path string, readOnly bool) (string, error) {
 	if path == "" {
 		return "", errors.New("SQLite path is required")
 	}
@@ -1420,7 +1460,11 @@ func sqliteDSN(path string) (string, error) {
 	query := value.Query()
 	query.Add("_pragma", "busy_timeout(5000)")
 	query.Add("_pragma", "foreign_keys(1)")
-	query.Add("_pragma", "journal_mode(WAL)")
+	if readOnly {
+		query.Set("mode", "ro")
+	} else {
+		query.Add("_pragma", "journal_mode(WAL)")
+	}
 	value.RawQuery = query.Encode()
 	return value.String(), nil
 }

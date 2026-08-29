@@ -107,3 +107,40 @@ func TestAuditRetentionPurgesOldEventsInBoundedBatches(t *testing.T) {
 		t.Fatalf("audit retention changed resource version = %d err=%v", version, err)
 	}
 }
+
+func TestAuditExportReadOnlyOpenDoesNotCreateMissingDatabase(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "missing.db")
+	if _, err := OpenReadOnly(context.Background(), path); err == nil {
+		t.Fatal("read-only open unexpectedly created a missing database")
+	}
+}
+
+func TestAuditExportReadOnlyOpenListsWithoutMigration(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "moco.db")
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendAuditEvent(ctx, ports.AuditEvent{
+		OccurredAt: time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC), RequestID: "read-only",
+		Method: "GET", Route: "/api/v1", StatusCode: 200, Outcome: "success",
+	}); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	readOnly, err := OpenReadOnly(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = readOnly.Close() })
+	sequence, err := readOnly.CurrentAuditSequence(ctx)
+	if err != nil || sequence != 1 {
+		t.Fatalf("read-only sequence=%d err=%v, want 1", sequence, err)
+	}
+}

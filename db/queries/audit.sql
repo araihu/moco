@@ -20,6 +20,10 @@ WHERE sequence > sqlc.arg(after_sequence)
 ORDER BY sequence
 LIMIT sqlc.arg(page_size);
 
+-- name: CurrentAuditSequence :one
+SELECT CAST(COALESCE(MAX(sequence), 0) AS INTEGER)
+FROM audit_events;
+
 -- name: PurgeAuditEvents :execrows
 DELETE FROM audit_events
 WHERE sequence IN (
