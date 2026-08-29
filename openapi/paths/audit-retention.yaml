@@ -1,0 +1,36 @@
+parameters:
+  - $ref: ../components/parameters/request-id.yaml
+post:
+  operationId: purgeAuditEvents
+  summary: Purge one bounded audit-retention page
+  description: Deletes at most 200 audit events strictly older than the required cutoff. This is local deployment maintenance, not a public resource mutation. Repeat the same cutoff until complete is true and remaining is zero; the count is not a snapshot and newly inserted events can change it. Sequence numbers remain monotonic, the public resource-watch revision is unchanged, and event contents, credentials, plaintext secret paths, and key material are never accepted or returned. The endpoint requires an explicit exact-path POST policy and should be restricted to a deployment origin.
+  tags: [Audit]
+  parameters:
+    - $ref: ../components/parameters/audit-before.yaml
+    - $ref: ../components/parameters/limit.yaml
+  responses:
+    '200':
+      description: Bounded retention result.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          example:
+            before: '2026-08-01T00:00:00Z'
+            deleted: 50
+            remaining: 12
+            hasMore: true
+            complete: false
+          schema:
+            $ref: ../components/schemas/audit-retention-result.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

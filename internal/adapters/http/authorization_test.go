@@ -38,6 +38,8 @@ func TestAuthorizationResourceRecognizesOnlyContractRoutes(t *testing.T) {
 		{name: "audit unsupported", method: http.MethodPut, path: "/internal/v1/audit", matches: false},
 		{name: "encryption rotation", method: http.MethodPost, path: "/internal/v1/encryption/rotation", resource: "/internal/v1/encryption/rotation", matches: true},
 		{name: "encryption rotation unsupported", method: http.MethodGet, path: "/internal/v1/encryption/rotation", matches: false},
+		{name: "audit retention", method: http.MethodPost, path: "/internal/v1/audit/retention", resource: "/internal/v1/audit/retention", matches: true},
+		{name: "audit retention unsupported", method: http.MethodGet, path: "/internal/v1/audit/retention", matches: false},
 		{name: "health", method: http.MethodGet, path: "/readyz", matches: false},
 	}
 	for _, test := range tests {

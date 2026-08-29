@@ -86,6 +86,10 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize audit service: %w", err)
 	}
+	auditRetentionService, err := services.NewAuditRetentionService(store)
+	if err != nil {
+		return fmt.Errorf("initialize audit retention service: %w", err)
+	}
 	auditPathHMACKey := deriveAuditPathHMACKey(configuration.cursorHMACKey)
 	defer wipeConfigurationKey(auditPathHMACKey)
 	keyRotationService, err := services.NewVaultKeyRotationService(store, envelope, services.VaultKeyRotationServiceOptions{KeyState: store})
@@ -107,6 +111,7 @@ func run(logger *slog.Logger) error {
 		Authorizer:       security.authorizer,
 		Authorization:    security.policyService,
 		Audit:            auditService,
+		AuditRetention:   auditRetentionService,
 		AuditPathHMACKey: auditPathHMACKey,
 		KeyRotation:      keyRotationService,
 		PrincipalCheck:   security.authenticator.HasPrincipal,

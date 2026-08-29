@@ -18,6 +18,7 @@ secret lifecycles:
 - SQLite authorization policy snapshots with atomic revision-guarded replacement, coalesced local signals, and shared-store polling reloads;
 - restricted internal `GET`/`PUT /internal/v1/authorization` snapshot administration;
 - restricted internal `GET /internal/v1/audit` request metadata ledger;
+- restricted internal `POST /internal/v1/audit/retention` bounded local ledger retention;
 - restricted internal `POST /internal/v1/encryption/rotation` bounded root-key rewrap batches;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
@@ -29,7 +30,7 @@ secret lifecycles:
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. External KMS/HSM providers,
 cross-host policy transport when instances do not share the SQLite store, audit
-retention/export, and production deployment hardening are not implemented yet.
+export, and production deployment hardening are not implemented yet.
 Treat this as a development slice, not a production secret store.
 
 ## Run locally
@@ -120,6 +121,14 @@ reconciliation/change feed; controllers and operators use `/api/v1/watch` plus
 relist for convergence. A ledger write failure is logged and does not change
 the already-produced response; retention and export remain deployment
 responsibilities.
+
+The internal audit-retention endpoint requires its own explicit `POST` policy
+for `/internal/v1/audit/retention`. Supply a past RFC3339 cutoff and repeat the
+bounded request until `complete` is true and `remaining` is zero. Retention
+deletes only ledger rows older than the cutoff, preserves monotonic sequence
+allocation, and does not advance the public resource-watch revision. The
+response is a current diagnostic rather than a snapshot; keep the operation on
+the deployment origin and export any retained data before purging it.
 
 The internal encryption rotation endpoint requires its own explicit `POST`
 policy for `/internal/v1/encryption/rotation`. It is a maintenance operation,

@@ -10,6 +10,19 @@ import (
 	"database/sql"
 )
 
+const countAuditEventsBefore = `-- name: CountAuditEventsBefore :one
+SELECT COUNT(*)
+FROM audit_events
+WHERE occurred_at < ?1
+`
+
+func (q *Queries) CountAuditEventsBefore(ctx context.Context, beforeOccurredAt string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAuditEventsBefore, beforeOccurredAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const insertAuditEvent = `-- name: InsertAuditEvent :one
 INSERT INTO audit_events (
     occurred_at,
@@ -107,4 +120,28 @@ func (q *Queries) ListAuditEventsPage(ctx context.Context, arg ListAuditEventsPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeAuditEvents = `-- name: PurgeAuditEvents :execrows
+DELETE FROM audit_events
+WHERE sequence IN (
+    SELECT candidates.sequence
+    FROM audit_events AS candidates
+    WHERE candidates.occurred_at < ?1
+    ORDER BY candidates.occurred_at, candidates.sequence
+    LIMIT ?2
+)
+`
+
+type PurgeAuditEventsParams struct {
+	BeforeOccurredAt string `json:"before_occurred_at"`
+	PageSize         int64  `json:"page_size"`
+}
+
+func (q *Queries) PurgeAuditEvents(ctx context.Context, arg PurgeAuditEventsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeAuditEvents, arg.BeforeOccurredAt, arg.PageSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

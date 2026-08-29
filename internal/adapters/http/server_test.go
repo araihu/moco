@@ -261,6 +261,27 @@ func TestAuditLedgerCapturesProtectedRequestWithoutQueryOrPlaintextPath(t *testi
 	}
 }
 
+func TestAuditRetentionEndpointIsBoundedAndProtected(t *testing.T) {
+	t.Parallel()
+	test := newFixture(t, services.TenantServiceOptions{
+		CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes"),
+	})
+	response := test.request(t, http.MethodPost, "/internal/v1/audit/retention?before=2026-08-01T00:00:00Z&limit=2", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	result := decode[internalapi.AuditRetentionResult](t, response)
+	if !result.Complete || result.HasMore || result.Remaining != 0 || result.Deleted != 0 || !result.Before.Equal(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("unexpected retention result: %#v", result)
+	}
+	response = test.request(t, http.MethodPost, "/internal/v1/audit/retention?before=2999-01-01T00:00:00Z", nil, nil, true)
+	assertStatus(t, response, http.StatusBadRequest)
+	problem := decode[httpapi.Problem](t, response)
+	if problem.Code != "invalid_audit_cutoff" {
+		t.Fatalf("unexpected future cutoff problem: %#v", problem)
+	}
+	response = test.request(t, http.MethodPost, "/internal/v1/audit/retention?before=2026-08-01T00:00:00Z", nil, nil, false)
+	assertStatus(t, response, http.StatusUnauthorized)
+}
+
 func TestAuditLedgerRequiresExplicitPermission(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -599,6 +620,7 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 		{Subject: "fixture-principal", Domain: "*", Path: "/api/v1", Method: "GET"},
 		{Subject: "fixture-principal", Domain: "*", Path: "/api/v1/*", Method: "*"},
 		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/audit", Method: "GET"},
+		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/audit/retention", Method: "POST"},
 		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/encryption/rotation", Method: "POST"},
 	})
 	if err != nil {
@@ -612,10 +634,15 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	if err != nil {
 		t.Fatalf("create key rotation service: %v", err)
 	}
+	auditRetentionService, err := services.NewAuditRetentionService(store)
+	if err != nil {
+		t.Fatalf("create audit retention service: %v", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
 		Readiness: store, ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
 		Audit:            auditService,
+		AuditRetention:   auditRetentionService,
 		AuditPathHMACKey: []byte("test-audit-path-key-with-at-least-32-bytes"),
 		KeyRotation:      keyRotationService,
 		ServiceVersion:   "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),

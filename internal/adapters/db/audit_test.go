@@ -61,3 +61,49 @@ func TestAuditEventsPersistAndDoNotAdvanceResourceVersion(t *testing.T) {
 		t.Fatalf("continuation = %#v, want second event", page)
 	}
 }
+
+func TestAuditRetentionPurgesOldEventsInBoundedBatches(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "moco.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	base := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	for index, offset := range []time.Duration{-3 * time.Hour, -2 * time.Hour, -time.Hour, time.Hour} {
+		if _, err := store.AppendAuditEvent(ctx, ports.AuditEvent{
+			OccurredAt: base.Add(offset), RequestID: "retention-" + string(rune('a'+index)),
+			Method: "GET", Route: "/api/v1", StatusCode: 200, Outcome: "success",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cutoff := base
+	deleted, err := store.PurgeAuditEvents(ctx, ports.PurgeAuditEventsQuery{Before: cutoff, PageSize: 2})
+	if err != nil || deleted != 2 {
+		t.Fatalf("first retention purge deleted=%d err=%v, want 2", deleted, err)
+	}
+	remaining, err := store.CountAuditEventsBefore(ctx, cutoff)
+	if err != nil || remaining != 1 {
+		t.Fatalf("remaining old events=%d err=%v, want 1", remaining, err)
+	}
+	deleted, err = store.PurgeAuditEvents(ctx, ports.PurgeAuditEventsQuery{Before: cutoff, PageSize: 2})
+	if err != nil || deleted != 1 {
+		t.Fatalf("second retention purge deleted=%d err=%v, want 1", deleted, err)
+	}
+	remaining, err = store.CountAuditEventsBefore(ctx, cutoff)
+	if err != nil || remaining != 0 {
+		t.Fatalf("remaining old events after completion=%d err=%v, want 0", remaining, err)
+	}
+	page, err := store.ListAuditEvents(ctx, ports.ListAuditEventsQuery{PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 1 || page[0].Sequence != 4 {
+		t.Fatalf("retained events = %#v, want only newest sequence 4", page)
+	}
+	if version, err := store.CurrentResourceVersion(ctx); err != nil || version != 0 {
+		t.Fatalf("audit retention changed resource version = %d err=%v", version, err)
+	}
+}

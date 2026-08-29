@@ -1,12 +1,14 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Process probes, deployment-scoped authorization administration, and a
     restricted request audit ledger for security observability. The audit
     operation is not a reconciliation/change feed; controllers and operators
-    use the public watch endpoint and relist contract for convergence.
+    use the public watch endpoint and relist contract for convergence. A
+    bounded local retention operation removes events before an operator-supplied
+    cutoff without changing public resource history.
     The encryption operation performs bounded online rewraps of vault data keys
     under the configured active root-key era; key material is supplied only by
     deployment configuration and is never accepted or returned by this API.
@@ -38,6 +40,8 @@ paths:
     $ref: ./paths/authorization.yaml
   /internal/v1/audit:
     $ref: ./paths/audit.yaml
+  /internal/v1/audit/retention:
+    $ref: ./paths/audit-retention.yaml
   /internal/v1/encryption/rotation:
     $ref: ./paths/encryption-rotation.yaml
 components:

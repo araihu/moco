@@ -19,3 +19,18 @@ FROM audit_events
 WHERE sequence > sqlc.arg(after_sequence)
 ORDER BY sequence
 LIMIT sqlc.arg(page_size);
+
+-- name: PurgeAuditEvents :execrows
+DELETE FROM audit_events
+WHERE sequence IN (
+    SELECT candidates.sequence
+    FROM audit_events AS candidates
+    WHERE candidates.occurred_at < sqlc.arg(before_occurred_at)
+    ORDER BY candidates.occurred_at, candidates.sequence
+    LIMIT sqlc.arg(page_size)
+);
+
+-- name: CountAuditEventsBefore :one
+SELECT COUNT(*)
+FROM audit_events
+WHERE occurred_at < sqlc.arg(before_occurred_at);

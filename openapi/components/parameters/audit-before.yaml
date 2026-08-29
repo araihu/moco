@@ -1,0 +1,10 @@
+name: before
+in: query
+required: true
+description: Delete events strictly older than this UTC cutoff. Repeat the same cutoff until the response reports complete=true.
+schema:
+  type: string
+  format: date-time
+  minLength: 1
+  maxLength: 64
+  example: '2026-08-01T00:00:00Z'

@@ -25,8 +25,23 @@ type ListAuditEventsQuery struct {
 	PageSize      int
 }
 
+// PurgeAuditEventsQuery selects one bounded, age-based retention batch.
+// Records strictly before Before are deleted in sequence order.
+type PurgeAuditEventsQuery struct {
+	Before   time.Time
+	PageSize int
+}
+
 // AuditRepository persists and reads the append-only audit ledger.
 type AuditRepository interface {
 	AppendAuditEvent(context.Context, AuditEvent) (AuditEvent, error)
 	ListAuditEvents(context.Context, ListAuditEventsQuery) ([]AuditEvent, error)
+}
+
+// AuditRetentionRepository owns bounded local retention maintenance. It is
+// deliberately separate from AuditRepository so ordinary request auditing and
+// reads do not require a destructive capability.
+type AuditRetentionRepository interface {
+	PurgeAuditEvents(context.Context, PurgeAuditEventsQuery) (int64, error)
+	CountAuditEventsBefore(context.Context, time.Time) (int64, error)
 }

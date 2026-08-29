@@ -57,10 +57,78 @@ func TestAuditServiceRejectsOversizedPage(t *testing.T) {
 	}
 }
 
+func TestAuditRetentionServicePurgesBoundedPages(t *testing.T) {
+	t.Parallel()
+	cutoff := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	repository := &fakeAuditRetentionRepository{remaining: 3}
+	service, err := services.NewAuditRetentionService(repository, services.AuditRetentionServiceOptions{
+		Clock: func() time.Time { return cutoff.Add(time.Hour) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.Purge(context.Background(), services.AuditRetentionRequest{Before: cutoff, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Deleted != 2 || first.Remaining != 1 || !first.HasMore || first.Complete || !first.Before.Equal(cutoff) {
+		t.Fatalf("first retention result = %#v", first)
+	}
+	second, err := service.Purge(context.Background(), services.AuditRetentionRequest{Before: cutoff, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Deleted != 1 || second.Remaining != 0 || second.HasMore || !second.Complete {
+		t.Fatalf("second retention result = %#v", second)
+	}
+	if !repository.lastQuery.Before.Equal(cutoff) || repository.lastQuery.PageSize != 2 {
+		t.Fatalf("retention query = %#v", repository.lastQuery)
+	}
+}
+
+func TestAuditRetentionServiceRejectsUnsafeRequests(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 29, 13, 0, 0, 0, time.UTC)
+	service, err := services.NewAuditRetentionService(&fakeAuditRetentionRepository{}, services.AuditRetentionServiceOptions{
+		Clock: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range []services.AuditRetentionRequest{
+		{Limit: 1},
+		{Before: now.Add(time.Minute), Limit: 1},
+		{Before: now, Limit: services.MaxAuditPageSize + 1},
+	} {
+		if _, err := service.Purge(context.Background(), request); err == nil {
+			t.Fatalf("unsafe retention request %#v unexpectedly accepted", request)
+		}
+	}
+}
+
 type fakeAuditRepository struct {
 	append    func(ports.AuditEvent) (ports.AuditEvent, error)
 	list      []ports.AuditEvent
 	lastQuery ports.ListAuditEventsQuery
+}
+
+type fakeAuditRetentionRepository struct {
+	remaining int64
+	lastQuery ports.PurgeAuditEventsQuery
+}
+
+func (r *fakeAuditRetentionRepository) PurgeAuditEvents(_ context.Context, query ports.PurgeAuditEventsQuery) (int64, error) {
+	r.lastQuery = query
+	deleted := int64(query.PageSize)
+	if deleted > r.remaining {
+		deleted = r.remaining
+	}
+	r.remaining -= deleted
+	return deleted, nil
+}
+
+func (r *fakeAuditRetentionRepository) CountAuditEventsBefore(_ context.Context, _ time.Time) (int64, error) {
+	return r.remaining, nil
 }
 
 func (r *fakeAuditRepository) AppendAuditEvent(_ context.Context, event ports.AuditEvent) (ports.AuditEvent, error) {

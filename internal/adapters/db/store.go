@@ -34,6 +34,7 @@ type Store struct {
 var _ ports.AuthorizationRepository = (*Store)(nil)
 var _ ports.ResourceVersionReader = (*Store)(nil)
 var _ ports.AuditRepository = (*Store)(nil)
+var _ ports.AuditRetentionRepository = (*Store)(nil)
 var _ ports.VaultKeyRotationRepository = (*Store)(nil)
 var _ ports.EncryptionKeyStateRepository = (*Store)(nil)
 
@@ -160,6 +161,29 @@ func (s *Store) ListAuditEvents(ctx context.Context, query ports.ListAuditEvents
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+// PurgeAuditEvents deletes one bounded set of events strictly before the
+// cutoff. Sequence numbers remain monotonic; retention never changes the
+// public resource-watch revision.
+func (s *Store) PurgeAuditEvents(ctx context.Context, query ports.PurgeAuditEventsQuery) (int64, error) {
+	deleted, err := s.queries.PurgeAuditEvents(ctx, sqlc.PurgeAuditEventsParams{
+		BeforeOccurredAt: formatDatabaseTime(query.Before.UTC()), PageSize: int64(query.PageSize),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("purge audit events: %w", err)
+	}
+	return deleted, nil
+}
+
+// CountAuditEventsBefore counts events strictly before a retention cutoff.
+// The result is a current diagnostic, not a historical snapshot.
+func (s *Store) CountAuditEventsBefore(ctx context.Context, before time.Time) (int64, error) {
+	count, err := s.queries.CountAuditEventsBefore(ctx, formatDatabaseTime(before.UTC()))
+	if err != nil {
+		return 0, fmt.Errorf("count audit events before cutoff: %w", err)
+	}
+	return count, nil
 }
 
 // LoadAuthorization reads the complete authoritative policy snapshot in a

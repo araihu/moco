@@ -118,6 +118,34 @@ type AuditEventList struct {
 	NextAfterSequence *int64 `json:"nextAfterSequence"`
 }
 
+// AuditRetentionResult Bounded local audit retention result. It contains no event contents; remaining is a current diagnostic rather than a historical snapshot.
+type AuditRetentionResult struct {
+	// Before Normalized UTC cutoff used by the retention batch.
+	//
+	// Example: 2026-08-01T00:00:00Z
+	Before time.Time `json:"before"`
+
+	// Complete True when no event currently remains before the cutoff.
+	//
+	// Example: false
+	Complete bool `json:"complete"`
+
+	// Deleted Number of events deleted by this bounded request.
+	//
+	// Example: 50
+	Deleted int32 `json:"deleted"`
+
+	// HasMore Whether another bounded retention request is needed for the cutoff.
+	//
+	// Example: true
+	HasMore bool `json:"hasMore"`
+
+	// Remaining Current number of events strictly before the cutoff; this is not a snapshot.
+	//
+	// Example: 12
+	Remaining int64 `json:"remaining"`
+}
+
 // AuthorizationPolicy Allow policy for a role or principal, domain, path pattern, and HTTP method. Secret operation policies may additionally narrow access to a literal logical secret path prefix.
 type AuthorizationPolicy struct {
 	// Domain Example: 11111111-1111-4111-8111-111111111111
@@ -314,6 +342,9 @@ type UnavailableStatusStatus string
 // AuditAfterSequence Example: 42
 type AuditAfterSequence = int64
 
+// AuditBefore Example: 2026-08-01T00:00:00Z
+type AuditBefore = time.Time
+
 // EncryptionAfterTenantId defines model for encryption-after-tenant-id.
 type EncryptionAfterTenantId = string
 
@@ -351,6 +382,18 @@ type Unauthorized = Problem
 type ListAuditEventsParams struct {
 	// AfterSequence Exclusive audit sequence checkpoint. Use the returned nextAfterSequence to continue the same ordered ledger page.
 	AfterSequence *AuditAfterSequence `form:"afterSequence,omitempty" json:"afterSequence,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// PurgeAuditEventsParams defines parameters for PurgeAuditEvents.
+type PurgeAuditEventsParams struct {
+	// Before Delete events strictly older than this UTC cutoff. Repeat the same cutoff until the response reports complete=true.
+	Before AuditBefore `form:"before" json:"before"`
 
 	// Limit Maximum number of items to return.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -397,6 +440,9 @@ type ServerInterface interface {
 	// ListAuditEvents List request audit events
 	// (GET /internal/v1/audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
+	// PurgeAuditEvents Purge one bounded audit-retention page
+	// (POST /internal/v1/audit/retention)
+	PurgeAuditEvents(w http.ResponseWriter, r *http.Request, params PurgeAuditEventsParams)
 	// GetAuthorizationSnapshot Read the persisted authorization snapshot
 	// (GET /internal/v1/authorization)
 	GetAuthorizationSnapshot(w http.ResponseWriter, r *http.Request, params GetAuthorizationSnapshotParams)
@@ -481,6 +527,73 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAuditEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PurgeAuditEvents operation middleware
+func (siw *ServerInterfaceWrapper) PurgeAuditEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PurgeAuditEventsParams
+
+	// ------------- Required query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PurgeAuditEvents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -828,6 +941,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/internal/v1/authorization", wrapper.GetAuthorizationSnapshot)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/internal/v1/authorization", wrapper.ReplaceAuthorizationSnapshot)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/internal/v1/audit", wrapper.ListAuditEvents)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/internal/v1/audit/retention", wrapper.PurgeAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/internal/v1/encryption/rotation", wrapper.RotateEncryptionKeys)
 
 	return m
@@ -1003,6 +1117,123 @@ type ListAuditEvents503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ListAuditEvents503ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeAuditEventsRequestObject struct {
+	Params PurgeAuditEventsParams
+}
+
+type PurgeAuditEventsResponseObject interface {
+	VisitPurgeAuditEventsResponse(w http.ResponseWriter) error
+}
+
+type PurgeAuditEvents200ResponseHeaders struct {
+	XRequestID string
+}
+
+type PurgeAuditEvents200JSONResponse struct {
+	Body    AuditRetentionResult
+	Headers PurgeAuditEvents200ResponseHeaders
+}
+
+func (response PurgeAuditEvents200JSONResponse) VisitPurgeAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeAuditEvents400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PurgeAuditEvents400ApplicationProblemPlusJSONResponse) VisitPurgeAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeAuditEvents401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PurgeAuditEvents401ApplicationProblemPlusJSONResponse) VisitPurgeAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeAuditEvents403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response PurgeAuditEvents403ApplicationProblemPlusJSONResponse) VisitPurgeAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeAuditEvents500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response PurgeAuditEvents500ApplicationProblemPlusJSONResponse) VisitPurgeAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeAuditEvents503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response PurgeAuditEvents503ApplicationProblemPlusJSONResponse) VisitPurgeAuditEventsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -1459,6 +1690,9 @@ type StrictServerInterface interface {
 	// ListAuditEvents List request audit events
 	// (GET /internal/v1/audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+	// PurgeAuditEvents Purge one bounded audit-retention page
+	// (POST /internal/v1/audit/retention)
+	PurgeAuditEvents(ctx context.Context, request PurgeAuditEventsRequestObject) (PurgeAuditEventsResponseObject, error)
 	// GetAuthorizationSnapshot Read the persisted authorization snapshot
 	// (GET /internal/v1/authorization)
 	GetAuthorizationSnapshot(ctx context.Context, request GetAuthorizationSnapshotRequestObject) (GetAuthorizationSnapshotResponseObject, error)
@@ -1534,6 +1768,32 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
 		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PurgeAuditEvents operation middleware
+func (sh *strictHandler) PurgeAuditEvents(w http.ResponseWriter, r *http.Request, params PurgeAuditEventsParams) {
+	var request PurgeAuditEventsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PurgeAuditEvents(ctx, request.(PurgeAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PurgeAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PurgeAuditEventsResponseObject); ok {
+		if err := validResponse.VisitPurgeAuditEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

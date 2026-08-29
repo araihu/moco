@@ -8,8 +8,9 @@ behind a TLS ingress when deployment policy permits it.
 
 `internal.yaml` contains the minimal unauthenticated liveness/readiness probes
 needed by a process supervisor or load balancer plus bearer-protected
-authorization-snapshot, request-audit, and bounded encryption-rotation
-operations for the restricted deployment origin. These operations never expose
+authorization-snapshot, request-audit, bounded encryption-rotation, and
+bounded local audit-retention operations for the restricted deployment origin.
+These operations never expose
 token digests, request bodies, query strings, plaintext logical secret paths, or
 key material. A deployment should restrict the origin with network policy as
 well as explicit Casbin permissions; same-cluster placement is not an
@@ -63,6 +64,11 @@ artifacts; edit the exploded sources instead.
   `remainingOldKeys=0`; keep old key material configured until that verification
   is complete. A stale epoch is rejected with `409` and requires a deployment
   restart/reload before retrying.
+- `POST /internal/v1/audit/retention` deletes at most 200 ledger rows strictly
+  before an operator-supplied cutoff. Repeat the same cutoff until
+  `complete=true` and `remaining=0`; the count is a current diagnostic, not a
+  snapshot. Sequence allocation and the public watch revision are unaffected,
+  and the operation requires its own exact-path `POST` policy.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.

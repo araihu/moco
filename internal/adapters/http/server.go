@@ -46,6 +46,7 @@ type HandlerOptions struct {
 	Authorizer       ports.Authorizer
 	Authorization    *services.AuthorizationPolicyService
 	Audit            *services.AuditService
+	AuditRetention   *services.AuditRetentionService
 	AuditPathHMACKey []byte
 	KeyRotation      *services.VaultKeyRotationService
 	PrincipalCheck   func(string) bool
@@ -93,6 +94,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		authorizer:      options.Authorizer,
 		authorization:   options.Authorization,
 		audit:           options.Audit,
+		auditRetention:  options.AuditRetention,
 		keyRotation:     options.KeyRotation,
 		principalCheck:  options.PrincipalCheck,
 		serviceVersion:  options.ServiceVersion,
@@ -142,6 +144,7 @@ type Server struct {
 	resourceVersion ports.ResourceVersionReader
 	authorization   *services.AuthorizationPolicyService
 	audit           *services.AuditService
+	auditRetention  *services.AuditRetentionService
 	keyRotation     *services.VaultKeyRotationService
 	principalCheck  func(string) bool
 	serviceVersion  string
@@ -271,6 +274,9 @@ func authorizationResource(r *http.Request) (string, string, bool) {
 	if path == auditPath {
 		return "*", path, r.Method == http.MethodGet
 	}
+	if path == auditRetentionPath {
+		return "*", path, r.Method == http.MethodPost
+	}
 	if path == keyRotationPath {
 		return "*", path, r.Method == http.MethodPost
 	}
@@ -366,12 +372,13 @@ func strictResourceJSON(next http.Handler) http.Handler {
 const (
 	authorizationAdminPath    = "/internal/v1/authorization"
 	auditPath                 = "/internal/v1/audit"
+	auditRetentionPath        = "/internal/v1/audit/retention"
 	keyRotationPath           = "/internal/v1/encryption/rotation"
 	maxAuthorizationJSONBytes = 2 << 20
 )
 
 func isProtectedAPIPath(path string) bool {
-	return isPublicAPIPath(path) || path == authorizationAdminPath || path == auditPath || path == keyRotationPath
+	return isPublicAPIPath(path) || path == authorizationAdminPath || path == auditPath || path == auditRetentionPath || path == keyRotationPath
 }
 
 func isPublicAPIPath(path string) bool {
