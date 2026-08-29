@@ -78,6 +78,26 @@ func TestStaticAuthorizerNarrowSecretPoliciesByLogicalPath(t *testing.T) {
 	}
 }
 
+func TestStaticAuthorizerTreatsWildcardCharactersAsLiteralSecretPrefixes(t *testing.T) {
+	t.Parallel()
+	prefix := "*"
+	authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{
+		Subject: "reader", Domain: "*", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", Method: "GET", SecretPathPrefix: &prefix,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := "/api/v1/tenants/tenant-a/vaults/vault-a/secret"
+	allowed, err := authorizer.AuthorizeSecretPath(t.Context(), "reader", "tenant-a", resource, "GET", "*literal")
+	if err != nil || !allowed {
+		t.Fatalf("literal wildcard prefix was denied: allowed=%t err=%v", allowed, err)
+	}
+	allowed, err = authorizer.AuthorizeSecretPath(t.Context(), "reader", "tenant-a", resource, "GET", "prod/literal")
+	if err != nil || allowed {
+		t.Fatalf("literal wildcard prefix matched unrelated path: allowed=%t err=%v", allowed, err)
+	}
+}
+
 func TestStaticAuthorizerFindsScopedCollectionAccessAndTenantVisibility(t *testing.T) {
 	t.Parallel()
 	authorizer, err := authz.NewStaticAuthorizer(

@@ -108,7 +108,7 @@ func buildEnforcer(bindings []RoleBinding, policies []Policy) (*casbin.SyncedEnf
 		if !validMethod(policy.Method) {
 			return nil, fmt.Errorf("policy %d method must be an uppercase HTTP method or '*': %q", index, policy.Method)
 		}
-		secretPathPrefix := "*"
+		secretPathPrefix := ""
 		if policy.SecretPathPrefix != nil {
 			secretPathPrefix = *policy.SecretPathPrefix
 		}
@@ -126,7 +126,7 @@ func buildEnforcer(bindings []RoleBinding, policies []Policy) (*casbin.SyncedEnf
 // Authorize evaluates one request. Empty values fail closed without invoking
 // the policy engine.
 func (a *StaticAuthorizer) Authorize(ctx context.Context, principal, domain, resource, action string) (bool, error) {
-	return a.authorize(ctx, principal, domain, resource, action, "*")
+	return a.authorize(ctx, principal, domain, resource, action, "")
 }
 
 func (a *StaticAuthorizer) authorize(ctx context.Context, principal, domain, resource, action, secretPath string) (bool, error) {
@@ -146,7 +146,7 @@ func (a *StaticAuthorizer) authorize(ctx context.Context, principal, domain, res
 }
 
 // AuthorizeSecretPath evaluates a secret item request including its decoded
-// logical path. A policy without SecretPathPrefix uses "*" and therefore
+// logical path. A policy without SecretPathPrefix uses an empty matcher and therefore
 // preserves the existing vault-scoped behavior.
 func (a *StaticAuthorizer) AuthorizeSecretPath(ctx context.Context, principal, domain, resource, action, secretPath string) (bool, error) {
 	if secretPath == "" {
@@ -292,8 +292,11 @@ func secretPathMatch(args ...interface{}) (interface{}, error) {
 	if !ok {
 		return false, errors.New("secretPathMatch: policy path must be a string")
 	}
-	if policyPath == "*" {
+	if policyPath == "" {
 		return true, nil
+	}
+	if requestPath == "" {
+		return false, nil
 	}
 	return strings.HasPrefix(requestPath, policyPath), nil
 }
