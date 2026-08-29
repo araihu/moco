@@ -9,11 +9,31 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for AuditEventOutcome.
+const (
+	Failure AuditEventOutcome = "failure"
+	Success AuditEventOutcome = "success"
+)
+
+// Valid indicates whether the value is a known member of the AuditEventOutcome enum.
+func (e AuditEventOutcome) Valid() bool {
+	switch e {
+	case Failure:
+		return true
+	case Success:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for HealthStatusStatus.
 const (
@@ -43,6 +63,59 @@ func (e UnavailableStatusStatus) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// AuditEvent Request audit metadata without request bodies, query strings, credentials, or plaintext secret paths.
+type AuditEvent struct {
+	// Method Example: GET
+	Method string `json:"method"`
+
+	// OccurredAt Example: 2026-08-29T15:04:05Z
+	OccurredAt time.Time `json:"occurredAt"`
+
+	// Outcome Example: success
+	Outcome AuditEventOutcome `json:"outcome"`
+
+	// PrincipalId Authenticated principal identifier; absent when authentication did not succeed.
+	//
+	// Example: operator
+	PrincipalId *string `json:"principalId,omitempty"`
+
+	// RequestId Example: 11111111-1111-4111-8111-111111111111
+	RequestId string `json:"requestId"`
+
+	// Route Request path without its query string.
+	//
+	// Example: /api/v1/tenants/11111111-1111-4111-8111-111111111111
+	Route string `json:"route"`
+
+	// SecretPathSha256 SHA-256 digest of the decoded logical secret path or list prefix; the plaintext is never persisted.
+	//
+	// Example: 2bb80d537b1da3e38bd30361aa855686bde0ba53e611d8a8a5e47993629e366f
+	SecretPathSha256 *string `json:"secretPathSha256,omitempty"`
+
+	// Sequence Example: 42
+	Sequence int64 `json:"sequence"`
+
+	// StatusCode Example: 200
+	StatusCode int32 `json:"statusCode"`
+}
+
+// AuditEventOutcome Example: success
+type AuditEventOutcome string
+
+// AuditEventList Ordered page from the append-only audit ledger.
+type AuditEventList struct {
+	// HasMore Whether another event exists after the last returned sequence.
+	//
+	// Example: false
+	HasMore bool `json:"hasMore"`
+
+	// Items Example: [{"method":"GET","occurredAt":"2026-08-29T15:04:05Z","outcome":"success","principalId":"operator","requestId":"11111111-1111-4111-8111-111111111111","route":"/api/v1/tenants/11111111-1111-4111-8111-111111111111","sequence":42,"statusCode":200}]
+	Items []AuditEvent `json:"items"`
+
+	// NextAfterSequence Exclusive checkpoint for the next page; null when hasMore is false.
+	NextAfterSequence *int64 `json:"nextAfterSequence"`
 }
 
 // AuthorizationPolicy Allow policy for a role or principal, domain, path pattern, and HTTP method. Secret operation policies may additionally narrow access to a literal logical secret path prefix.
@@ -189,6 +262,12 @@ type UnavailableStatus struct {
 // UnavailableStatusStatus Example: unavailable
 type UnavailableStatusStatus string
 
+// AuditAfterSequence Example: 42
+type AuditAfterSequence = int64
+
+// Limit defines model for limit.
+type Limit = int32
+
 // RequestId defines model for request-id.
 type RequestId = string
 
@@ -210,6 +289,18 @@ type ServiceUnavailable = Problem
 // Unauthorized Problem Details response compatible with RFC 9457.
 type Unauthorized = Problem
 
+// ListAuditEventsParams defines parameters for ListAuditEvents.
+type ListAuditEventsParams struct {
+	// AfterSequence Exclusive audit sequence checkpoint. Use the returned nextAfterSequence to continue the same ordered ledger page.
+	AfterSequence *AuditAfterSequence `form:"afterSequence,omitempty" json:"afterSequence,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
 // GetAuthorizationSnapshotParams defines parameters for GetAuthorizationSnapshot.
 type GetAuthorizationSnapshotParams struct {
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
@@ -230,6 +321,9 @@ type ReplaceAuthorizationSnapshotJSONRequestBody = AuthorizationSnapshotInput
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAuditEvents List request audit events
+	// (GET /internal/v1/audit)
+	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
 	// GetAuthorizationSnapshot Read the persisted authorization snapshot
 	// (GET /internal/v1/authorization)
 	GetAuthorizationSnapshot(w http.ResponseWriter, r *http.Request, params GetAuthorizationSnapshotParams)
@@ -252,6 +346,73 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListAuditEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditEventsParams
+
+	// ------------- Optional query parameter "afterSequence" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterSequence", r.URL.Query(), &params.AfterSequence, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "afterSequence"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "afterSequence", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetAuthorizationSnapshot operation middleware
 func (siw *ServerInterfaceWrapper) GetAuthorizationSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -510,6 +671,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/readyz", wrapper.GetReadiness)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/internal/v1/authorization", wrapper.GetAuthorizationSnapshot)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/internal/v1/authorization", wrapper.ReplaceAuthorizationSnapshot)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/internal/v1/audit", wrapper.ListAuditEvents)
 
 	return m
 }
@@ -569,6 +731,123 @@ type UnauthorizedApplicationProblemPlusJSONResponse struct {
 	Body Problem
 
 	Headers UnauthorizedResponseHeaders
+}
+
+type ListAuditEventsRequestObject struct {
+	Params ListAuditEventsParams
+}
+
+type ListAuditEventsResponseObject interface {
+	VisitListAuditEventsResponse(w http.ResponseWriter) error
+}
+
+type ListAuditEvents200ResponseHeaders struct {
+	XRequestID string
+}
+
+type ListAuditEvents200JSONResponse struct {
+	Body    AuditEventList
+	Headers ListAuditEvents200ResponseHeaders
+}
+
+func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListAuditEvents400ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListAuditEvents401ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListAuditEvents403ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListAuditEvents500ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListAuditEvents503ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type GetAuthorizationSnapshotRequestObject struct {
@@ -877,6 +1156,9 @@ func (response GetReadiness503JSONResponse) VisitGetReadinessResponse(w http.Res
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListAuditEvents List request audit events
+	// (GET /internal/v1/audit)
+	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
 	// GetAuthorizationSnapshot Read the persisted authorization snapshot
 	// (GET /internal/v1/authorization)
 	GetAuthorizationSnapshot(ctx context.Context, request GetAuthorizationSnapshotRequestObject) (GetAuthorizationSnapshotResponseObject, error)
@@ -928,6 +1210,32 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListAuditEvents operation middleware
+func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams) {
+	var request ListAuditEventsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAuditEvents(ctx, request.(ListAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
+		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // GetAuthorizationSnapshot operation middleware

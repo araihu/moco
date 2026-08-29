@@ -1,0 +1,30 @@
+title: AuditEventList
+type: object
+description: Ordered page from the append-only audit ledger.
+additionalProperties: false
+required: [items, hasMore, nextAfterSequence]
+properties:
+  items:
+    type: array
+    example:
+      - sequence: 42
+        occurredAt: '2026-08-29T15:04:05Z'
+        requestId: 11111111-1111-4111-8111-111111111111
+        principalId: operator
+        method: GET
+        route: /api/v1/tenants/11111111-1111-4111-8111-111111111111
+        statusCode: 200
+        outcome: success
+    items:
+      $ref: ./audit-event.yaml
+  hasMore:
+    type: boolean
+    description: Whether another event exists after the last returned sequence.
+    example: false
+  nextAfterSequence:
+    type: integer
+    format: int64
+    minimum: 1
+    nullable: true
+    description: Exclusive checkpoint for the next page; null when hasMore is false.
+    example: null

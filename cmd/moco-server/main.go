@@ -75,6 +75,10 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize secret service: %w", err)
 	}
+	auditService, err := services.NewAuditService(store)
+	if err != nil {
+		return fmt.Errorf("initialize audit service: %w", err)
+	}
 	security, err := buildSecurityRuntime(startupContext, configuration, store)
 	if err != nil {
 		return fmt.Errorf("initialize access control: %w", err)
@@ -89,6 +93,7 @@ func run(logger *slog.Logger) error {
 		Authenticator:   security.authenticator,
 		Authorizer:      security.authorizer,
 		Authorization:   security.policyService,
+		Audit:           auditService,
 		PrincipalCheck:  security.authenticator.HasPrincipal,
 		ServiceVersion:  version,
 		Logger:          logger,

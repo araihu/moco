@@ -45,6 +45,7 @@ type HandlerOptions struct {
 	Authenticator   BearerAuthenticator
 	Authorizer      ports.Authorizer
 	Authorization   *services.AuthorizationPolicyService
+	Audit           *services.AuditService
 	PrincipalCheck  func(string) bool
 	ServiceVersion  string
 	Logger          *slog.Logger
@@ -86,6 +87,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		resourceVersion: options.ResourceVersion,
 		authorizer:      options.Authorizer,
 		authorization:   options.Authorization,
+		audit:           options.Audit,
 		principalCheck:  options.PrincipalCheck,
 		serviceVersion:  options.ServiceVersion,
 		logger:          options.Logger,
@@ -118,6 +120,9 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	handler := strictResourceJSON(api)
 	handler = authorizationMiddleware(options.Authorizer, options.Logger, handler)
 	handler = bearerAuthentication(options.Authenticator, handler)
+	if options.Audit != nil {
+		handler = auditMiddleware(options.Audit, options.Logger, handler)
+	}
 	handler = requestIDs(handler)
 	return handler, nil
 }
@@ -130,6 +135,7 @@ type Server struct {
 	readiness       ReadinessChecker
 	resourceVersion ports.ResourceVersionReader
 	authorization   *services.AuthorizationPolicyService
+	audit           *services.AuditService
 	principalCheck  func(string) bool
 	serviceVersion  string
 	logger          *slog.Logger
@@ -179,7 +185,10 @@ func bearerAuthentication(authenticator BearerAuthenticator, next http.Handler) 
 			return
 		}
 		ctx := context.WithValue(r.Context(), principalContextKey, principal)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		// Keep the authenticated context visible to an outer audit wrapper while
+		// preserving the same request pointer for the downstream chain.
+		*r = *r.WithContext(ctx)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -251,6 +260,9 @@ func authorizationResource(r *http.Request) (string, string, bool) {
 	path := r.URL.Path
 	if path == authorizationAdminPath {
 		return "*", path, r.Method == http.MethodGet || r.Method == http.MethodPut
+	}
+	if path == auditPath {
+		return "*", path, r.Method == http.MethodGet
 	}
 	if !isPublicAPIPath(path) {
 		return "", "", false
@@ -343,11 +355,12 @@ func strictResourceJSON(next http.Handler) http.Handler {
 
 const (
 	authorizationAdminPath    = "/internal/v1/authorization"
+	auditPath                 = "/internal/v1/audit"
 	maxAuthorizationJSONBytes = 2 << 20
 )
 
 func isProtectedAPIPath(path string) bool {
-	return isPublicAPIPath(path) || path == authorizationAdminPath
+	return isPublicAPIPath(path) || path == authorizationAdminPath || path == auditPath
 }
 
 func isPublicAPIPath(path string) bool {

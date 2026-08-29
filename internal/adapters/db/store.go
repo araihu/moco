@@ -33,6 +33,7 @@ type Store struct {
 
 var _ ports.AuthorizationRepository = (*Store)(nil)
 var _ ports.ResourceVersionReader = (*Store)(nil)
+var _ ports.AuditRepository = (*Store)(nil)
 
 // Open opens a SQLite file, applies embedded migrations, and verifies it.
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -69,6 +70,45 @@ func (s *Store) CurrentResourceVersion(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("read resource version: %w", err)
 	}
 	return revision, nil
+}
+
+// AppendAuditEvent appends one request record without affecting the resource
+// watch checkpoint. Audit records are operational history, not API resources.
+func (s *Store) AppendAuditEvent(ctx context.Context, event ports.AuditEvent) (ports.AuditEvent, error) {
+	row, err := s.queries.InsertAuditEvent(ctx, sqlc.InsertAuditEventParams{
+		OccurredAt:       formatDatabaseTime(event.OccurredAt),
+		RequestID:        event.RequestID,
+		PrincipalID:      nullableString(event.PrincipalID),
+		Method:           event.Method,
+		Route:            event.Route,
+		StatusCode:       int64(event.StatusCode),
+		Outcome:          event.Outcome,
+		SecretPathSha256: nullableString(event.SecretPathSHA256),
+	})
+	if err != nil {
+		return ports.AuditEvent{}, fmt.Errorf("append audit event: %w", err)
+	}
+	return auditEventFromRow(row)
+}
+
+// ListAuditEvents returns events after an exclusive sequence checkpoint.
+func (s *Store) ListAuditEvents(ctx context.Context, query ports.ListAuditEventsQuery) ([]ports.AuditEvent, error) {
+	rows, err := s.queries.ListAuditEventsPage(ctx, sqlc.ListAuditEventsPageParams{
+		AfterSequence: query.AfterSequence,
+		PageSize:      int64(query.PageSize),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list audit events: %w", err)
+	}
+	events := make([]ports.AuditEvent, 0, len(rows))
+	for _, row := range rows {
+		event, err := auditEventFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, nil
 }
 
 // LoadAuthorization reads the complete authoritative policy snapshot in a
@@ -1019,6 +1059,24 @@ func secretMetadata(
 		Sequence: sequence, TenantID: tenantID, VaultID: vaultID, Path: path,
 		Digest: digest, ContentType: contentType, Version: version,
 		CreatedAt: createdAt, UpdatedAt: updatedAt,
+	}, nil
+}
+
+func auditEventFromRow(row sqlc.AuditEvent) (ports.AuditEvent, error) {
+	occurredAt, err := time.Parse(databaseTimeFormat, row.OccurredAt)
+	if err != nil {
+		return ports.AuditEvent{}, fmt.Errorf("parse audit occurrence time: %w", err)
+	}
+	return ports.AuditEvent{
+		Sequence:         row.Sequence,
+		OccurredAt:       occurredAt,
+		RequestID:        row.RequestID,
+		PrincipalID:      pointerFromNull(row.PrincipalID),
+		Method:           row.Method,
+		Route:            row.Route,
+		StatusCode:       int(row.StatusCode),
+		Outcome:          row.Outcome,
+		SecretPathSHA256: pointerFromNull(row.SecretPathSha256),
 	}, nil
 }
 

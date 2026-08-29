@@ -1,11 +1,12 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.4.0
+  version: 0.5.0
   description: |
-    Process probes and deployment-scoped authorization administration. The
-    administration operation is intended for a restricted deployment origin;
-    it never exposes bearer token digests.
+    Process probes, deployment-scoped authorization administration, and a
+    restricted request audit ledger. Administrative operations are intended for
+    a restricted deployment origin; they never expose bearer token digests or
+    request payloads.
   contact:
     name: AraiHu
     url: https://github.com/araihu/moco
@@ -19,6 +20,8 @@ tags:
     description: Process liveness and traffic readiness probes.
   - name: Authorization
     description: Restricted replacement of the persisted authorization snapshot.
+  - name: Audit
+    description: Restricted request metadata ledger for operational reconciliation.
 paths:
   /livez:
     get:
@@ -157,6 +160,41 @@ paths:
           $ref: '#/components/responses/bad-request'
         '412':
           $ref: '#/components/responses/precondition-failed'
+        '401':
+          $ref: '#/components/responses/unauthorized'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '500':
+          $ref: '#/components/responses/internal-error'
+        '503':
+          $ref: '#/components/responses/service-unavailable'
+  /internal/v1/audit:
+    parameters:
+      - $ref: '#/components/parameters/request-id'
+    get:
+      operationId: listAuditEvents
+      summary: List request audit events
+      description: Returns request metadata in ascending durable sequence order. Query strings, request bodies, bearer credentials, and plaintext logical secret paths are never returned; secret paths are represented only by SHA-256 digests. The endpoint is internal and requires an explicit authorization policy for its exact path.
+      tags: [Audit]
+      parameters:
+        - $ref: '#/components/parameters/audit-after-sequence'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Ordered audit event page.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/request-id'
+          content:
+            application/json:
+              example:
+                items: []
+                hasMore: false
+                nextAfterSequence: null
+              schema:
+                $ref: '#/components/schemas/audit-event-list'
+        '400':
+          $ref: '#/components/responses/bad-request'
         '401':
           $ref: '#/components/responses/unauthorized'
         '403':
@@ -417,6 +455,115 @@ components:
           minLength: 1
           description: Human-readable message that never contains secret values.
           example: must match the documented name format
+    audit-event-list:
+      title: AuditEventList
+      type: object
+      description: Ordered page from the append-only audit ledger.
+      additionalProperties: false
+      required:
+        - items
+        - hasMore
+        - nextAfterSequence
+      properties:
+        items:
+          type: array
+          example:
+            - sequence: 42
+              occurredAt: '2026-08-29T15:04:05Z'
+              requestId: 11111111-1111-4111-8111-111111111111
+              principalId: operator
+              method: GET
+              route: /api/v1/tenants/11111111-1111-4111-8111-111111111111
+              statusCode: 200
+              outcome: success
+          items:
+            $ref: '#/components/schemas/audit-event'
+        hasMore:
+          type: boolean
+          description: Whether another event exists after the last returned sequence.
+          example: false
+        nextAfterSequence:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: Exclusive checkpoint for the next page; null when hasMore is false.
+          example:
+    audit-event:
+      title: AuditEvent
+      type: object
+      description: Request audit metadata without request bodies, query strings, credentials, or plaintext secret paths.
+      additionalProperties: false
+      required:
+        - sequence
+        - occurredAt
+        - requestId
+        - method
+        - route
+        - statusCode
+        - outcome
+      properties:
+        sequence:
+          type: integer
+          format: int64
+          minimum: 1
+          readOnly: true
+          example: 42
+        occurredAt:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2026-08-29T15:04:05Z'
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          readOnly: true
+          example: 11111111-1111-4111-8111-111111111111
+        principalId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          nullable: true
+          readOnly: true
+          description: Authenticated principal identifier; absent when authentication did not succeed.
+          example: operator
+        method:
+          type: string
+          minLength: 1
+          maxLength: 16
+          readOnly: true
+          example: GET
+        route:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          readOnly: true
+          description: Request path without its query string.
+          example: /api/v1/tenants/11111111-1111-4111-8111-111111111111
+        statusCode:
+          type: integer
+          format: int32
+          minimum: 100
+          maximum: 599
+          readOnly: true
+          example: 200
+        outcome:
+          type: string
+          enum:
+            - success
+            - failure
+          readOnly: true
+          example: success
+        secretPathSha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          minLength: 64
+          maxLength: 64
+          nullable: true
+          readOnly: true
+          description: SHA-256 digest of the decoded logical secret path or list prefix; the plaintext is never persisted.
+          example: 2bb80d537b1da3e38bd30361aa855686bde0ba53e611d8a8a5e47993629e366f
   responses:
     unauthorized:
       description: Bearer authentication is missing or invalid.
@@ -527,6 +674,28 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    audit-after-sequence:
+      name: afterSequence
+      in: query
+      required: false
+      description: Exclusive audit sequence checkpoint. Use the returned nextAfterSequence to continue the same ordered ledger page.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+        default: 0
+        example: 42
+    limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items to return.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 200
+        default: 50
   headers:
     retry-after:
       description: Delay in seconds before retrying the request.

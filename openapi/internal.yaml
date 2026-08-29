@@ -1,11 +1,12 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.4.0
+  version: 0.5.0
   description: |
-    Process probes and deployment-scoped authorization administration. The
-    administration operation is intended for a restricted deployment origin;
-    it never exposes bearer token digests.
+    Process probes, deployment-scoped authorization administration, and a
+    restricted request audit ledger. Administrative operations are intended for
+    a restricted deployment origin; they never expose bearer token digests or
+    request payloads.
   contact:
     name: AraiHu
     url: https://github.com/araihu/moco
@@ -19,6 +20,8 @@ tags:
     description: Process liveness and traffic readiness probes.
   - name: Authorization
     description: Restricted replacement of the persisted authorization snapshot.
+  - name: Audit
+    description: Restricted request metadata ledger for operational reconciliation.
 paths:
   /livez:
     $ref: ./paths/livez.yaml
@@ -26,6 +29,8 @@ paths:
     $ref: ./paths/readyz.yaml
   /internal/v1/authorization:
     $ref: ./paths/authorization.yaml
+  /internal/v1/audit:
+    $ref: ./paths/audit.yaml
 components:
   securitySchemes:
     bearerAuth:

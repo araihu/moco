@@ -31,7 +31,12 @@ e = some(where (p.eft == allow))
 m = (r.sub == p.sub || g(r.sub, p.sub, r.dom) || g(r.sub, p.sub, "*")) && (p.dom == "*" || r.dom == p.dom) && keyMatch3(r.obj, p.obj) && (p.act == "*" || r.act == p.act) && secretPathMatch(r.secret_path, p.secret_path)
 `
 
-const secretItemPolicyPath = "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret" //nolint:gosec // route pattern, not a credential.
+const (
+	authorizationAdminPolicyPath = "/internal/v1/authorization"
+	auditPolicyPath              = "/internal/v1/audit"
+
+	secretItemPolicyPath = "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret" //nolint:gosec // route pattern, not a credential.
+)
 
 const secretMetadataPolicyPath = "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret/metadata" //nolint:gosec // route pattern, not a credential.
 
@@ -239,7 +244,7 @@ func validMethod(value string) bool {
 }
 
 func validatePolicyPath(value string) error {
-	if value == "/internal/v1/authorization" {
+	if value == authorizationAdminPolicyPath || value == auditPolicyPath {
 		return nil
 	}
 	if len(value) < len("/api/v1") || len(value) > 512 || (value != "/api/v1" && !strings.HasPrefix(value, "/api/v1/")) {

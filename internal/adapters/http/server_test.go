@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -222,6 +223,95 @@ func TestWatchChangesReturnsCheckpointAndDetectsMutations(t *testing.T) {
 	problem := decode[httpapi.Problem](t, response)
 	if problem.Code != "resource_version_ahead" {
 		t.Fatalf("unexpected ahead checkpoint problem: %#v", problem)
+	}
+}
+
+func TestAuditLedgerCapturesProtectedRequestWithoutQueryOrPlaintextPath(t *testing.T) {
+	t.Parallel()
+	test := newFixture(t, services.TenantServiceOptions{
+		CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes"),
+	})
+	secretPath := "prod/database/password"
+	response := test.request(t, http.MethodGet, "/api/v1/tenants/11111111-1111-4111-8111-111111111111/vaults/22222222-2222-4222-8222-222222222222/secret?path="+secretPath, nil, nil, true)
+	assertStatus(t, response, http.StatusNotFound)
+
+	response = test.request(t, http.MethodGet, "/internal/v1/audit?limit=10", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	page := decode[internalapi.AuditEventList](t, response)
+	if len(page.Items) != 1 || page.Items[0].Route != "/api/v1/tenants/11111111-1111-4111-8111-111111111111/vaults/22222222-2222-4222-8222-222222222222/secret" {
+		t.Fatalf("unexpected first audit page: %#v", page)
+	}
+	event := page.Items[0]
+	if event.StatusCode != http.StatusNotFound || event.Outcome != internalapi.Failure || event.PrincipalId == nil || *event.PrincipalId != "fixture-principal" {
+		t.Fatalf("unexpected audit event: %#v", event)
+	}
+	if event.SecretPathSha256 == nil || *event.SecretPathSha256 != sha256Hex(secretPath) {
+		t.Fatalf("secret path digest = %v, want SHA-256 digest", event.SecretPathSha256)
+	}
+	if strings.Contains(string(response.Body), secretPath) || strings.Contains(string(response.Body), "?path=") {
+		t.Fatalf("audit response leaked query/path: %s", response.Body)
+	}
+
+	response = test.request(t, http.MethodGet, "/internal/v1/audit?afterSequence=1&limit=10", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	continuation := decode[internalapi.AuditEventList](t, response)
+	if len(continuation.Items) != 1 || continuation.Items[0].Route != "/internal/v1/audit" {
+		t.Fatalf("unexpected audit continuation: %#v", continuation)
+	}
+}
+
+func TestAuditLedgerRequiresExplicitPermission(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := db.Open(ctx, filepath.Join(t.TempDir(), "moco.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	tenantService, err := services.NewTenantService(store, services.TenantServiceOptions{CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vaultService, err := services.NewVaultService(store, services.VaultServiceOptions{CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := encryption.NewHKDFAESGCMEnvelope(encryption.HKDFAESGCMOptions{RootKeyID: "test-root-v1", RootKey: bytes.Repeat([]byte{0x42}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(envelope.Destroy)
+	secretService, err := services.NewSecretService(store, envelope, services.SecretServiceOptions{CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(testBearerToken))
+	authenticator, err := authn.NewTokenAuthenticator([]authn.Credential{{PrincipalID: "fixture-principal", TokenSHA256: hex.EncodeToString(digest[:])}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{Subject: "fixture-principal", Domain: "*", Path: "/api/v1/*", Method: "*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auditService, err := services.NewAuditService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
+		Tenants: tenantService, Vaults: vaultService, Secrets: secretService, Readiness: store,
+		ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer, Audit: auditService,
+		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/internal/v1/audit", nil)
+	request.Header.Set("Authorization", "Bearer "+testBearerToken)
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("audit without explicit permission status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -485,13 +575,19 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{
 		{Subject: "fixture-principal", Domain: "*", Path: "/api/v1", Method: "GET"},
 		{Subject: "fixture-principal", Domain: "*", Path: "/api/v1/*", Method: "*"},
+		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/audit", Method: "GET"},
 	})
 	if err != nil {
 		t.Fatalf("create test authorizer: %v", err)
 	}
+	auditService, err := services.NewAuditService(store)
+	if err != nil {
+		t.Fatalf("create audit service: %v", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
 		Readiness: store, ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
+		Audit:          auditService,
 		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -561,4 +657,9 @@ func decode[T any](t *testing.T, response *testResponse) T {
 		t.Fatalf("decode response: %v", err)
 	}
 	return value
+}
+
+func sha256Hex(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(digest[:])
 }

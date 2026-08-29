@@ -8,6 +8,18 @@ import (
 	"database/sql"
 )
 
+type AuditEvent struct {
+	Sequence         int64          `json:"sequence"`
+	OccurredAt       string         `json:"occurred_at"`
+	RequestID        string         `json:"request_id"`
+	PrincipalID      sql.NullString `json:"principal_id"`
+	Method           string         `json:"method"`
+	Route            string         `json:"route"`
+	StatusCode       int64          `json:"status_code"`
+	Outcome          string         `json:"outcome"`
+	SecretPathSha256 sql.NullString `json:"secret_path_sha256"`
+}
+
 type AuthorizationPolicy struct {
 	Subject          string `json:"subject"`
 	Domain           string `json:"domain"`

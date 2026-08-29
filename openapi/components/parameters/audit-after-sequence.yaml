@@ -1,0 +1,10 @@
+name: afterSequence
+in: query
+required: false
+description: Exclusive audit sequence checkpoint. Use the returned nextAfterSequence to continue the same ordered ledger page.
+schema:
+  type: integer
+  format: int64
+  minimum: 0
+  default: 0
+  example: 42

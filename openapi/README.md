@@ -7,10 +7,11 @@ operation therefore uses explicit bearer authentication and is safe to expose
 behind a TLS ingress when deployment policy permits it.
 
 `internal.yaml` contains the minimal unauthenticated liveness/readiness probes
-needed by a process supervisor or load balancer plus a bearer-protected
-authorization snapshot operation for the restricted deployment origin. The
-snapshot operation never exposes token digests. A deployment should restrict
-the origin with network policy as well as an explicit Casbin permission; same-
+needed by a process supervisor or load balancer plus bearer-protected
+authorization-snapshot and request-audit operations for the restricted
+deployment origin. These operations never expose token digests, request bodies,
+query strings, or plaintext logical secret paths. A deployment should restrict
+the origin with network policy as well as explicit Casbin permissions; same-
 cluster placement is not an authentication mechanism.
 
 The contracts are intentionally split into small files below `paths/` and
@@ -42,6 +43,11 @@ artifacts; edit the exploded sources instead.
 - The internal authorization snapshot exposes its monotonic revision as both
   `revision` and an `ETag`; `PUT /internal/v1/authorization` requires
   `If-Match` and returns `412` for a stale writer.
+- `GET /internal/v1/audit` exposes an ascending sequence ledger of request
+  metadata. `afterSequence` is exclusive and `nextAfterSequence` continues the
+  page; query strings and request payloads are omitted, while logical secret
+  paths are represented only by SHA-256 digests. Audit writes happen after the
+  response and cannot change its status.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.

@@ -16,6 +16,7 @@ secret lifecycles:
 - multi-principal bearer authentication from token digests and default-deny Casbin policies;
 - SQLite authorization policy snapshots with atomic revision-guarded replacement, coalesced local signals, and shared-store polling reloads;
 - restricted internal `GET`/`PUT /internal/v1/authorization` snapshot administration;
+- restricted internal `GET /internal/v1/audit` request metadata ledger;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
 - creation idempotency scoped to the authenticated principal for at least 24 hours;
@@ -26,8 +27,9 @@ secret lifecycles:
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. Root-key rotation, external
 KMS/HSM providers, cross-host policy transport when instances do not share the
-SQLite store, auditing, and production deployment hardening are not implemented
-yet. Treat this as a development slice, not a production secret store.
+SQLite store, audit retention/export, and production deployment hardening are
+not implemented yet. Treat this as a development slice, not a production secret
+store.
 
 ## Run locally
 
@@ -82,6 +84,14 @@ The internal authorization endpoint requires an explicit Casbin policy for
 public API. Keep that permission on a dedicated deployment principal and
 restrict the direct deployment origin with network policy as well.
 
+The internal audit endpoint requires its own explicit `GET` policy for
+`/internal/v1/audit`. It records protected API attempts after the response is
+produced, including status and principal metadata, without request bodies,
+query strings, bearer credentials, or plaintext secret paths. Logical secret
+paths and list prefixes are represented only by SHA-256 digests. A ledger write
+failure is logged and does not change the already-produced response; retention
+and export remain deployment responsibilities.
+
 Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
 tenant-scoped requests through `domain`; use the literal tenant ID for an
 isolated tenant. A secret-operation policy can additionally set
@@ -118,7 +128,7 @@ nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 - `internal/core/`: domain types, ports, and application services.
 - `internal/adapters/db/`: SQLite/sqlc repository.
 - `internal/adapters/encryption/`: HKDF-SHA-256/AES-256-GCM envelope encryption adapter.
-- `internal/adapters/http/`: generated strict contract and handwritten adapter.
+- `internal/adapters/http/`: generated strict contract and handwritten adapter, including audit capture.
 - `internal/adapters/authn/`: bearer token keyring keyed by SHA-256 digests.
 - `internal/adapters/authz/`: reloadable Casbin model, policy bus, and default-deny adapter.
 

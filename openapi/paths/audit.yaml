@@ -1,0 +1,34 @@
+parameters:
+  - $ref: ../components/parameters/request-id.yaml
+get:
+  operationId: listAuditEvents
+  summary: List request audit events
+  description: Returns request metadata in ascending durable sequence order. Query strings, request bodies, bearer credentials, and plaintext logical secret paths are never returned; secret paths are represented only by SHA-256 digests. The endpoint is internal and requires an explicit authorization policy for its exact path.
+  tags: [Audit]
+  parameters:
+    - $ref: ../components/parameters/audit-after-sequence.yaml
+    - $ref: ../components/parameters/limit.yaml
+  responses:
+    '200':
+      description: Ordered audit event page.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          example:
+            items: []
+            hasMore: false
+            nextAfterSequence: null
+          schema:
+            $ref: ../components/schemas/audit-event-list.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml
