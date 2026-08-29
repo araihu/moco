@@ -9,6 +9,19 @@ import (
 	"context"
 )
 
+const countVaultKeysNotUsingRootKey = `-- name: CountVaultKeysNotUsingRootKey :one
+SELECT COUNT(*)
+FROM vault_keys
+WHERE root_key_id <> ?1
+`
+
+func (q *Queries) CountVaultKeysNotUsingRootKey(ctx context.Context, rootKeyID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countVaultKeysNotUsingRootKey, rootKeyID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countVaultSecrets = `-- name: CountVaultSecrets :one
 SELECT COUNT(*)
 FROM secrets
@@ -49,6 +62,42 @@ func (q *Queries) DeleteSecret(ctx context.Context, arg DeleteSecretParams) (int
 	return result.RowsAffected()
 }
 
+const deleteSecretIfKeyState = `-- name: DeleteSecretIfKeyState :execrows
+DELETE FROM secrets
+WHERE tenant_id = ?1
+  AND vault_id = ?2
+  AND path = ?3
+  AND EXISTS (
+      SELECT 1
+      FROM encryption_key_state
+      WHERE id = 1
+        AND active_root_key_id = ?4
+        AND epoch = ?5
+  )
+`
+
+type DeleteSecretIfKeyStateParams struct {
+	TenantID                string `json:"tenant_id"`
+	VaultID                 string `json:"vault_id"`
+	Path                    string `json:"path"`
+	ExpectedActiveRootKeyID string `json:"expected_active_root_key_id"`
+	ExpectedKeyEpoch        int64  `json:"expected_key_epoch"`
+}
+
+func (q *Queries) DeleteSecretIfKeyState(ctx context.Context, arg DeleteSecretIfKeyStateParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSecretIfKeyState,
+		arg.TenantID,
+		arg.VaultID,
+		arg.Path,
+		arg.ExpectedActiveRootKeyID,
+		arg.ExpectedKeyEpoch,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSecretIfVersion = `-- name: DeleteSecretIfVersion :execrows
 DELETE FROM secrets
 WHERE tenant_id = ?1
@@ -70,6 +119,45 @@ func (q *Queries) DeleteSecretIfVersion(ctx context.Context, arg DeleteSecretIfV
 		arg.VaultID,
 		arg.Path,
 		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteSecretIfVersionAndKeyState = `-- name: DeleteSecretIfVersionAndKeyState :execrows
+DELETE FROM secrets
+WHERE tenant_id = ?1
+  AND vault_id = ?2
+  AND path = ?3
+  AND version = ?4
+  AND EXISTS (
+      SELECT 1
+      FROM encryption_key_state
+      WHERE id = 1
+        AND active_root_key_id = ?5
+        AND epoch = ?6
+  )
+`
+
+type DeleteSecretIfVersionAndKeyStateParams struct {
+	TenantID                string `json:"tenant_id"`
+	VaultID                 string `json:"vault_id"`
+	Path                    string `json:"path"`
+	ExpectedVersion         int64  `json:"expected_version"`
+	ExpectedActiveRootKeyID string `json:"expected_active_root_key_id"`
+	ExpectedKeyEpoch        int64  `json:"expected_key_epoch"`
+}
+
+func (q *Queries) DeleteSecretIfVersionAndKeyState(ctx context.Context, arg DeleteSecretIfVersionAndKeyStateParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSecretIfVersionAndKeyState,
+		arg.TenantID,
+		arg.VaultID,
+		arg.Path,
+		arg.ExpectedVersion,
+		arg.ExpectedActiveRootKeyID,
+		arg.ExpectedKeyEpoch,
 	)
 	if err != nil {
 		return 0, err
@@ -286,6 +374,84 @@ func (q *Queries) InsertSecret(ctx context.Context, arg InsertSecretParams) (Sec
 	return i, err
 }
 
+const insertSecretIfKeyState = `-- name: InsertSecretIfKeyState :one
+INSERT INTO secrets (
+    tenant_id,
+    vault_id,
+    path,
+    salt,
+    ciphertext,
+    digest,
+    content_type,
+    version,
+    created_at,
+    updated_at
+)
+SELECT
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    1,
+    ?8,
+    ?9
+FROM encryption_key_state
+WHERE id = 1
+  AND active_root_key_id = ?10
+  AND epoch = ?11
+ON CONFLICT (tenant_id, vault_id, path) DO NOTHING
+RETURNING sequence, tenant_id, vault_id, path, salt, ciphertext, digest,
+          content_type, version, created_at, updated_at
+`
+
+type InsertSecretIfKeyStateParams struct {
+	TenantID                string `json:"tenant_id"`
+	VaultID                 string `json:"vault_id"`
+	Path                    string `json:"path"`
+	Salt                    []byte `json:"salt"`
+	Ciphertext              []byte `json:"ciphertext"`
+	Digest                  string `json:"digest"`
+	ContentType             string `json:"content_type"`
+	CreatedAt               string `json:"created_at"`
+	UpdatedAt               string `json:"updated_at"`
+	ExpectedActiveRootKeyID string `json:"expected_active_root_key_id"`
+	ExpectedKeyEpoch        int64  `json:"expected_key_epoch"`
+}
+
+func (q *Queries) InsertSecretIfKeyState(ctx context.Context, arg InsertSecretIfKeyStateParams) (Secret, error) {
+	row := q.db.QueryRowContext(ctx, insertSecretIfKeyState,
+		arg.TenantID,
+		arg.VaultID,
+		arg.Path,
+		arg.Salt,
+		arg.Ciphertext,
+		arg.Digest,
+		arg.ContentType,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.ExpectedActiveRootKeyID,
+		arg.ExpectedKeyEpoch,
+	)
+	var i Secret
+	err := row.Scan(
+		&i.Sequence,
+		&i.TenantID,
+		&i.VaultID,
+		&i.Path,
+		&i.Salt,
+		&i.Ciphertext,
+		&i.Digest,
+		&i.ContentType,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertVaultKey = `-- name: InsertVaultKey :execrows
 INSERT INTO vault_keys (
     tenant_id,
@@ -315,6 +481,57 @@ func (q *Queries) InsertVaultKey(ctx context.Context, arg InsertVaultKeyParams) 
 		arg.Salt,
 		arg.WrappedKey,
 		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const insertVaultKeyIfKeyState = `-- name: InsertVaultKeyIfKeyState :execrows
+INSERT INTO vault_keys (
+    tenant_id,
+    vault_id,
+    root_key_id,
+    salt,
+    wrapped_key,
+    created_at
+)
+SELECT
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6
+FROM encryption_key_state
+WHERE id = 1
+  AND active_root_key_id = ?7
+  AND epoch = ?8
+ON CONFLICT (tenant_id, vault_id) DO NOTHING
+`
+
+type InsertVaultKeyIfKeyStateParams struct {
+	TenantID                string `json:"tenant_id"`
+	VaultID                 string `json:"vault_id"`
+	RootKeyID               string `json:"root_key_id"`
+	Salt                    []byte `json:"salt"`
+	WrappedKey              []byte `json:"wrapped_key"`
+	CreatedAt               string `json:"created_at"`
+	ExpectedActiveRootKeyID string `json:"expected_active_root_key_id"`
+	ExpectedKeyEpoch        int64  `json:"expected_key_epoch"`
+}
+
+func (q *Queries) InsertVaultKeyIfKeyState(ctx context.Context, arg InsertVaultKeyIfKeyStateParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertVaultKeyIfKeyState,
+		arg.TenantID,
+		arg.VaultID,
+		arg.RootKeyID,
+		arg.Salt,
+		arg.WrappedKey,
+		arg.CreatedAt,
+		arg.ExpectedActiveRootKeyID,
+		arg.ExpectedKeyEpoch,
 	)
 	if err != nil {
 		return 0, err
@@ -397,6 +614,143 @@ func (q *Queries) ListSecretMetadataPage(ctx context.Context, arg ListSecretMeta
 		return nil, err
 	}
 	return items, nil
+}
+
+const listVaultKeysPage = `-- name: ListVaultKeysPage :many
+SELECT tenant_id, vault_id, root_key_id, salt, wrapped_key, created_at
+FROM vault_keys
+WHERE tenant_id > ?1
+   OR (tenant_id = ?1
+       AND vault_id > ?2)
+ORDER BY tenant_id, vault_id
+LIMIT ?3
+`
+
+type ListVaultKeysPageParams struct {
+	AfterTenantID string `json:"after_tenant_id"`
+	AfterVaultID  string `json:"after_vault_id"`
+	PageSize      int64  `json:"page_size"`
+}
+
+func (q *Queries) ListVaultKeysPage(ctx context.Context, arg ListVaultKeysPageParams) ([]VaultKey, error) {
+	rows, err := q.db.QueryContext(ctx, listVaultKeysPage, arg.AfterTenantID, arg.AfterVaultID, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VaultKey{}
+	for rows.Next() {
+		var i VaultKey
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.VaultID,
+			&i.RootKeyID,
+			&i.Salt,
+			&i.WrappedKey,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const replaceVaultKeyIfCurrent = `-- name: ReplaceVaultKeyIfCurrent :execrows
+UPDATE vault_keys
+SET root_key_id = ?1,
+    salt = ?2,
+    wrapped_key = ?3
+WHERE tenant_id = ?4
+  AND vault_id = ?5
+  AND root_key_id = ?6
+  AND salt = ?7
+  AND wrapped_key = ?8
+`
+
+type ReplaceVaultKeyIfCurrentParams struct {
+	ReplacementRootKeyID  string `json:"replacement_root_key_id"`
+	ReplacementSalt       []byte `json:"replacement_salt"`
+	ReplacementWrappedKey []byte `json:"replacement_wrapped_key"`
+	TenantID              string `json:"tenant_id"`
+	VaultID               string `json:"vault_id"`
+	ExpectedRootKeyID     string `json:"expected_root_key_id"`
+	ExpectedSalt          []byte `json:"expected_salt"`
+	ExpectedWrappedKey    []byte `json:"expected_wrapped_key"`
+}
+
+func (q *Queries) ReplaceVaultKeyIfCurrent(ctx context.Context, arg ReplaceVaultKeyIfCurrentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, replaceVaultKeyIfCurrent,
+		arg.ReplacementRootKeyID,
+		arg.ReplacementSalt,
+		arg.ReplacementWrappedKey,
+		arg.TenantID,
+		arg.VaultID,
+		arg.ExpectedRootKeyID,
+		arg.ExpectedSalt,
+		arg.ExpectedWrappedKey,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const replaceVaultKeyIfCurrentAndKeyState = `-- name: ReplaceVaultKeyIfCurrentAndKeyState :execrows
+UPDATE vault_keys
+SET root_key_id = ?1,
+    salt = ?2,
+    wrapped_key = ?3
+WHERE tenant_id = ?4
+  AND vault_id = ?5
+  AND root_key_id = ?6
+  AND salt = ?7
+  AND wrapped_key = ?8
+  AND EXISTS (
+      SELECT 1
+      FROM encryption_key_state
+      WHERE id = 1
+        AND active_root_key_id = ?9
+        AND epoch = ?10
+  )
+`
+
+type ReplaceVaultKeyIfCurrentAndKeyStateParams struct {
+	ReplacementRootKeyID    string `json:"replacement_root_key_id"`
+	ReplacementSalt         []byte `json:"replacement_salt"`
+	ReplacementWrappedKey   []byte `json:"replacement_wrapped_key"`
+	TenantID                string `json:"tenant_id"`
+	VaultID                 string `json:"vault_id"`
+	ExpectedRootKeyID       string `json:"expected_root_key_id"`
+	ExpectedSalt            []byte `json:"expected_salt"`
+	ExpectedWrappedKey      []byte `json:"expected_wrapped_key"`
+	ExpectedActiveRootKeyID string `json:"expected_active_root_key_id"`
+	ExpectedKeyEpoch        int64  `json:"expected_key_epoch"`
+}
+
+func (q *Queries) ReplaceVaultKeyIfCurrentAndKeyState(ctx context.Context, arg ReplaceVaultKeyIfCurrentAndKeyStateParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, replaceVaultKeyIfCurrentAndKeyState,
+		arg.ReplacementRootKeyID,
+		arg.ReplacementSalt,
+		arg.ReplacementWrappedKey,
+		arg.TenantID,
+		arg.VaultID,
+		arg.ExpectedRootKeyID,
+		arg.ExpectedSalt,
+		arg.ExpectedWrappedKey,
+		arg.ExpectedActiveRootKeyID,
+		arg.ExpectedKeyEpoch,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const secretSnapshotUpperBound = `-- name: SecretSnapshotUpperBound :one
@@ -488,6 +842,75 @@ func (q *Queries) UpdateSecretIfVersion(ctx context.Context, arg UpdateSecretIfV
 	return i, err
 }
 
+const updateSecretIfVersionAndKeyState = `-- name: UpdateSecretIfVersionAndKeyState :one
+UPDATE secrets
+SET salt = ?1,
+    ciphertext = ?2,
+    digest = ?3,
+    content_type = ?4,
+    version = version + 1,
+    updated_at = ?5
+WHERE tenant_id = ?6
+  AND vault_id = ?7
+  AND path = ?8
+  AND version = ?9
+  AND (digest <> ?3 OR content_type <> ?4)
+  AND EXISTS (
+      SELECT 1
+      FROM encryption_key_state
+      WHERE id = 1
+        AND active_root_key_id = ?10
+        AND epoch = ?11
+  )
+RETURNING sequence, tenant_id, vault_id, path, salt, ciphertext, digest,
+          content_type, version, created_at, updated_at
+`
+
+type UpdateSecretIfVersionAndKeyStateParams struct {
+	Salt                    []byte `json:"salt"`
+	Ciphertext              []byte `json:"ciphertext"`
+	Digest                  string `json:"digest"`
+	ContentType             string `json:"content_type"`
+	UpdatedAt               string `json:"updated_at"`
+	TenantID                string `json:"tenant_id"`
+	VaultID                 string `json:"vault_id"`
+	Path                    string `json:"path"`
+	ExpectedVersion         int64  `json:"expected_version"`
+	ExpectedActiveRootKeyID string `json:"expected_active_root_key_id"`
+	ExpectedKeyEpoch        int64  `json:"expected_key_epoch"`
+}
+
+func (q *Queries) UpdateSecretIfVersionAndKeyState(ctx context.Context, arg UpdateSecretIfVersionAndKeyStateParams) (Secret, error) {
+	row := q.db.QueryRowContext(ctx, updateSecretIfVersionAndKeyState,
+		arg.Salt,
+		arg.Ciphertext,
+		arg.Digest,
+		arg.ContentType,
+		arg.UpdatedAt,
+		arg.TenantID,
+		arg.VaultID,
+		arg.Path,
+		arg.ExpectedVersion,
+		arg.ExpectedActiveRootKeyID,
+		arg.ExpectedKeyEpoch,
+	)
+	var i Secret
+	err := row.Scan(
+		&i.Sequence,
+		&i.TenantID,
+		&i.VaultID,
+		&i.Path,
+		&i.Salt,
+		&i.Ciphertext,
+		&i.Digest,
+		&i.ContentType,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertSecret = `-- name: UpsertSecret :one
 INSERT INTO secrets (
     tenant_id,
@@ -537,6 +960,98 @@ func (q *Queries) UpsertSecret(ctx context.Context, arg UpsertSecretParams) (Sec
 		arg.ContentType,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+	)
+	var i Secret
+	err := row.Scan(
+		&i.Sequence,
+		&i.TenantID,
+		&i.VaultID,
+		&i.Path,
+		&i.Salt,
+		&i.Ciphertext,
+		&i.Digest,
+		&i.ContentType,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertSecretIfKeyState = `-- name: UpsertSecretIfKeyState :one
+INSERT INTO secrets (
+    tenant_id,
+    vault_id,
+    path,
+    salt,
+    ciphertext,
+    digest,
+    content_type,
+    version,
+    created_at,
+    updated_at
+)
+SELECT
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    1,
+    ?8,
+    ?9
+FROM encryption_key_state
+WHERE id = 1
+  AND active_root_key_id = ?10
+  AND epoch = ?11
+ON CONFLICT (tenant_id, vault_id, path) DO UPDATE
+SET salt = excluded.salt,
+    ciphertext = excluded.ciphertext,
+    digest = excluded.digest,
+    content_type = excluded.content_type,
+    version = secrets.version + 1,
+    updated_at = excluded.updated_at
+WHERE (secrets.digest <> excluded.digest OR secrets.content_type <> excluded.content_type)
+  AND EXISTS (
+      SELECT 1
+      FROM encryption_key_state
+      WHERE id = 1
+        AND active_root_key_id = ?10
+        AND epoch = ?11
+  )
+RETURNING sequence, tenant_id, vault_id, path, salt, ciphertext, digest,
+          content_type, version, created_at, updated_at
+`
+
+type UpsertSecretIfKeyStateParams struct {
+	TenantID                string `json:"tenant_id"`
+	VaultID                 string `json:"vault_id"`
+	Path                    string `json:"path"`
+	Salt                    []byte `json:"salt"`
+	Ciphertext              []byte `json:"ciphertext"`
+	Digest                  string `json:"digest"`
+	ContentType             string `json:"content_type"`
+	CreatedAt               string `json:"created_at"`
+	UpdatedAt               string `json:"updated_at"`
+	ExpectedActiveRootKeyID string `json:"expected_active_root_key_id"`
+	ExpectedKeyEpoch        int64  `json:"expected_key_epoch"`
+}
+
+func (q *Queries) UpsertSecretIfKeyState(ctx context.Context, arg UpsertSecretIfKeyStateParams) (Secret, error) {
+	row := q.db.QueryRowContext(ctx, upsertSecretIfKeyState,
+		arg.TenantID,
+		arg.VaultID,
+		arg.Path,
+		arg.Salt,
+		arg.Ciphertext,
+		arg.Digest,
+		arg.ContentType,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.ExpectedActiveRootKeyID,
+		arg.ExpectedKeyEpoch,
 	)
 	var i Secret
 	err := row.Scan(

@@ -47,6 +47,7 @@ type HandlerOptions struct {
 	Authorization    *services.AuthorizationPolicyService
 	Audit            *services.AuditService
 	AuditPathHMACKey []byte
+	KeyRotation      *services.VaultKeyRotationService
 	PrincipalCheck   func(string) bool
 	ServiceVersion   string
 	Logger           *slog.Logger
@@ -92,6 +93,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		authorizer:      options.Authorizer,
 		authorization:   options.Authorization,
 		audit:           options.Audit,
+		keyRotation:     options.KeyRotation,
 		principalCheck:  options.PrincipalCheck,
 		serviceVersion:  options.ServiceVersion,
 		logger:          options.Logger,
@@ -140,6 +142,7 @@ type Server struct {
 	resourceVersion ports.ResourceVersionReader
 	authorization   *services.AuthorizationPolicyService
 	audit           *services.AuditService
+	keyRotation     *services.VaultKeyRotationService
 	principalCheck  func(string) bool
 	serviceVersion  string
 	logger          *slog.Logger
@@ -268,6 +271,9 @@ func authorizationResource(r *http.Request) (string, string, bool) {
 	if path == auditPath {
 		return "*", path, r.Method == http.MethodGet
 	}
+	if path == keyRotationPath {
+		return "*", path, r.Method == http.MethodPost
+	}
 	if !isPublicAPIPath(path) {
 		return "", "", false
 	}
@@ -360,11 +366,12 @@ func strictResourceJSON(next http.Handler) http.Handler {
 const (
 	authorizationAdminPath    = "/internal/v1/authorization"
 	auditPath                 = "/internal/v1/audit"
+	keyRotationPath           = "/internal/v1/encryption/rotation"
 	maxAuthorizationJSONBytes = 2 << 20
 )
 
 func isProtectedAPIPath(path string) bool {
-	return isPublicAPIPath(path) || path == authorizationAdminPath || path == auditPath
+	return isPublicAPIPath(path) || path == authorizationAdminPath || path == auditPath || path == keyRotationPath
 }
 
 func isPublicAPIPath(path string) bool {

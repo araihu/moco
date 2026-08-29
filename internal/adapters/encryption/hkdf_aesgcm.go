@@ -28,14 +28,18 @@ var singleUseNonce [12]byte
 type HKDFAESGCMOptions struct {
 	RootKeyID string
 	RootKey   []byte
-	Random    io.Reader
+	// RootKeys enables a deployment keyring during online rotation. The
+	// RootKeyID entry is the active key used for new vaults and rewraps; other
+	// entries are read-only previous key eras.
+	RootKeys map[string][]byte
+	Random   io.Reader
 }
 
 // HKDFAESGCMEnvelope derives an independent AES-256-GCM key for every wrapped
 // vault key and secret ciphertext. Each derived key encrypts exactly one message.
 type HKDFAESGCMEnvelope struct {
 	rootKeyID string
-	rootKey   []byte
+	rootKeys  map[string][]byte
 	random    io.Reader
 }
 
@@ -45,24 +49,51 @@ func NewHKDFAESGCMEnvelope(options HKDFAESGCMOptions) (*HKDFAESGCMEnvelope, erro
 	if !validKeyID(options.RootKeyID) {
 		return nil, errors.New("root key ID must contain 1 to 128 visible ASCII characters")
 	}
-	if len(options.RootKey) != encryptionKeyBytes {
-		return nil, errors.New("root encryption key must contain exactly 32 bytes")
+	if options.RootKeys != nil && len(options.RootKey) != 0 {
+		return nil, errors.New("root key and root keyring cannot be configured together")
+	}
+	rootKeys := make(map[string][]byte)
+	if options.RootKeys == nil {
+		if len(options.RootKey) != encryptionKeyBytes {
+			return nil, errors.New("root encryption key must contain exactly 32 bytes")
+		}
+		rootKeys[options.RootKeyID] = append([]byte(nil), options.RootKey...)
+	} else {
+		if len(options.RootKeys) == 0 {
+			return nil, errors.New("root keyring must contain at least one key")
+		}
+		for keyID, key := range options.RootKeys {
+			if !validKeyID(keyID) {
+				wipeKeyring(rootKeys)
+				return nil, errors.New("root keyring contains an invalid key ID")
+			}
+			if len(key) != encryptionKeyBytes {
+				wipeKeyring(rootKeys)
+				return nil, errors.New("root keyring entries must contain exactly 32 bytes")
+			}
+			rootKeys[keyID] = append([]byte(nil), key...)
+		}
+		if _, ok := rootKeys[options.RootKeyID]; !ok {
+			wipeKeyring(rootKeys)
+			return nil, errors.New("active root key ID is missing from the root keyring")
+		}
 	}
 	if options.Random == nil {
 		options.Random = rand.Reader
 	}
 	return &HKDFAESGCMEnvelope{
-		rootKeyID: options.RootKeyID,
-		rootKey:   append([]byte(nil), options.RootKey...),
-		random:    options.Random,
+		rootKeyID: options.RootKeyID, rootKeys: rootKeys, random: options.Random,
 	}, nil
 }
 
-// Destroy clears the in-process root key after all encryption operations stop.
+// Destroy clears in-process root keys after all encryption operations stop.
 func (e *HKDFAESGCMEnvelope) Destroy() {
-	wipe(e.rootKey)
-	e.rootKey = nil
+	wipeKeyring(e.rootKeys)
+	e.rootKeys = nil
 }
+
+// ActiveRootKeyID returns the key ID used for new vault keys and rewraps.
+func (e *HKDFAESGCMEnvelope) ActiveRootKeyID() string { return e.rootKeyID }
 
 // NewVaultKey generates and wraps one independent vault data key.
 func (e *HKDFAESGCMEnvelope) NewVaultKey(tenantID, vaultID string, createdAt time.Time) (ports.WrappedVaultKey, error) {
@@ -77,7 +108,11 @@ func (e *HKDFAESGCMEnvelope) NewVaultKey(tenantID, vaultID string, createdAt tim
 	}
 	aad := associatedData("vault-key", e.rootKeyID, tenantID, vaultID)
 	defer wipe(aad)
-	wrappingCipher, err := deriveAESGCM(e.rootKey, salt, aad)
+	rootKey, ok := e.rootKeys[e.rootKeyID]
+	if !ok {
+		return ports.WrappedVaultKey{}, errors.New("active root key is unavailable")
+	}
+	wrappingCipher, err := deriveAESGCM(rootKey, salt, aad)
 	if err != nil {
 		return ports.WrappedVaultKey{}, fmt.Errorf("derive vault wrapping key: %w", err)
 	}
@@ -88,6 +123,33 @@ func (e *HKDFAESGCMEnvelope) NewVaultKey(tenantID, vaultID string, createdAt tim
 		Ciphertext: wrapped,
 		CreatedAt:  createdAt.UTC(),
 	}, nil
+}
+
+// RewrapVaultKey decrypts one wrapped vault data key with its stored key era
+// and encrypts the same data key under the active root key. The data key never
+// leaves this adapter.
+func (e *HKDFAESGCMEnvelope) RewrapVaultKey(tenantID, vaultID string, key ports.WrappedVaultKey) (ports.WrappedVaultKey, error) {
+	dataKey, err := e.unwrapVaultKey(key, tenantID, vaultID)
+	if err != nil {
+		return ports.WrappedVaultKey{}, err
+	}
+	defer wipe(dataKey)
+	salt, err := e.randomSalt()
+	if err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("generate rotated vault key salt: %w", err)
+	}
+	rootKey, ok := e.rootKeys[e.rootKeyID]
+	if !ok {
+		return ports.WrappedVaultKey{}, errors.New("active root key is unavailable")
+	}
+	aad := associatedData("vault-key", e.rootKeyID, tenantID, vaultID)
+	defer wipe(aad)
+	wrappingCipher, err := deriveAESGCM(rootKey, salt, aad)
+	if err != nil {
+		return ports.WrappedVaultKey{}, fmt.Errorf("derive rotated vault wrapping key: %w", err)
+	}
+	wrapped := wrappingCipher.Seal(nil, singleUseNonce[:], dataKey, aad)
+	return ports.WrappedVaultKey{RootKeyID: e.rootKeyID, Salt: salt, Ciphertext: wrapped, CreatedAt: key.CreatedAt}, nil
 }
 
 // EncryptSecret encrypts a value under a one-time key derived from its vault
@@ -144,7 +206,8 @@ func (e *HKDFAESGCMEnvelope) DecryptSecret(
 }
 
 func (e *HKDFAESGCMEnvelope) unwrapVaultKey(key ports.WrappedVaultKey, tenantID, vaultID string) ([]byte, error) {
-	if key.RootKeyID != e.rootKeyID {
+	rootKey, ok := e.rootKeys[key.RootKeyID]
+	if !ok {
 		return nil, errors.New("stored vault key uses an unavailable root key ID")
 	}
 	if len(key.Salt) != kdfSaltBytes || len(key.Ciphertext) != encryptionKeyBytes+aes.BlockSize {
@@ -152,7 +215,7 @@ func (e *HKDFAESGCMEnvelope) unwrapVaultKey(key ports.WrappedVaultKey, tenantID,
 	}
 	aad := associatedData("vault-key", key.RootKeyID, tenantID, vaultID)
 	defer wipe(aad)
-	wrappingCipher, err := deriveAESGCM(e.rootKey, key.Salt, aad)
+	wrappingCipher, err := deriveAESGCM(rootKey, key.Salt, aad)
 	if err != nil {
 		return nil, fmt.Errorf("derive vault unwrapping key: %w", err)
 	}
@@ -227,4 +290,11 @@ func validKeyID(value string) bool {
 func wipe(value []byte) {
 	clear(value)
 	runtime.KeepAlive(value)
+}
+
+func wipeKeyring(keys map[string][]byte) {
+	for keyID, key := range keys {
+		wipe(key)
+		delete(keys, keyID)
+	}
 }

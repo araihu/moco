@@ -176,6 +176,53 @@ type AuthorizationSnapshotInput struct {
 	RoleBindings []AuthorizationRoleBinding `json:"roleBindings"`
 }
 
+// EncryptionRotationResult Bounded root-key rewrap result. It contains counts and a keyset checkpoint only; no key material or secret data is returned.
+type EncryptionRotationResult struct {
+	// ActiveRootKeyEpoch Monotonic deployment epoch that fences stale server processes during rollout.
+	//
+	// Example: 2
+	ActiveRootKeyEpoch int64 `json:"activeRootKeyEpoch"`
+
+	// ActiveRootKeyId Identifier of the deployment key era used for new and rewrapped vault keys.
+	//
+	// Example: root-v2
+	ActiveRootKeyId string `json:"activeRootKeyId"`
+
+	// Complete True when no vault key currently uses an older root-key era. A fresh full sweep should be run after transient failures or concurrent maintenance.
+	//
+	// Example: false
+	Complete bool `json:"complete"`
+
+	// HasMore Example: true
+	HasMore bool `json:"hasMore"`
+
+	// NextAfterTenantId Checkpoint for the next page; null when hasMore is false.
+	//
+	// Example: 11111111-1111-4111-8111-111111111111
+	NextAfterTenantId *string `json:"nextAfterTenantId"`
+
+	// NextAfterVaultId Checkpoint for the next page; null when hasMore is false.
+	//
+	// Example: 22222222-2222-4222-8222-222222222222
+	NextAfterVaultId *string `json:"nextAfterVaultId"`
+
+	// RemainingOldKeys Current count of vault keys whose root key ID differs from the active era; this is not a snapshot.
+	//
+	// Example: 3
+	RemainingOldKeys int64 `json:"remainingOldKeys"`
+
+	// Rewrapped Example: 47
+	Rewrapped int32 `json:"rewrapped"`
+
+	// Scanned Example: 50
+	Scanned int32 `json:"scanned"`
+
+	// Skipped Keys already using the active era or changed by another worker before this request committed.
+	//
+	// Example: 3
+	Skipped int32 `json:"skipped"`
+}
+
 // HealthStatus Minimal probe result with no deployment details.
 type HealthStatus struct {
 	// Status Example: ok
@@ -194,7 +241,9 @@ type Problem struct {
 	// invalid_resource_version, invalid_watch_timeout, resource_version_ahead,
 	// resource_not_found,
 	// resource_conflict, resource_has_children, idempotency_key_conflict,
-	// etag_mismatch, secret_too_large, service_unavailable, and internal_error.
+	// etag_mismatch, secret_too_large, invalid_rotation_checkpoint,
+	// invalid_limit, encryption_key_epoch_conflict, service_unavailable,
+	// and internal_error.
 	//
 	//
 	// Example: resource_not_found
@@ -265,6 +314,12 @@ type UnavailableStatusStatus string
 // AuditAfterSequence Example: 42
 type AuditAfterSequence = int64
 
+// EncryptionAfterTenantId defines model for encryption-after-tenant-id.
+type EncryptionAfterTenantId = string
+
+// EncryptionAfterVaultId defines model for encryption-after-vault-id.
+type EncryptionAfterVaultId = string
+
 // Limit defines model for limit.
 type Limit = int32
 
@@ -273,6 +328,9 @@ type RequestId = string
 
 // BadRequest Problem Details response compatible with RFC 9457.
 type BadRequest = Problem
+
+// Conflict Problem Details response compatible with RFC 9457.
+type Conflict = Problem
 
 // Forbidden Problem Details response compatible with RFC 9457.
 type Forbidden = Problem
@@ -316,6 +374,21 @@ type ReplaceAuthorizationSnapshotParams struct {
 	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
 }
 
+// RotateEncryptionKeysParams defines parameters for RotateEncryptionKeys.
+type RotateEncryptionKeysParams struct {
+	// AfterTenantId Exclusive tenant identifier checkpoint returned with the preceding rotation page. Supply it together with afterVaultId.
+	AfterTenantId *EncryptionAfterTenantId `form:"afterTenantId,omitempty" json:"afterTenantId,omitempty"`
+
+	// AfterVaultId Exclusive vault identifier checkpoint returned with the preceding rotation page. Supply it together with afterTenantId.
+	AfterVaultId *EncryptionAfterVaultId `form:"afterVaultId,omitempty" json:"afterVaultId,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
 // ReplaceAuthorizationSnapshotJSONRequestBody defines body for ReplaceAuthorizationSnapshot for application/json ContentType.
 type ReplaceAuthorizationSnapshotJSONRequestBody = AuthorizationSnapshotInput
 
@@ -330,6 +403,9 @@ type ServerInterface interface {
 	// ReplaceAuthorizationSnapshot Replace the persisted authorization snapshot
 	// (PUT /internal/v1/authorization)
 	ReplaceAuthorizationSnapshot(w http.ResponseWriter, r *http.Request, params ReplaceAuthorizationSnapshotParams)
+	// RotateEncryptionKeys Rewrap one bounded page of vault data keys
+	// (POST /internal/v1/encryption/rotation)
+	RotateEncryptionKeys(w http.ResponseWriter, r *http.Request, params RotateEncryptionKeysParams)
 	// GetLiveness Check process liveness
 	// (GET /livez)
 	GetLiveness(w http.ResponseWriter, r *http.Request)
@@ -519,6 +595,86 @@ func (siw *ServerInterfaceWrapper) ReplaceAuthorizationSnapshot(w http.ResponseW
 	handler.ServeHTTP(w, r)
 }
 
+// RotateEncryptionKeys operation middleware
+func (siw *ServerInterfaceWrapper) RotateEncryptionKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RotateEncryptionKeysParams
+
+	// ------------- Optional query parameter "afterTenantId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterTenantId", r.URL.Query(), &params.AfterTenantId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "afterTenantId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "afterTenantId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "afterVaultId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterVaultId", r.URL.Query(), &params.AfterVaultId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "afterVaultId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "afterVaultId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateEncryptionKeys(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetLiveness operation middleware
 func (siw *ServerInterfaceWrapper) GetLiveness(w http.ResponseWriter, r *http.Request) {
 
@@ -672,6 +828,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/internal/v1/authorization", wrapper.GetAuthorizationSnapshot)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/internal/v1/authorization", wrapper.ReplaceAuthorizationSnapshot)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/internal/v1/audit", wrapper.ListAuditEvents)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/internal/v1/encryption/rotation", wrapper.RotateEncryptionKeys)
 
 	return m
 }
@@ -683,6 +840,15 @@ type BadRequestApplicationProblemPlusJSONResponse struct {
 	Body Problem
 
 	Headers BadRequestResponseHeaders
+}
+
+type ConflictResponseHeaders struct {
+	XRequestID string
+}
+type ConflictApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers ConflictResponseHeaders
 }
 
 type ForbiddenResponseHeaders struct {
@@ -1090,6 +1256,140 @@ func (response ReplaceAuthorizationSnapshot503ApplicationProblemPlusJSONResponse
 	return err
 }
 
+type RotateEncryptionKeysRequestObject struct {
+	Params RotateEncryptionKeysParams
+}
+
+type RotateEncryptionKeysResponseObject interface {
+	VisitRotateEncryptionKeysResponse(w http.ResponseWriter) error
+}
+
+type RotateEncryptionKeys200ResponseHeaders struct {
+	XRequestID string
+}
+
+type RotateEncryptionKeys200JSONResponse struct {
+	Body    EncryptionRotationResult
+	Headers RotateEncryptionKeys200ResponseHeaders
+}
+
+func (response RotateEncryptionKeys200JSONResponse) VisitRotateEncryptionKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEncryptionKeys400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RotateEncryptionKeys400ApplicationProblemPlusJSONResponse) VisitRotateEncryptionKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEncryptionKeys401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RotateEncryptionKeys401ApplicationProblemPlusJSONResponse) VisitRotateEncryptionKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEncryptionKeys403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response RotateEncryptionKeys403ApplicationProblemPlusJSONResponse) VisitRotateEncryptionKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEncryptionKeys409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RotateEncryptionKeys409ApplicationProblemPlusJSONResponse) VisitRotateEncryptionKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEncryptionKeys500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response RotateEncryptionKeys500ApplicationProblemPlusJSONResponse) VisitRotateEncryptionKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEncryptionKeys503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response RotateEncryptionKeys503ApplicationProblemPlusJSONResponse) VisitRotateEncryptionKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetLivenessRequestObject struct {
 }
 
@@ -1165,6 +1465,9 @@ type StrictServerInterface interface {
 	// ReplaceAuthorizationSnapshot Replace the persisted authorization snapshot
 	// (PUT /internal/v1/authorization)
 	ReplaceAuthorizationSnapshot(ctx context.Context, request ReplaceAuthorizationSnapshotRequestObject) (ReplaceAuthorizationSnapshotResponseObject, error)
+	// RotateEncryptionKeys Rewrap one bounded page of vault data keys
+	// (POST /internal/v1/encryption/rotation)
+	RotateEncryptionKeys(ctx context.Context, request RotateEncryptionKeysRequestObject) (RotateEncryptionKeysResponseObject, error)
 	// GetLiveness Check process liveness
 	// (GET /livez)
 	GetLiveness(ctx context.Context, request GetLivenessRequestObject) (GetLivenessResponseObject, error)
@@ -1290,6 +1593,32 @@ func (sh *strictHandler) ReplaceAuthorizationSnapshot(w http.ResponseWriter, r *
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ReplaceAuthorizationSnapshotResponseObject); ok {
 		if err := validResponse.VisitReplaceAuthorizationSnapshotResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateEncryptionKeys operation middleware
+func (sh *strictHandler) RotateEncryptionKeys(w http.ResponseWriter, r *http.Request, params RotateEncryptionKeysParams) {
+	var request RotateEncryptionKeysRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateEncryptionKeys(ctx, request.(RotateEncryptionKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateEncryptionKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateEncryptionKeysResponseObject); ok {
+		if err := validResponse.VisitRotateEncryptionKeysResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

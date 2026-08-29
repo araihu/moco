@@ -430,6 +430,27 @@ func TestAuthorizationAdministrationIsProtectedAndAtomic(t *testing.T) {
 	}
 }
 
+func TestEncryptionRotationEndpointIsBoundedAndProtected(t *testing.T) {
+	t.Parallel()
+	test := newFixture(t, services.TenantServiceOptions{
+		CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes"),
+	})
+	response := test.request(t, http.MethodPost, "/internal/v1/encryption/rotation?limit=1", nil, nil, false)
+	assertStatus(t, response, http.StatusUnauthorized)
+	response = test.request(t, http.MethodPost, "/internal/v1/encryption/rotation?afterTenantId=tenant", nil, nil, true)
+	assertStatus(t, response, http.StatusBadRequest)
+	problem := decode[httpapi.Problem](t, response)
+	if problem.Code != "invalid_rotation_checkpoint" {
+		t.Fatalf("unexpected rotation validation problem: %#v", problem)
+	}
+	response = test.request(t, http.MethodPost, "/internal/v1/encryption/rotation?limit=1", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	result := decode[internalapi.EncryptionRotationResult](t, response)
+	if result.ActiveRootKeyId != "test-root-v1" || result.ActiveRootKeyEpoch != 0 || !result.Complete || result.RemainingOldKeys != 0 || result.Scanned != 0 || result.Rewrapped != 0 || result.Skipped != 0 || result.HasMore || result.NextAfterTenantId != nil || result.NextAfterVaultId != nil {
+		t.Fatalf("unexpected empty rotation result: %#v", result)
+	}
+}
+
 func TestConcurrentIdempotentCreateReturnsOneResult(t *testing.T) {
 	t.Parallel()
 	test := newFixture(t, services.TenantServiceOptions{
@@ -578,6 +599,7 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 		{Subject: "fixture-principal", Domain: "*", Path: "/api/v1", Method: "GET"},
 		{Subject: "fixture-principal", Domain: "*", Path: "/api/v1/*", Method: "*"},
 		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/audit", Method: "GET"},
+		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/encryption/rotation", Method: "POST"},
 	})
 	if err != nil {
 		t.Fatalf("create test authorizer: %v", err)
@@ -586,11 +608,16 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	if err != nil {
 		t.Fatalf("create audit service: %v", err)
 	}
+	keyRotationService, err := services.NewVaultKeyRotationService(store, envelope)
+	if err != nil {
+		t.Fatalf("create key rotation service: %v", err)
+	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
 		Readiness: store, ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
 		Audit:            auditService,
 		AuditPathHMACKey: []byte("test-audit-path-key-with-at-least-32-bytes"),
+		KeyRotation:      keyRotationService,
 		ServiceVersion:   "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

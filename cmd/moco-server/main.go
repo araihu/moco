@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -38,9 +39,10 @@ func run(logger *slog.Logger) error {
 	}
 	envelope, err := encryption.NewHKDFAESGCMEnvelope(encryption.HKDFAESGCMOptions{
 		RootKeyID: configuration.encryptionKeyID,
-		RootKey:   configuration.encryptionKey,
+		RootKeys:  configuration.encryptionKeys,
 	})
 	wipeConfigurationKey(configuration.encryptionKey)
+	wipeConfigurationKeys(configuration.encryptionKeys)
 	if err != nil {
 		return fmt.Errorf("initialize secret encryption: %w", err)
 	}
@@ -57,6 +59,9 @@ func run(logger *slog.Logger) error {
 			logger.Error("close database", "error", err)
 		}
 	}()
+	if _, err := store.EnsureEncryptionKeyState(startupContext, configuration.encryptionKeyID, configuration.encryptionKeyEpoch); err != nil {
+		return fmt.Errorf("initialize encryption key state: %w", err)
+	}
 
 	tenantService, err := services.NewTenantService(store, services.TenantServiceOptions{
 		CursorHMACKey: []byte(configuration.cursorHMACKey),
@@ -72,6 +77,7 @@ func run(logger *slog.Logger) error {
 	}
 	secretService, err := services.NewSecretService(store, envelope, services.SecretServiceOptions{
 		CursorHMACKey: []byte(configuration.cursorHMACKey),
+		KeyState:      store,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize secret service: %w", err)
@@ -82,6 +88,10 @@ func run(logger *slog.Logger) error {
 	}
 	auditPathHMACKey := deriveAuditPathHMACKey(configuration.cursorHMACKey)
 	defer wipeConfigurationKey(auditPathHMACKey)
+	keyRotationService, err := services.NewVaultKeyRotationService(store, envelope, services.VaultKeyRotationServiceOptions{KeyState: store})
+	if err != nil {
+		return fmt.Errorf("initialize vault key rotation service: %w", err)
+	}
 	security, err := buildSecurityRuntime(startupContext, configuration, store)
 	if err != nil {
 		return fmt.Errorf("initialize access control: %w", err)
@@ -98,6 +108,7 @@ func run(logger *slog.Logger) error {
 		Authorization:    security.policyService,
 		Audit:            auditService,
 		AuditPathHMACKey: auditPathHMACKey,
+		KeyRotation:      keyRotationService,
 		PrincipalCheck:   security.authenticator.HasPrincipal,
 		ServiceVersion:   version,
 		Logger:           logger,
@@ -165,13 +176,15 @@ func deriveAuditPathHMACKey(cursorHMACKey string) []byte {
 }
 
 type configuration struct {
-	address         string
-	databasePath    string
-	bearerToken     string
-	cursorHMACKey   string
-	authConfigPath  string
-	encryptionKeyID string
-	encryptionKey   []byte
+	address            string
+	databasePath       string
+	bearerToken        string
+	cursorHMACKey      string
+	authConfigPath     string
+	encryptionKeyID    string
+	encryptionKey      []byte
+	encryptionKeys     map[string][]byte
+	encryptionKeyEpoch int64
 }
 
 func loadConfiguration() (configuration, error) {
@@ -183,6 +196,11 @@ func loadConfiguration() (configuration, error) {
 		authConfigPath:  os.Getenv("MOCO_AUTH_CONFIG"),
 		encryptionKeyID: environmentOrDefault("MOCO_ENCRYPTION_KEY_ID", "local-v1"),
 	}
+	epoch, err := strconv.ParseInt(environmentOrDefault("MOCO_ENCRYPTION_KEY_EPOCH", "1"), 10, 64)
+	if err != nil || epoch < 1 {
+		return configuration{}, errors.New("MOCO_ENCRYPTION_KEY_EPOCH must be a positive decimal integer")
+	}
+	config.encryptionKeyEpoch = epoch
 	if config.authConfigPath != "" && config.bearerToken != "" {
 		return configuration{}, errors.New("MOCO_AUTH_CONFIG and MOCO_BEARER_TOKEN are mutually exclusive")
 	}
@@ -192,13 +210,31 @@ func loadConfiguration() (configuration, error) {
 	if len(config.cursorHMACKey) < 32 {
 		return configuration{}, errors.New("MOCO_CURSOR_HMAC_KEY must contain at least 32 bytes")
 	}
+	if !validEncryptionKeyID(config.encryptionKeyID) {
+		return configuration{}, errors.New("MOCO_ENCRYPTION_KEY_ID must contain 1 to 128 visible ASCII characters")
+	}
 	encodedKey := os.Getenv("MOCO_ENCRYPTION_KEY")
+	encodedKeys := os.Getenv("MOCO_ENCRYPTION_KEYS")
+	if encodedKey != "" && encodedKeys != "" {
+		return configuration{}, errors.New("MOCO_ENCRYPTION_KEY and MOCO_ENCRYPTION_KEYS are mutually exclusive")
+	}
+	if encodedKeys != "" {
+		keyring, err := loadEncryptionKeyring(encodedKeys)
+		if err != nil {
+			return configuration{}, err
+		}
+		config.encryptionKeyID = keyring.ActiveKeyID
+		config.encryptionKeys = keyring.Keys
+		config.encryptionKey = append([]byte(nil), keyring.Keys[keyring.ActiveKeyID]...)
+		return config, nil
+	}
 	key, err := base64.StdEncoding.Strict().DecodeString(encodedKey)
 	if err != nil || len(key) != 32 {
 		wipeConfigurationKey(key)
 		return configuration{}, errors.New("MOCO_ENCRYPTION_KEY must be standard base64 encoding of exactly 32 bytes")
 	}
 	config.encryptionKey = key
+	config.encryptionKeys = map[string][]byte{config.encryptionKeyID: append([]byte(nil), key...)}
 	return config, nil
 }
 
@@ -214,4 +250,11 @@ func environmentOrDefault(name, fallback string) string {
 func wipeConfigurationKey(value []byte) {
 	clear(value)
 	runtime.KeepAlive(value)
+}
+
+func wipeConfigurationKeys(values map[string][]byte) {
+	for keyID, value := range values {
+		wipeConfigurationKey(value)
+		delete(values, keyID)
+	}
 }

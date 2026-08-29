@@ -36,6 +36,8 @@ func TestAuthorizationResourceRecognizesOnlyContractRoutes(t *testing.T) {
 		{name: "authorization admin unsupported", method: http.MethodPatch, path: "/internal/v1/authorization", matches: false},
 		{name: "audit read", method: http.MethodGet, path: "/internal/v1/audit", resource: "/internal/v1/audit", matches: true},
 		{name: "audit unsupported", method: http.MethodPut, path: "/internal/v1/audit", matches: false},
+		{name: "encryption rotation", method: http.MethodPost, path: "/internal/v1/encryption/rotation", resource: "/internal/v1/encryption/rotation", matches: true},
+		{name: "encryption rotation unsupported", method: http.MethodGet, path: "/internal/v1/encryption/rotation", matches: false},
 		{name: "health", method: http.MethodGet, path: "/readyz", matches: false},
 	}
 	for _, test := range tests {

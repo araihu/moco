@@ -1,12 +1,15 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Process probes, deployment-scoped authorization administration, and a
     restricted request audit ledger for security observability. The audit
     operation is not a reconciliation/change feed; controllers and operators
     use the public watch endpoint and relist contract for convergence.
+    The encryption operation performs bounded online rewraps of vault data keys
+    under the configured active root-key era; key material is supplied only by
+    deployment configuration and is never accepted or returned by this API.
     Administrative operations are intended for a restricted deployment origin;
     they never expose bearer token digests or request payloads.
   contact:
@@ -24,6 +27,8 @@ tags:
     description: Restricted replacement of the persisted authorization snapshot.
   - name: Audit
     description: Restricted request metadata ledger for security observability; not a reconciliation feed.
+  - name: Encryption
+    description: Restricted bounded root-key rewrap maintenance; never accepts or returns key material.
 paths:
   /livez:
     $ref: ./paths/livez.yaml
@@ -33,6 +38,8 @@ paths:
     $ref: ./paths/authorization.yaml
   /internal/v1/audit:
     $ref: ./paths/audit.yaml
+  /internal/v1/encryption/rotation:
+    $ref: ./paths/encryption-rotation.yaml
 components:
   securitySchemes:
     bearerAuth:

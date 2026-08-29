@@ -40,6 +40,12 @@ type AuthorizationRoleBinding struct {
 	Domain      string `json:"domain"`
 }
 
+type EncryptionKeyState struct {
+	ID              int64  `json:"id"`
+	ActiveRootKeyID string `json:"active_root_key_id"`
+	Epoch           int64  `json:"epoch"`
+}
+
 type IdempotencyRecord struct {
 	PrincipalID    string `json:"principal_id"`
 	Operation      string `json:"operation"`

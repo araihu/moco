@@ -1,0 +1,44 @@
+parameters:
+  - $ref: ../components/parameters/request-id.yaml
+post:
+  operationId: rotateEncryptionKeys
+  summary: Rewrap one bounded page of vault data keys
+  description: Rewraps persisted vault data keys whose root key ID is not the configured active era. The active and previous root keys are loaded from deployment configuration; this operation never accepts, returns, or logs key material. Repeating a page is safe. Use both returned keyset checkpoints to continue when hasMore is true, then run a fresh sweep until complete is true and remainingOldKeys is zero. The server persists an encryption-key epoch and rejects stale processes; the expected active ID and epoch are revalidated atomically in each key replacement, so all writers must start with the current epoch before maintenance. Rotation changes only wrapped-key bytes, not secret ciphertext, resource versions, or API representations, and may be run concurrently by workers in the same epoch.
+  tags: [Encryption]
+  parameters:
+    - $ref: ../components/parameters/encryption-after-tenant-id.yaml
+    - $ref: ../components/parameters/encryption-after-vault-id.yaml
+    - $ref: ../components/parameters/limit.yaml
+  responses:
+    '200':
+      description: Bounded rotation result.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          example:
+            activeRootKeyId: root-v2
+            activeRootKeyEpoch: 2
+            scanned: 50
+            rewrapped: 47
+            skipped: 3
+            hasMore: true
+            complete: false
+            nextAfterTenantId: 11111111-1111-4111-8111-111111111111
+            nextAfterVaultId: 22222222-2222-4222-8222-222222222222
+            remainingOldKeys: 3
+          schema:
+            $ref: ../components/schemas/encryption-rotation-result.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '409':
+      $ref: ../components/responses/conflict.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

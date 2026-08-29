@@ -75,6 +75,10 @@ func mapProblem(requestID string, err error) mappedProblem {
 		detail := "The resource has children; retry with cascade=true to delete them."
 		return mappedProblem{problem: newProblem(requestID, 409, "Conflict", "resource_has_children", "conflict", &detail)}
 	}
+	if errors.Is(err, ports.ErrEncryptionKeyStateConflict) {
+		detail := "The deployment is using a stale or conflicting encryption key epoch."
+		return mappedProblem{problem: newProblem(requestID, 409, "Conflict", "encryption_key_epoch_conflict", "conflict", &detail)}
+	}
 	var precondition *services.PreconditionError
 	if errors.As(err, &precondition) {
 		detail := "The supplied ETag does not match the current resource revision."

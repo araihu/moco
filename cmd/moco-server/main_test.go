@@ -54,6 +54,46 @@ func TestLoadConfigurationRejectsMalformedEncryptionKey(t *testing.T) {
 	}
 }
 
+func TestLoadConfigurationAcceptsEncryptionKeyring(t *testing.T) {
+	oldKey := bytes.Repeat([]byte{0x11}, 32)
+	activeKey := bytes.Repeat([]byte{0x22}, 32)
+	keyring, err := json.Marshal(map[string]any{
+		"activeKeyId": "root-v2",
+		"keys": map[string]string{
+			"root-v1": base64.StdEncoding.EncodeToString(oldKey),
+			"root-v2": base64.StdEncoding.EncodeToString(activeKey),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOCO_BEARER_TOKEN", "test-bearer-token-with-at-least-32-bytes")
+	t.Setenv("MOCO_AUTH_CONFIG", "")
+	t.Setenv("MOCO_CURSOR_HMAC_KEY", "test-cursor-key-with-at-least-32-bytes")
+	t.Setenv("MOCO_ENCRYPTION_KEY", "")
+	t.Setenv("MOCO_ENCRYPTION_KEYS", string(keyring))
+
+	configuration, err := loadConfiguration()
+	if err != nil {
+		t.Fatalf("load keyring configuration: %v", err)
+	}
+	if configuration.encryptionKeyID != "root-v2" || !bytes.Equal(configuration.encryptionKeys["root-v1"], oldKey) || !bytes.Equal(configuration.encryptionKey, activeKey) {
+		t.Fatalf("unexpected keyring configuration: %#v", configuration)
+	}
+}
+
+func TestLoadConfigurationRejectsAmbiguousEncryptionSettings(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x01}, 32))
+	t.Setenv("MOCO_BEARER_TOKEN", "test-bearer-token-with-at-least-32-bytes")
+	t.Setenv("MOCO_AUTH_CONFIG", "")
+	t.Setenv("MOCO_CURSOR_HMAC_KEY", "test-cursor-key-with-at-least-32-bytes")
+	t.Setenv("MOCO_ENCRYPTION_KEY", key)
+	t.Setenv("MOCO_ENCRYPTION_KEYS", `{"activeKeyId":"root-v1","keys":{"root-v1":"`+key+`"}}`)
+	if _, err := loadConfiguration(); err == nil {
+		t.Fatal("legacy and keyring encryption settings unexpectedly accepted together")
+	}
+}
+
 func TestLoadConfigurationAcceptsAuthConfigWithoutLegacyToken(t *testing.T) {
 	t.Setenv("MOCO_BEARER_TOKEN", "")
 	t.Setenv("MOCO_AUTH_CONFIG", filepath.Join(t.TempDir(), "access.json"))

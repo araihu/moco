@@ -1,0 +1,8 @@
+name: afterTenantId
+in: query
+required: false
+description: Exclusive tenant identifier checkpoint returned with the preceding rotation page. Supply it together with afterVaultId.
+schema:
+  type: string
+  minLength: 1
+  maxLength: 128

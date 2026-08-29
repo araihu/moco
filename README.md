@@ -13,10 +13,12 @@ secret lifecycles:
 - bearer-authenticated tenant and tenant-scoped vault create, list, get, replace, and delete;
 - path-based secret create/replace, value read, metadata read/list, and conditional delete;
 - HKDF-SHA-256/AES-256-GCM envelope encryption with one random wrapped data key per vault;
+- deployment root-key keyrings with read support for previous eras and bounded online vault-key rewrapping;
 - multi-principal bearer authentication from token digests and default-deny Casbin policies;
 - SQLite authorization policy snapshots with atomic revision-guarded replacement, coalesced local signals, and shared-store polling reloads;
 - restricted internal `GET`/`PUT /internal/v1/authorization` snapshot administration;
 - restricted internal `GET /internal/v1/audit` request metadata ledger;
+- restricted internal `POST /internal/v1/encryption/rotation` bounded root-key rewrap batches;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
 - creation idempotency scoped to the authenticated principal for at least 24 hours;
@@ -25,11 +27,10 @@ secret lifecycles:
 - unauthenticated `/livez` and `/readyz` process probes.
 
 Secret metadata operations never select or return ciphertext or plaintext, and
-secret-bearing reads use `Cache-Control: no-store`. Root-key rotation, external
-KMS/HSM providers, cross-host policy transport when instances do not share the
-SQLite store, audit retention/export, and production deployment hardening are
-not implemented yet. Treat this as a development slice, not a production secret
-store.
+secret-bearing reads use `Cache-Control: no-store`. External KMS/HSM providers,
+cross-host policy transport when instances do not share the SQLite store, audit
+retention/export, and production deployment hardening are not implemented yet.
+Treat this as a development slice, not a production secret store.
 
 ## Run locally
 
@@ -50,9 +51,31 @@ embedded migrations. The listener is plain HTTP; terminate TLS in front of it
 before sending bearer credentials across a network.
 
 `MOCO_ENCRYPTION_KEY_ID` is stored with wrapped vault keys and defaults to
-`local-v1`. Keep the exact encryption key with database backups. Changing either
-the key bytes or its identifier makes existing secrets intentionally unreadable;
-online root-key rotation is a later slice.
+`local-v1`. Keep the exact encryption key with database backups. For a rotation,
+set `MOCO_ENCRYPTION_KEYS` to one strict JSON document containing the active key
+ID and up to 16 standard-base64 256-bit keys, retaining the previous key until
+all vaults are rewrapped:
+
+```bash
+export MOCO_ENCRYPTION_KEYS="$(jq -cn \
+  --arg old "$(printf %s "$OLD_KEY_B64")" \
+  --arg active "$(printf %s "$ACTIVE_KEY_B64")" \
+  '{activeKeyId:"root-v2",keys:{"root-v1":$old,"root-v2":$active}}')"
+export MOCO_ENCRYPTION_KEY_EPOCH="2"
+export MOCO_ENCRYPTION_KEY=""
+```
+
+The active key ID is used for new vaults. Previous IDs remain read-capable, and
+`POST /internal/v1/encryption/rotation` rewraps at most 200 vault keys per call;
+continue with both returned checkpoints, then run fresh sweeps until
+`complete` is true and `remainingOldKeys` is zero. The epoch is a monotonically
+increasing shared-store fence: bump it with each active-era rollout and start
+all writers with the new key ID and epoch before rotating. Processes from an
+older epoch can still serve compatible reads but cannot write secrets or run
+rotation. Remove the retired key only after a backup and verification. Repeating
+a page is safe. The operation changes only wrapped-key bytes, does not expose
+key material, and does not advance the public resource-watch revision. Do not
+configure a keyring and the legacy `MOCO_ENCRYPTION_KEY` at the same time.
 
 The local `MOCO_BEARER_TOKEN` mode creates one backwards-compatible principal
 with full API access. Multi-principal deployments set `MOCO_AUTH_CONFIG` to a
@@ -97,6 +120,12 @@ reconciliation/change feed; controllers and operators use `/api/v1/watch` plus
 relist for convergence. A ledger write failure is logged and does not change
 the already-produced response; retention and export remain deployment
 responsibilities.
+
+The internal encryption rotation endpoint requires its own explicit `POST`
+policy for `/internal/v1/encryption/rotation`. It is a maintenance operation,
+not a public resource API; restrict it to a dedicated operator principal and
+deployment origin. Key material is supplied through startup configuration, not
+through HTTP.
 
 Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
 tenant-scoped requests through `domain`; use the literal tenant ID for an

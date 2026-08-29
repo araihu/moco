@@ -1,0 +1,73 @@
+type: object
+additionalProperties: false
+required: [activeRootKeyEpoch, activeRootKeyId, complete, hasMore, nextAfterTenantId, nextAfterVaultId, remainingOldKeys, rewrapped, scanned, skipped]
+description: Bounded root-key rewrap result. It contains counts and a keyset checkpoint only; no key material or secret data is returned.
+properties:
+  activeRootKeyId:
+    type: string
+    minLength: 1
+    maxLength: 128
+    readOnly: true
+    description: Identifier of the deployment key era used for new and rewrapped vault keys.
+    example: root-v2
+  activeRootKeyEpoch:
+    type: integer
+    format: int64
+    minimum: 0
+    readOnly: true
+    description: Monotonic deployment epoch that fences stale server processes during rollout.
+    example: 2
+  scanned:
+    type: integer
+    format: int32
+    minimum: 0
+    maximum: 200
+    readOnly: true
+    example: 50
+  rewrapped:
+    type: integer
+    format: int32
+    minimum: 0
+    maximum: 200
+    readOnly: true
+    example: 47
+  skipped:
+    type: integer
+    format: int32
+    minimum: 0
+    maximum: 200
+    readOnly: true
+    description: Keys already using the active era or changed by another worker before this request committed.
+    example: 3
+  hasMore:
+    type: boolean
+    readOnly: true
+    example: true
+  complete:
+    type: boolean
+    readOnly: true
+    description: True when no vault key currently uses an older root-key era. A fresh full sweep should be run after transient failures or concurrent maintenance.
+    example: false
+  nextAfterTenantId:
+    type: string
+    minLength: 1
+    maxLength: 128
+    nullable: true
+    readOnly: true
+    description: Checkpoint for the next page; null when hasMore is false.
+    example: 11111111-1111-4111-8111-111111111111
+  nextAfterVaultId:
+    type: string
+    minLength: 1
+    maxLength: 128
+    nullable: true
+    readOnly: true
+    description: Checkpoint for the next page; null when hasMore is false.
+    example: 22222222-2222-4222-8222-222222222222
+  remainingOldKeys:
+    type: integer
+    format: int64
+    minimum: 0
+    readOnly: true
+    description: Current count of vault keys whose root key ID differs from the active era; this is not a snapshot.
+    example: 3

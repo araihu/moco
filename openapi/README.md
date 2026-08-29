@@ -8,11 +8,12 @@ behind a TLS ingress when deployment policy permits it.
 
 `internal.yaml` contains the minimal unauthenticated liveness/readiness probes
 needed by a process supervisor or load balancer plus bearer-protected
-authorization-snapshot and request-audit operations for the restricted
-deployment origin. These operations never expose token digests, request bodies,
-query strings, or plaintext logical secret paths. A deployment should restrict
-the origin with network policy as well as explicit Casbin permissions; same-
-cluster placement is not an authentication mechanism.
+authorization-snapshot, request-audit, and bounded encryption-rotation
+operations for the restricted deployment origin. These operations never expose
+token digests, request bodies, query strings, plaintext logical secret paths, or
+key material. A deployment should restrict the origin with network policy as
+well as explicit Casbin permissions; same-cluster placement is not an
+authentication mechanism.
 
 The contracts are intentionally split into small files below `paths/` and
 `components/`. Relative `$ref` values are part of the source contract. Run
@@ -52,6 +53,16 @@ artifacts; edit the exploded sources instead.
   and operators use the public watch endpoint and relist contract for
   convergence. Audit writes happen after the response and cannot change its
   status.
+- `POST /internal/v1/encryption/rotation` rewraps a bounded page of vault data
+  keys under the configured active root-key era. The active and previous keys
+  are supplied only through startup configuration; the response contains
+  counts, the active deployment epoch, completion state, and a tenant/vault
+  keyset checkpoint, never key material. Repeating a page is safe, and
+  wrapped-key maintenance does not advance the public watch revision. Follow
+  checkpoints and then run fresh sweeps until `complete=true` and
+  `remainingOldKeys=0`; keep old key material configured until that verification
+  is complete. A stale epoch is rejected with `409` and requires a deployment
+  restart/reload before retrying.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.

@@ -34,6 +34,8 @@ type Store struct {
 var _ ports.AuthorizationRepository = (*Store)(nil)
 var _ ports.ResourceVersionReader = (*Store)(nil)
 var _ ports.AuditRepository = (*Store)(nil)
+var _ ports.VaultKeyRotationRepository = (*Store)(nil)
+var _ ports.EncryptionKeyStateRepository = (*Store)(nil)
 
 // Open opens a SQLite file, applies embedded migrations, and verifies it.
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -70,6 +72,55 @@ func (s *Store) CurrentResourceVersion(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("read resource version: %w", err)
 	}
 	return revision, nil
+}
+
+// CurrentEncryptionKeyState reads the shared root-key epoch used to fence
+// stale server processes during a rolling rotation.
+func (s *Store) CurrentEncryptionKeyState(ctx context.Context) (ports.EncryptionKeyState, error) {
+	row, err := s.queries.GetEncryptionKeyState(ctx)
+	if err != nil {
+		return ports.EncryptionKeyState{}, fmt.Errorf("read encryption key state: %w", err)
+	}
+	return ports.EncryptionKeyState{ActiveRootKeyID: row.ActiveRootKeyID, Epoch: row.Epoch}, nil
+}
+
+// EnsureEncryptionKeyState adopts a newer configured epoch or verifies that
+// the process matches the already-authoritative state. Older or mismatched
+// processes are fenced before they can write encrypted data.
+func (s *Store) EnsureEncryptionKeyState(ctx context.Context, activeRootKeyID string, epoch int64) (ports.EncryptionKeyState, error) {
+	if !validEncryptionKeyIdentifier(activeRootKeyID) || epoch < 1 {
+		return ports.EncryptionKeyState{}, ports.ErrEncryptionKeyStateConflict
+	}
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return ports.EncryptionKeyState{}, fmt.Errorf("begin encryption key state check: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	current, err := queries.GetEncryptionKeyState(ctx)
+	if err != nil {
+		return ports.EncryptionKeyState{}, fmt.Errorf("get encryption key state: %w", err)
+	}
+	if current.Epoch > epoch || (current.Epoch == epoch && current.ActiveRootKeyID != activeRootKeyID) {
+		return ports.EncryptionKeyState{}, ports.ErrEncryptionKeyStateConflict
+	}
+	if current.Epoch < epoch {
+		advanced, err := queries.AdvanceEncryptionKeyState(ctx, sqlc.AdvanceEncryptionKeyStateParams{
+			ActiveRootKeyID: activeRootKeyID, NextEpoch: epoch, ExpectedEpoch: current.Epoch,
+		})
+		if err != nil {
+			return ports.EncryptionKeyState{}, fmt.Errorf("advance encryption key state: %w", err)
+		}
+		if advanced != 1 {
+			return ports.EncryptionKeyState{}, ports.ErrEncryptionKeyStateConflict
+		}
+		current.ActiveRootKeyID = activeRootKeyID
+		current.Epoch = epoch
+	}
+	if err := tx.Commit(); err != nil {
+		return ports.EncryptionKeyState{}, fmt.Errorf("commit encryption key state: %w", err)
+	}
+	return ports.EncryptionKeyState{ActiveRootKeyID: current.ActiveRootKeyID, Epoch: current.Epoch}, nil
 }
 
 // AppendAuditEvent appends one request record without affecting the resource
@@ -620,7 +671,7 @@ func (s *Store) GetVaultKey(ctx context.Context, tenantID, vaultID string) (port
 }
 
 // CreateVaultKey atomically installs a wrapped key or returns the concurrent winner.
-func (s *Store) CreateVaultKey(ctx context.Context, tenantID, vaultID string, candidate ports.WrappedVaultKey) (ports.WrappedVaultKey, error) {
+func (s *Store) CreateVaultKey(ctx context.Context, tenantID, vaultID string, candidate ports.WrappedVaultKey, expectedState *ports.EncryptionKeyState) (ports.WrappedVaultKey, error) {
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
 		return ports.WrappedVaultKey{}, fmt.Errorf("begin vault key creation: %w", err)
@@ -632,12 +683,28 @@ func (s *Store) CreateVaultKey(ctx context.Context, tenantID, vaultID string, ca
 	} else if err != nil {
 		return ports.WrappedVaultKey{}, fmt.Errorf("get keyed vault: %w", err)
 	}
-	if _, err := queries.InsertVaultKey(ctx, sqlc.InsertVaultKeyParams{
-		TenantID: tenantID, VaultID: vaultID, RootKeyID: candidate.RootKeyID,
-		Salt: candidate.Salt, WrappedKey: candidate.Ciphertext,
-		CreatedAt: formatDatabaseTime(candidate.CreatedAt),
-	}); err != nil {
+	var inserted int64
+	if expectedState == nil {
+		inserted, err = queries.InsertVaultKey(ctx, sqlc.InsertVaultKeyParams{
+			TenantID: tenantID, VaultID: vaultID, RootKeyID: candidate.RootKeyID,
+			Salt: candidate.Salt, WrappedKey: candidate.Ciphertext,
+			CreatedAt: formatDatabaseTime(candidate.CreatedAt),
+		})
+	} else {
+		inserted, err = queries.InsertVaultKeyIfKeyState(ctx, sqlc.InsertVaultKeyIfKeyStateParams{
+			TenantID: tenantID, VaultID: vaultID, RootKeyID: candidate.RootKeyID,
+			Salt: candidate.Salt, WrappedKey: candidate.Ciphertext,
+			CreatedAt:               formatDatabaseTime(candidate.CreatedAt),
+			ExpectedActiveRootKeyID: expectedState.ActiveRootKeyID, ExpectedKeyEpoch: expectedState.Epoch,
+		})
+	}
+	if err != nil {
 		return ports.WrappedVaultKey{}, fmt.Errorf("insert vault key: %w", err)
+	}
+	if expectedState != nil && inserted == 0 {
+		if err := verifyExpectedEncryptionKeyState(ctx, queries, expectedState); err != nil {
+			return ports.WrappedVaultKey{}, err
+		}
 	}
 	row, err := queries.GetVaultKey(ctx, sqlc.GetVaultKeyParams{TenantID: tenantID, VaultID: vaultID})
 	if err != nil {
@@ -651,6 +718,105 @@ func (s *Store) CreateVaultKey(ctx context.Context, tenantID, vaultID string, ca
 		return ports.WrappedVaultKey{}, fmt.Errorf("commit vault key creation: %w", err)
 	}
 	return key, nil
+}
+
+// ListVaultKeys returns a bounded keyset page for online root-key rotation.
+// Vault and tenant IDs are ordering checkpoints only; no key material is
+// included in the API response built on top of this repository.
+func (s *Store) ListVaultKeys(ctx context.Context, query ports.ListVaultKeysQuery) ([]ports.VaultKeyRecord, error) {
+	rows, err := s.queries.ListVaultKeysPage(ctx, sqlc.ListVaultKeysPageParams{
+		AfterTenantID: query.AfterTenantID,
+		AfterVaultID:  query.AfterVaultID,
+		PageSize:      int64(query.PageSize),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list vault keys: %w", err)
+	}
+	records := make([]ports.VaultKeyRecord, 0, len(rows))
+	for _, row := range rows {
+		key, err := vaultKeyFromRow(sqlc.GetVaultKeyRow{
+			RootKeyID: row.RootKeyID, Salt: row.Salt, WrappedKey: row.WrappedKey, CreatedAt: row.CreatedAt,
+		})
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, ports.VaultKeyRecord{TenantID: row.TenantID, VaultID: row.VaultID, Key: key})
+	}
+	return records, nil
+}
+
+// ReplaceVaultKey performs a compare-and-swap update of one wrapped key. It
+// leaves the key creation timestamp untouched so this maintenance operation
+// does not alter API resource history or watch checkpoints.
+func (s *Store) ReplaceVaultKey(ctx context.Context, command ports.ReplaceVaultKeyCommand) (bool, error) {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin vault key replacement: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
+	var rows int64
+	if command.ExpectedKeyState == nil {
+		rows, err = queries.ReplaceVaultKeyIfCurrent(ctx, sqlc.ReplaceVaultKeyIfCurrentParams{
+			ReplacementRootKeyID:  command.Replace.RootKeyID,
+			ReplacementSalt:       command.Replace.Salt,
+			ReplacementWrappedKey: command.Replace.Ciphertext,
+			TenantID:              command.TenantID,
+			VaultID:               command.VaultID,
+			ExpectedRootKeyID:     command.Expected.RootKeyID,
+			ExpectedSalt:          command.Expected.Salt,
+			ExpectedWrappedKey:    command.Expected.Ciphertext,
+		})
+	} else {
+		rows, err = queries.ReplaceVaultKeyIfCurrentAndKeyState(ctx, sqlc.ReplaceVaultKeyIfCurrentAndKeyStateParams{
+			ReplacementRootKeyID: command.Replace.RootKeyID, ReplacementSalt: command.Replace.Salt,
+			ReplacementWrappedKey: command.Replace.Ciphertext, TenantID: command.TenantID,
+			VaultID: command.VaultID, ExpectedRootKeyID: command.Expected.RootKeyID,
+			ExpectedSalt: command.Expected.Salt, ExpectedWrappedKey: command.Expected.Ciphertext,
+			ExpectedActiveRootKeyID: command.ExpectedKeyState.ActiveRootKeyID,
+			ExpectedKeyEpoch:        command.ExpectedKeyState.Epoch,
+		})
+	}
+	if err != nil {
+		return false, fmt.Errorf("replace vault key: %w", err)
+	}
+	if rows == 0 && command.ExpectedKeyState != nil {
+		if err := verifyExpectedEncryptionKeyState(ctx, queries, command.ExpectedKeyState); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit vault key replacement: %w", err)
+	}
+	return rows == 1, nil
+}
+
+// CountVaultKeysNotUsingRootKey counts the material that still belongs to an
+// older root-key era. The count is a completion diagnostic, not a snapshot.
+func (s *Store) CountVaultKeysNotUsingRootKey(ctx context.Context, rootKeyID string) (int64, error) {
+	count, err := s.queries.CountVaultKeysNotUsingRootKey(ctx, rootKeyID)
+	if err != nil {
+		return 0, fmt.Errorf("count vault keys pending rotation: %w", err)
+	}
+	return count, nil
+}
+
+// verifyExpectedEncryptionKeyState checks the shared fence from the same
+// transaction that is about to classify a zero-row encrypted mutation. A
+// matching state means a normal CAS/precondition miss; a mismatch means the
+// process became stale while preparing the write.
+func verifyExpectedEncryptionKeyState(ctx context.Context, queries *sqlc.Queries, expected *ports.EncryptionKeyState) error {
+	if expected == nil {
+		return nil
+	}
+	current, err := queries.GetEncryptionKeyState(ctx)
+	if err != nil {
+		return fmt.Errorf("read encryption key state for mutation: %w", err)
+	}
+	if current.ActiveRootKeyID != expected.ActiveRootKeyID || current.Epoch != expected.Epoch {
+		return ports.ErrEncryptionKeyStateConflict
+	}
+	return nil
 }
 
 // PutSecret atomically creates, replaces, or replays one encrypted value.
@@ -668,6 +834,11 @@ func (s *Store) PutSecret(ctx context.Context, command ports.PutSecretCommand) (
 	}
 	row, err := putSecretRow(ctx, queries, command)
 	if errors.Is(err, sql.ErrNoRows) {
+		if command.ExpectedKeyState != nil {
+			if stateErr := verifyExpectedEncryptionKeyState(ctx, queries, command.ExpectedKeyState); stateErr != nil {
+				return ports.PutSecretResult{}, stateErr
+			}
+		}
 		currentRow, currentErr := queries.GetSecretMetadata(ctx, sqlc.GetSecretMetadataParams{
 			TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
 		})
@@ -784,34 +955,69 @@ func (s *Store) ListSecretMetadata(ctx context.Context, query ports.ListSecretsQ
 }
 
 // DeleteSecret removes one path, optionally at one exact version.
-func (s *Store) DeleteSecret(ctx context.Context, tenantID, vaultID, path string, expectedVersion *int64) error {
+func (s *Store) DeleteSecret(ctx context.Context, command ports.DeleteSecretCommand) error {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin secret deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.queries.WithTx(tx)
 	var rows int64
-	var err error
-	if expectedVersion == nil {
-		rows, err = s.queries.DeleteSecret(ctx, sqlc.DeleteSecretParams{TenantID: tenantID, VaultID: vaultID, Path: path})
+	if command.ExpectedVersion == nil && command.ExpectedKeyState == nil {
+		rows, err = queries.DeleteSecret(ctx, sqlc.DeleteSecretParams{TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path})
+	} else if command.ExpectedVersion == nil {
+		rows, err = queries.DeleteSecretIfKeyState(ctx, sqlc.DeleteSecretIfKeyStateParams{
+			TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
+			ExpectedActiveRootKeyID: command.ExpectedKeyState.ActiveRootKeyID,
+			ExpectedKeyEpoch:        command.ExpectedKeyState.Epoch,
+		})
+	} else if command.ExpectedKeyState == nil {
+		rows, err = queries.DeleteSecretIfVersion(ctx, sqlc.DeleteSecretIfVersionParams{
+			TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path, ExpectedVersion: *command.ExpectedVersion,
+		})
 	} else {
-		rows, err = s.queries.DeleteSecretIfVersion(ctx, sqlc.DeleteSecretIfVersionParams{
-			TenantID: tenantID, VaultID: vaultID, Path: path, ExpectedVersion: *expectedVersion,
+		rows, err = queries.DeleteSecretIfVersionAndKeyState(ctx, sqlc.DeleteSecretIfVersionAndKeyStateParams{
+			TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
+			ExpectedVersion:         *command.ExpectedVersion,
+			ExpectedActiveRootKeyID: command.ExpectedKeyState.ActiveRootKeyID,
+			ExpectedKeyEpoch:        command.ExpectedKeyState.Epoch,
 		})
 	}
 	if err != nil {
 		return fmt.Errorf("delete secret: %w", err)
 	}
 	if rows == 1 {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit secret deletion: %w", err)
+		}
 		return nil
 	}
-	if expectedVersion != nil {
-		if _, getErr := s.queries.GetSecretMetadata(ctx, sqlc.GetSecretMetadataParams{TenantID: tenantID, VaultID: vaultID, Path: path}); getErr == nil {
+	if command.ExpectedKeyState != nil {
+		if stateErr := verifyExpectedEncryptionKeyState(ctx, queries, command.ExpectedKeyState); stateErr != nil {
+			return stateErr
+		}
+	}
+	if command.ExpectedVersion != nil {
+		if _, getErr := queries.GetSecretMetadata(ctx, sqlc.GetSecretMetadataParams{TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path}); getErr == nil {
 			return ports.ErrSecretPrecondition
 		} else if !errors.Is(getErr, sql.ErrNoRows) {
 			return fmt.Errorf("resolve secret delete precondition: %w", getErr)
 		}
 	}
-	return s.resolveMissingSecret(ctx, s.queries, tenantID, vaultID)
+	return s.resolveMissingSecret(ctx, queries, command.TenantID, command.VaultID)
 }
 
 func putSecretRow(ctx context.Context, queries *sqlc.Queries, command ports.PutSecretCommand) (sqlc.Secret, error) {
 	if command.CreateOnly {
+		if command.ExpectedKeyState != nil {
+			return queries.InsertSecretIfKeyState(ctx, sqlc.InsertSecretIfKeyStateParams{
+				TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
+				Salt: command.Value.Salt, Ciphertext: command.Value.Ciphertext,
+				Digest: command.Digest, ContentType: command.ContentType,
+				CreatedAt: formatDatabaseTime(command.UpdatedAt), UpdatedAt: formatDatabaseTime(command.UpdatedAt),
+				ExpectedActiveRootKeyID: command.ExpectedKeyState.ActiveRootKeyID, ExpectedKeyEpoch: command.ExpectedKeyState.Epoch,
+			})
+		}
 		return queries.InsertSecret(ctx, sqlc.InsertSecretParams{
 			TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
 			Salt: command.Value.Salt, Ciphertext: command.Value.Ciphertext,
@@ -820,11 +1026,29 @@ func putSecretRow(ctx context.Context, queries *sqlc.Queries, command ports.PutS
 		})
 	}
 	if command.ExpectedVersion != nil {
+		if command.ExpectedKeyState != nil {
+			return queries.UpdateSecretIfVersionAndKeyState(ctx, sqlc.UpdateSecretIfVersionAndKeyStateParams{
+				Salt: command.Value.Salt, Ciphertext: command.Value.Ciphertext,
+				Digest: command.Digest, ContentType: command.ContentType,
+				UpdatedAt: formatDatabaseTime(command.UpdatedAt), TenantID: command.TenantID,
+				VaultID: command.VaultID, Path: command.Path, ExpectedVersion: *command.ExpectedVersion,
+				ExpectedActiveRootKeyID: command.ExpectedKeyState.ActiveRootKeyID, ExpectedKeyEpoch: command.ExpectedKeyState.Epoch,
+			})
+		}
 		return queries.UpdateSecretIfVersion(ctx, sqlc.UpdateSecretIfVersionParams{
 			Salt: command.Value.Salt, Ciphertext: command.Value.Ciphertext,
 			Digest: command.Digest, ContentType: command.ContentType,
 			UpdatedAt: formatDatabaseTime(command.UpdatedAt), TenantID: command.TenantID,
 			VaultID: command.VaultID, Path: command.Path, ExpectedVersion: *command.ExpectedVersion,
+		})
+	}
+	if command.ExpectedKeyState != nil {
+		return queries.UpsertSecretIfKeyState(ctx, sqlc.UpsertSecretIfKeyStateParams{
+			TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path,
+			Salt: command.Value.Salt, Ciphertext: command.Value.Ciphertext,
+			Digest: command.Digest, ContentType: command.ContentType,
+			CreatedAt: formatDatabaseTime(command.UpdatedAt), UpdatedAt: formatDatabaseTime(command.UpdatedAt),
+			ExpectedActiveRootKeyID: command.ExpectedKeyState.ActiveRootKeyID, ExpectedKeyEpoch: command.ExpectedKeyState.Epoch,
 		})
 	}
 	return queries.UpsertSecret(ctx, sqlc.UpsertSecretParams{
@@ -1112,6 +1336,18 @@ func mapVaultConflict(ctx context.Context, queries *sqlc.Queries, tenantID, name
 		return ports.ErrTenantNotFound
 	}
 	return fmt.Errorf("persist vault: %w", original)
+}
+
+func validEncryptionKeyIdentifier(value string) bool {
+	if len(value) < 1 || len(value) > 128 {
+		return false
+	}
+	for _, char := range []byte(value) {
+		if char < 0x21 || char > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func migrateDatabase(dsn, name string) error {

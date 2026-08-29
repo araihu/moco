@@ -23,6 +23,7 @@ type SecretServiceOptions struct {
 	CursorHMACKey []byte
 	Clock         func() time.Time
 	CursorTTL     time.Duration
+	KeyState      ports.EncryptionKeyStateReader
 }
 
 // SecretService implements encrypted, tenant- and vault-scoped secret semantics.
@@ -32,6 +33,8 @@ type SecretService struct {
 	cursorHMACKey []byte
 	clock         func() time.Time
 	cursorTTL     time.Duration
+	keyState      ports.EncryptionKeyStateReader
+	activeKeyID   string
 }
 
 // SecretListRequest describes one metadata-only list request.
@@ -70,12 +73,25 @@ func NewSecretService(repository ports.SecretRepository, cipher ports.SecretCiph
 	if options.CursorTTL < 0 {
 		return nil, errors.New("invalid secret cursor lifetime")
 	}
+	activeKeyID := ""
+	if options.KeyState != nil {
+		provider, ok := cipher.(ports.ActiveRootKeyIDProvider)
+		if !ok {
+			return nil, errors.New("secret cipher must report its active root key ID when key-state fencing is enabled")
+		}
+		activeKeyID = provider.ActiveRootKeyID()
+		if activeKeyID == "" {
+			return nil, errors.New("secret cipher active root key ID is required")
+		}
+	}
 	return &SecretService{
 		repository:    repository,
 		cipher:        cipher,
 		cursorHMACKey: append([]byte(nil), options.CursorHMACKey...),
 		clock:         options.Clock,
 		cursorTTL:     options.CursorTTL,
+		keyState:      options.KeyState,
+		activeKeyID:   activeKeyID,
 	}, nil
 }
 
@@ -89,6 +105,10 @@ func (s *SecretService) Put(
 	if err := domain.ValidateSecretPath(path); err != nil {
 		return ports.PutSecretResult{}, "", err
 	}
+	keyState, err := s.ensureActiveKeyState(ctx)
+	if err != nil {
+		return ports.PutSecretResult{}, "", err
+	}
 	contentType, err := domain.ValidateSecretWrite(input)
 	if err != nil {
 		return ports.PutSecretResult{}, "", err
@@ -97,7 +117,7 @@ func (s *SecretService) Put(
 	if err != nil {
 		return ports.PutSecretResult{}, "", err
 	}
-	key, err := s.ensureVaultKey(ctx, tenantID, vaultID)
+	key, err := s.ensureVaultKey(ctx, tenantID, vaultID, keyState)
 	if err != nil {
 		return ports.PutSecretResult{}, "", err
 	}
@@ -110,6 +130,7 @@ func (s *SecretService) Put(
 		TenantID: tenantID, VaultID: vaultID, Path: path,
 		Digest: digest, ContentType: contentType, Value: encrypted,
 		UpdatedAt: s.clock().UTC(), CreateOnly: createOnly, ExpectedVersion: expectedVersion,
+		ExpectedKeyState: keyState,
 	})
 	if errors.Is(err, ports.ErrSecretPrecondition) {
 		return ports.PutSecretResult{}, "", s.currentSecretPrecondition(ctx, tenantID, vaultID, path)
@@ -221,6 +242,10 @@ func (s *SecretService) Delete(ctx context.Context, tenantID, vaultID, path stri
 	if err := domain.ValidateSecretPath(path); err != nil {
 		return err
 	}
+	keyState, err := s.ensureActiveKeyState(ctx)
+	if err != nil {
+		return err
+	}
 	var expectedVersion *int64
 	if ifMatch != nil {
 		if *ifMatch == "" {
@@ -236,11 +261,28 @@ func (s *SecretService) Delete(ctx context.Context, tenantID, vaultID, path stri
 		version := current.Version
 		expectedVersion = &version
 	}
-	err := s.repository.DeleteSecret(ctx, tenantID, vaultID, path, expectedVersion)
+	err = s.repository.DeleteSecret(ctx, ports.DeleteSecretCommand{
+		TenantID: tenantID, VaultID: vaultID, Path: path,
+		ExpectedVersion: expectedVersion, ExpectedKeyState: keyState,
+	})
 	if errors.Is(err, ports.ErrSecretPrecondition) {
 		return s.currentSecretPrecondition(ctx, tenantID, vaultID, path)
 	}
 	return err
+}
+
+func (s *SecretService) ensureActiveKeyState(ctx context.Context) (*ports.EncryptionKeyState, error) {
+	if s.keyState == nil {
+		return nil, nil
+	}
+	state, err := s.keyState.CurrentEncryptionKeyState(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read encryption key state: %w", err)
+	}
+	if state.Epoch < 1 || state.ActiveRootKeyID != s.activeKeyID {
+		return nil, ports.ErrEncryptionKeyStateConflict
+	}
+	return &state, nil
 }
 
 // SecretETag returns a strong validator bound to the immutable row sequence,
@@ -251,7 +293,7 @@ func SecretETag(metadata domain.SecretMetadata) string {
 	return fmt.Sprintf("\"secret-%s-%d-%d\"", hex.EncodeToString(scope[:16]), metadata.Sequence, metadata.Version)
 }
 
-func (s *SecretService) ensureVaultKey(ctx context.Context, tenantID, vaultID string) (ports.WrappedVaultKey, error) {
+func (s *SecretService) ensureVaultKey(ctx context.Context, tenantID, vaultID string, expectedState *ports.EncryptionKeyState) (ports.WrappedVaultKey, error) {
 	key, err := s.repository.GetVaultKey(ctx, tenantID, vaultID)
 	if err == nil {
 		return key, nil
@@ -263,7 +305,7 @@ func (s *SecretService) ensureVaultKey(ctx context.Context, tenantID, vaultID st
 	if err != nil {
 		return ports.WrappedVaultKey{}, fmt.Errorf("generate vault key: %w", err)
 	}
-	return s.repository.CreateVaultKey(ctx, tenantID, vaultID, candidate)
+	return s.repository.CreateVaultKey(ctx, tenantID, vaultID, candidate, expectedState)
 }
 
 func (s *SecretService) secretWritePrecondition(
