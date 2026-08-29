@@ -78,7 +78,7 @@ func TestStaticAuthorizerNarrowSecretPoliciesByLogicalPath(t *testing.T) {
 	}
 }
 
-func TestStaticAuthorizerTreatsWildcardCharactersAsLiteralSecretPrefixes(t *testing.T) {
+func TestStaticAuthorizerPreservesLegacyWildcardSecretPrefix(t *testing.T) {
 	t.Parallel()
 	prefix := "*"
 	authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{
@@ -88,13 +88,47 @@ func TestStaticAuthorizerTreatsWildcardCharactersAsLiteralSecretPrefixes(t *test
 		t.Fatal(err)
 	}
 	resource := "/api/v1/tenants/tenant-a/vaults/vault-a/secret"
-	allowed, err := authorizer.AuthorizeSecretPath(t.Context(), "reader", "tenant-a", resource, "GET", "*literal")
+	allowed, err := authorizer.AuthorizeSecretPath(t.Context(), "reader", "tenant-a", resource, "GET", "prod/literal")
 	if err != nil || !allowed {
-		t.Fatalf("literal wildcard prefix was denied: allowed=%t err=%v", allowed, err)
+		t.Fatalf("legacy wildcard prefix was denied: allowed=%t err=%v", allowed, err)
 	}
-	allowed, err = authorizer.AuthorizeSecretPath(t.Context(), "reader", "tenant-a", resource, "GET", "prod/literal")
+	allowed, err = authorizer.AuthorizeSecretPath(t.Context(), "reader", "tenant-a", resource, "GET", "dev/literal")
+	if err != nil || !allowed {
+		t.Fatalf("legacy wildcard prefix did not preserve broad access: allowed=%t err=%v", allowed, err)
+	}
+}
+
+func TestStaticAuthorizerNarrowSecretMetadataAndCollections(t *testing.T) {
+	t.Parallel()
+	prefix := "prod/database/"
+	authorizer, err := authz.NewStaticAuthorizer(nil, []authz.Policy{
+		{Subject: "reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret/metadata", Method: "GET", SecretPathPrefix: &prefix},
+		{Subject: "reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets", Method: "GET", SecretPathPrefix: &prefix},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadataResource := "/api/v1/tenants/tenant-a/vaults/vault-a/secret/metadata"
+	allowed, err := authorizer.AuthorizeSecretPath(t.Context(), "reader", "tenant-a", metadataResource, "GET", "prod/database/password")
+	if err != nil || !allowed {
+		t.Fatalf("prefixed metadata was denied: allowed=%t err=%v", allowed, err)
+	}
+	allowed, err = authorizer.AuthorizeSecretPath(t.Context(), "reader", "tenant-a", metadataResource, "GET", "prod/other/password")
 	if err != nil || allowed {
-		t.Fatalf("literal wildcard prefix matched unrelated path: allowed=%t err=%v", allowed, err)
+		t.Fatalf("out-of-prefix metadata was allowed: allowed=%t err=%v", allowed, err)
+	}
+	collectionResource := "/api/v1/tenants/tenant-a/vaults/vault-a/secrets"
+	allowed, err = authorizer.AuthorizeSecretPrefix(t.Context(), "reader", "tenant-a", collectionResource, "GET", "prod/database/passwords/")
+	if err != nil || !allowed {
+		t.Fatalf("nested collection prefix was denied: allowed=%t err=%v", allowed, err)
+	}
+	allowed, err = authorizer.AuthorizeSecretPrefix(t.Context(), "reader", "tenant-a", collectionResource, "GET", "")
+	if err != nil || allowed {
+		t.Fatalf("empty collection prefix was allowed: allowed=%t err=%v", allowed, err)
+	}
+	allowed, err = authorizer.AuthorizeSecretPrefix(t.Context(), "reader", "tenant-a", collectionResource, "GET", "dev/")
+	if err != nil || allowed {
+		t.Fatalf("out-of-prefix collection was allowed: allowed=%t err=%v", allowed, err)
 	}
 }
 

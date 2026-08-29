@@ -33,6 +33,10 @@ m = (r.sub == p.sub || g(r.sub, p.sub, r.dom) || g(r.sub, p.sub, "*")) && (p.dom
 
 const secretItemPolicyPath = "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret" //nolint:gosec // route pattern, not a credential.
 
+const secretMetadataPolicyPath = "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret/metadata" //nolint:gosec // route pattern, not a credential.
+
+const secretsCollectionPolicyPath = "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets" //nolint:gosec // route pattern, not a credential.
+
 // RoleBinding assigns one configured principal to a role.
 type RoleBinding = ports.AuthorizationRoleBinding
 
@@ -49,6 +53,7 @@ type StaticAuthorizer struct {
 
 var _ ports.Authorizer = (*StaticAuthorizer)(nil)
 var _ ports.SecretPathAuthorizer = (*StaticAuthorizer)(nil)
+var _ ports.SecretPrefixAuthorizer = (*StaticAuthorizer)(nil)
 
 // NewStaticAuthorizer builds a default-deny Casbin enforcer from validated
 // role bindings and allow policies.
@@ -153,6 +158,13 @@ func (a *StaticAuthorizer) AuthorizeSecretPath(ctx context.Context, principal, d
 		return a.Authorize(ctx, principal, domain, resource, action)
 	}
 	return a.authorize(ctx, principal, domain, resource, action, secretPath)
+}
+
+// AuthorizeSecretPrefix evaluates a secret collection request including its
+// decoded logical prefix. A path-scoped policy cannot authorize an empty
+// prefix, which would otherwise disclose the complete vault listing.
+func (a *StaticAuthorizer) AuthorizeSecretPrefix(ctx context.Context, principal, domain, resource, action, secretPrefix string) (bool, error) {
+	return a.authorize(ctx, principal, domain, resource, action, secretPrefix)
 }
 
 // AuthorizeAnyDomain checks a resource against each configured domain. It is
@@ -271,8 +283,10 @@ func validateSecretPathPrefix(policy Policy) error {
 	if policy.SecretPathPrefix == nil {
 		return nil
 	}
-	if policy.Path != secretItemPolicyPath {
-		return fmt.Errorf("is only valid with path %q", secretItemPolicyPath)
+	switch policy.Path {
+	case secretItemPolicyPath, secretMetadataPolicyPath, secretsCollectionPolicyPath:
+	default:
+		return fmt.Errorf("is only valid with a secret operation path")
 	}
 	if err := domain.ValidateSecretPrefix(policy.SecretPathPrefix); err != nil {
 		return errors.New("must be a valid literal secret path prefix")
@@ -292,7 +306,7 @@ func secretPathMatch(args ...interface{}) (interface{}, error) {
 	if !ok {
 		return false, errors.New("secretPathMatch: policy path must be a string")
 	}
-	if policyPath == "" {
+	if policyPath == "" || policyPath == "*" {
 		return true, nil
 	}
 	if requestPath == "" {

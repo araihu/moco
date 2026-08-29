@@ -31,6 +31,13 @@ type SecretPathAuthorizer interface {
 	AuthorizeSecretPath(context.Context, string, string, string, string, string) (bool, error)
 }
 
+// SecretPrefixAuthorizer evaluates a secret collection request against its
+// decoded logical prefix. An empty prefix represents an unscoped collection
+// request and must not satisfy a path-scoped policy.
+type SecretPrefixAuthorizer interface {
+	AuthorizeSecretPrefix(context.Context, string, string, string, string, string) (bool, error)
+}
+
 // AuthorizationPrincipal identifies a bearer credential by its token digest.
 type AuthorizationPrincipal struct {
 	PrincipalID string `json:"id"`

@@ -152,6 +152,31 @@ func TestAuthorizationMiddlewarePassesDecodedSecretPathToAuthorizer(t *testing.T
 	}
 }
 
+func TestAuthorizationMiddlewarePassesSecretMetadataAndPrefixToAuthorizer(t *testing.T) {
+	t.Parallel()
+	authorizer := &recordingSecretPathAuthorizer{allowed: true}
+	next := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	})
+	handler := authorizationMiddleware(authorizer, slog.Default(), next)
+	metadata := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		"/api/v1/tenants/tenant-a/vaults/vault-a/secret/metadata?path=prod%2Fdatabase%2Fpassword", nil)
+	metadata = metadata.WithContext(context.WithValue(metadata.Context(), principalContextKey, "operator"))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, metadata)
+	if recorder.Code != http.StatusNoContent || authorizer.secretCalls != 1 || authorizer.secretPath != "prod/database/password" {
+		t.Fatalf("metadata path authorization = status %d calls %d path %q", recorder.Code, authorizer.secretCalls, authorizer.secretPath)
+	}
+	collection := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		"/api/v1/tenants/tenant-a/vaults/vault-a/secrets?prefix=prod%2Fdatabase%2F", nil)
+	collection = collection.WithContext(context.WithValue(collection.Context(), principalContextKey, "operator"))
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, collection)
+	if recorder.Code != http.StatusNoContent || authorizer.prefixCalls != 1 || authorizer.prefixValue != "prod/database/" {
+		t.Fatalf("collection prefix authorization = status %d calls %d prefix %q", recorder.Code, authorizer.prefixCalls, authorizer.prefixValue)
+	}
+}
+
 type recordingAuthorizer struct {
 	allowed   bool
 	principal string
@@ -176,13 +201,26 @@ type recordingSecretPathAuthorizer struct {
 	recordingAuthorizer
 	secretCalls int
 	secretPath  string
+	prefixCalls int
+	prefixValue string
 }
 
 var _ ports.SecretPathAuthorizer = (*recordingSecretPathAuthorizer)(nil)
+var _ ports.SecretPrefixAuthorizer = (*recordingSecretPathAuthorizer)(nil)
 
 func (authorizer *recordingSecretPathAuthorizer) AuthorizeSecretPath(_ context.Context, principal, domain, resource, action, secretPath string) (bool, error) {
 	authorizer.secretCalls++
 	authorizer.secretPath = secretPath
+	authorizer.principal = principal
+	authorizer.domain = domain
+	authorizer.resource = resource
+	authorizer.action = action
+	return authorizer.allowed, nil
+}
+
+func (authorizer *recordingSecretPathAuthorizer) AuthorizeSecretPrefix(_ context.Context, principal, domain, resource, action, secretPrefix string) (bool, error) {
+	authorizer.prefixCalls++
+	authorizer.prefixValue = secretPrefix
 	authorizer.principal = principal
 	authorizer.domain = domain
 	authorizer.resource = resource

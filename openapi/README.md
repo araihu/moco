@@ -48,10 +48,12 @@ artifacts; edit the exploded sources instead.
 - `getSecretMetadata` returns a secret `digest` so controllers can detect drift
   without reading or logging the value.
 - Secret authorization is vault-scoped by default. An internal authorization
-  policy may set `secretPathPrefix` when its `path` is the secret item route;
-  the decoded logical `path` query parameter must then begin with that literal
-  prefix. Use dedicated vaults when a deployment needs isolation that is not
-  expressed by a path prefix.
+  policy may set `secretPathPrefix` on a secret item, metadata, or collection
+  route; the decoded logical `path` or `prefix` query value must then begin
+  with that literal prefix. The reserved value `*` preserves legacy
+  vault-wide behavior. A path-scoped collection request must provide a
+  non-empty prefix. Use dedicated vaults when a deployment needs isolation
+  that is not expressed by a path prefix.
 - `429` and `503` responses include `Retry-After`; they may be emitted by Mocó
   or by the deployment edge, and callers must apply bounded retries with jitter.
 

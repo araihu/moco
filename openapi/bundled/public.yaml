@@ -567,9 +567,11 @@ paths:
       description: |
         Lists metadata only; values are never returned. The first request creates a
         sequence-bounded snapshot. Follow `nextCursor` until `hasMore` is false. If
-        the cursor expires, restart without one. Omit prefix to list the complete
-        vault. Use `GET /api/v1/watch` as a full-resync signal after mutations,
-        including deletions.
+        the cursor expires, restart without one. Omit `prefix` to list the complete
+        vault only when the authorization policy is vault-scoped. A path-scoped
+        policy requires a non-empty `prefix` within its configured
+        `secretPathPrefix`. Use `GET /api/v1/watch` as a full-resync signal after
+        mutations, including deletions.
       tags: [Secrets]
       parameters:
         - $ref: '#/components/parameters/secret-prefix'
@@ -612,7 +614,8 @@ paths:
       summary: Inspect secret state without reading its value
       description: |
         Returns metadata only. Controllers should prefer this operation for drift
-        checks that do not require plaintext.
+        checks that do not require plaintext. When a deployment configures
+        `secretPathPrefix`, the decoded `path` must begin with that literal prefix.
       tags: [Secrets]
       parameters:
         - $ref: '#/components/parameters/if-none-match'
@@ -703,7 +706,8 @@ paths:
         idempotent upsert. The response contains metadata, never the submitted value.
         Authorization remains vault-scoped for policies without a path prefix. A
         deployment may narrow this operation with `secretPathPrefix` on its
-        internal authorization snapshot.
+        internal authorization snapshot; the requested `path` must be within the
+        configured prefix.
       tags: [Secrets]
       parameters:
         - $ref: '#/components/parameters/if-match'
@@ -1642,7 +1646,7 @@ components:
       name: cursor
       in: query
       required: false
-      description: Opaque next-page cursor returned by the preceding list response.
+      description: Opaque next-page cursor returned by the preceding list response. Repeat the same `prefix` query value when continuing a path-scoped secret listing.
       schema:
         type: string
         minLength: 1
@@ -1732,7 +1736,9 @@ components:
       required: false
       description: |
         Slash-delimited prefix. One trailing slash is allowed; empty, `.`, and `..`
-        segments are invalid. Omit it to list the entire vault.
+        segments are invalid. Omit it to list the entire vault only with a
+        vault-scoped authorization policy; path-scoped policies require a non-empty
+        prefix within their configured `secretPathPrefix`.
       schema:
         type: string
         minLength: 1

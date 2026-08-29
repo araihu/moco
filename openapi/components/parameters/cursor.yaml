@@ -1,7 +1,7 @@
 name: cursor
 in: query
 required: false
-description: Opaque next-page cursor returned by the preceding list response.
+description: Opaque next-page cursor returned by the preceding list response. Repeat the same `prefix` query value when continuing a path-scoped secret listing.
 schema:
   type: string
   minLength: 1

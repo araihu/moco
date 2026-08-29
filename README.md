@@ -84,10 +84,12 @@ restrict the direct deployment origin with network policy as well.
 
 Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
 tenant-scoped requests through `domain`; use the literal tenant ID for an
-isolated tenant. A secret-item policy can additionally set
+isolated tenant. A secret-operation policy can additionally set
 `secretPathPrefix` (for example `prod/database/`) to restrict the decoded
-logical secret path to that literal prefix. A global policy must explicitly
-use `domain: "*"`. `HEAD` requests consume the corresponding `GET` permission.
+logical secret path or list prefix to that literal prefix. The reserved value
+`*` preserves legacy vault-wide behavior. Path-scoped list requests must
+include a non-empty prefix. A global policy must explicitly use `domain: "*"`.
+`HEAD` requests consume the corresponding `GET` permission.
 Generate a digest without putting the clear token in the file:
 `printf %s "$TOKEN" | sha256sum`.
 

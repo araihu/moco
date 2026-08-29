@@ -220,13 +220,21 @@ func authorizationMiddleware(authorizer ports.Authorizer, logger *slog.Logger, n
 }
 
 func authorizeRequest(r *http.Request, authorizer ports.Authorizer, principal, domain, resource, action string) (bool, error) {
-	if pathAuthorizer, ok := authorizer.(ports.SecretPathAuthorizer); ok && strings.HasSuffix(resource, "/secret") {
-		values := r.URL.Query()["path"]
-		if len(values) == 1 && values[0] != "" {
-			return pathAuthorizer.AuthorizeSecretPath(r.Context(), principal, domain, resource, action, values[0])
-		}
+	if pathAuthorizer, ok := authorizer.(ports.SecretPathAuthorizer); ok && (strings.HasSuffix(resource, "/secret") || strings.HasSuffix(resource, "/secret/metadata")) {
+		return pathAuthorizer.AuthorizeSecretPath(r.Context(), principal, domain, resource, action, singleQueryValue(r, "path"))
+	}
+	if prefixAuthorizer, ok := authorizer.(ports.SecretPrefixAuthorizer); ok && strings.HasSuffix(resource, "/secrets") {
+		return prefixAuthorizer.AuthorizeSecretPrefix(r.Context(), principal, domain, resource, action, singleQueryValue(r, "prefix"))
 	}
 	return authorizer.Authorize(r.Context(), principal, domain, resource, action)
+}
+
+func singleQueryValue(r *http.Request, name string) string {
+	values := r.URL.Query()[name]
+	if len(values) != 1 {
+		return ""
+	}
+	return values[0]
 }
 
 func resourceForAnyDomain(path string) string {

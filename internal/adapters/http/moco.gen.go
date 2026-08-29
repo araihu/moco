@@ -504,7 +504,7 @@ type ListTenantsParams struct {
 	// Limit Maximum number of items to return.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Cursor Opaque next-page cursor returned by the preceding list response.
+	// Cursor Opaque next-page cursor returned by the preceding list response. Repeat the same `prefix` query value when continuing a path-scoped secret listing.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 
 	// Name Exact, case-sensitive resource name filter.
@@ -571,7 +571,7 @@ type ListVaultsParams struct {
 	// Limit Maximum number of items to return.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Cursor Opaque next-page cursor returned by the preceding list response.
+	// Cursor Opaque next-page cursor returned by the preceding list response. Repeat the same `prefix` query value when continuing a path-scoped secret listing.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 
 	// Name Exact, case-sensitive resource name filter.
@@ -700,13 +700,15 @@ type GetSecretMetadataParams struct {
 // ListSecretsParams defines parameters for ListSecrets.
 type ListSecretsParams struct {
 	// Prefix Slash-delimited prefix. One trailing slash is allowed; empty, `.`, and `..`
-	// segments are invalid. Omit it to list the entire vault.
+	// segments are invalid. Omit it to list the entire vault only with a
+	// vault-scoped authorization policy; path-scoped policies require a non-empty
+	// prefix within their configured `secretPathPrefix`.
 	Prefix *SecretPrefix `form:"prefix,omitempty" json:"prefix,omitempty"`
 
 	// Limit Maximum number of items to return.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Cursor Opaque next-page cursor returned by the preceding list response.
+	// Cursor Opaque next-page cursor returned by the preceding list response. Repeat the same `prefix` query value when continuing a path-scoped secret listing.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.

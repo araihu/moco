@@ -3,7 +3,7 @@ parameters:
 get:
   operationId: getAuthorizationSnapshot
   summary: Read the persisted authorization snapshot
-  description: Returns the complete role-binding and policy snapshot without token digests. The ETag is the authoritative snapshot revision. A policy's optional secretPathPrefix narrows only the decoded logical path of the secret item route and is a literal prefix match.
+  description: Returns the complete role-binding and policy snapshot without token digests. The ETag is the authoritative snapshot revision. A policy's optional secretPathPrefix narrows the decoded logical path or prefix query value for a secret item, metadata, or collection route and is a literal prefix match.
   tags: [Authorization]
   responses:
     '200':
@@ -40,7 +40,7 @@ get:
 put:
   operationId: replaceAuthorizationSnapshot
   summary: Replace the persisted authorization snapshot
-  description: Atomically replaces all role bindings and policies when If-Match identifies the revision observed by the writer. A committed change signals local reloaders and is discovered by shared-store polling in other processes. Set secretPathPrefix only on a policy for the canonical secret item route; policies without it remain vault-scoped.
+  description: Atomically replaces all role bindings and policies when If-Match identifies the revision observed by the writer. A committed change signals local reloaders and is discovered by shared-store polling in other processes. Set secretPathPrefix only on a policy for a canonical secret operation route; policies without it remain vault-scoped.
   tags: [Authorization]
   parameters:
     - name: If-Match
