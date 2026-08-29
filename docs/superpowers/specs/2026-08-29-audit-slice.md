@@ -11,6 +11,9 @@ The endpoint returns an append-only sequence ordered by SQLite insertion. The
 `afterSequence` query parameter is an exclusive checkpoint and
 `nextAfterSequence` continues a page. The page size is bounded at 200 so an
 operator can resume from a durable checkpoint without an opaque cursor secret.
+This ledger is a security-observability surface, not a reconciliation or
+change-feed contract; controllers and operators use the public watch endpoint
+and relist contract for convergence.
 
 ## Data minimization
 
@@ -25,7 +28,9 @@ event contains only:
   without a query string;
 - the final status code and a coarse `success`/`failure` outcome; and
 - a keyed HMAC-SHA-256 digest for a decoded secret `path` or collection
-  `prefix` query value when one was supplied.
+  `prefix` query value when one was supplied. The key is derived from the
+  deployment cursor key with a domain-separated label, so rotating
+  `MOCO_CURSOR_HMAC_KEY` intentionally breaks cross-era digest correlation.
 
 Request bodies, query strings, bearer credentials, ciphertext, and plaintext
 logical secret paths are never persisted or returned by the endpoint. Audit

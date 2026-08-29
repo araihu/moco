@@ -47,8 +47,11 @@ artifacts; edit the exploded sources instead.
   metadata. `afterSequence` is exclusive and `nextAfterSequence` continues the
   page; query strings and request payloads are omitted, while logical secret
   paths are represented only by keyed HMAC-SHA-256 digests. The audit read
-  itself is excluded to keep tailing from producing self-events. Audit writes
-  happen after the response and cannot change its status.
+  itself is excluded to keep tailing from producing self-events. This is a
+  security-observability ledger, not a reconciliation/change feed; controllers
+  and operators use the public watch endpoint and relist contract for
+  convergence. Audit writes happen after the response and cannot change its
+  status.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.

@@ -4,9 +4,11 @@ info:
   version: 0.5.0
   description: |
     Process probes, deployment-scoped authorization administration, and a
-    restricted request audit ledger. Administrative operations are intended for
-    a restricted deployment origin; they never expose bearer token digests or
-    request payloads.
+    restricted request audit ledger for security observability. The audit
+    operation is not a reconciliation/change feed; controllers and operators
+    use the public watch endpoint and relist contract for convergence.
+    Administrative operations are intended for a restricted deployment origin;
+    they never expose bearer token digests or request payloads.
   contact:
     name: AraiHu
     url: https://github.com/araihu/moco
@@ -21,7 +23,7 @@ tags:
   - name: Authorization
     description: Restricted replacement of the persisted authorization snapshot.
   - name: Audit
-    description: Restricted request metadata ledger for operational reconciliation.
+    description: Restricted request metadata ledger for security observability; not a reconciliation feed.
 paths:
   /livez:
     $ref: ./paths/livez.yaml

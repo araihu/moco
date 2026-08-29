@@ -90,8 +90,12 @@ produced, including status and principal metadata, without request bodies,
 query strings, bearer credentials, or plaintext secret paths. The audit read
 itself is excluded so a tailing client cannot create a self-sustaining stream
 of its own polls. Logical secret paths and list prefixes are represented only
-by keyed HMAC-SHA-256 digests. A ledger write failure is logged and does not
-change the already-produced response; retention and export remain deployment
+by keyed HMAC-SHA-256 digests derived with a domain-separated label from
+`MOCO_CURSOR_HMAC_KEY`. Rotating that key intentionally breaks correlation of
+path digests across key eras. The ledger is for security observability, not a
+reconciliation/change feed; controllers and operators use `/api/v1/watch` plus
+relist for convergence. A ledger write failure is logged and does not change
+the already-produced response; retention and export remain deployment
 responsibilities.
 
 Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
