@@ -1,0 +1,6 @@
+description: Authentication challenge for a bearer credential.
+required: true
+schema:
+  type: string
+  enum: [Bearer]
+example: Bearer

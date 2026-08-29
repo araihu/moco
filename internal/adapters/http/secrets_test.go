@@ -63,7 +63,7 @@ func TestSecretLifecycleEndToEnd(t *testing.T) {
 	assertStatus(t, response, http.StatusCreated)
 	firstETag := response.Header.Get("ETag")
 	created := decode[httpapi.SecretMetadata](t, response)
-	if created.Path != path || created.Version != 1 || created.ContentType != contentType || created.Digest != digestOf([]byte("secret")) || firstETag == "" {
+	if created.Path != path || created.Version != 1 || created.ContentType != contentType || created.Digest != digestOf([]byte("secret")) || firstETag == "" || response.Header.Get("Location") != itemPath {
 		t.Fatalf("unexpected created secret: %#v, headers %v", created, response.Header)
 	}
 	if bytes.Contains(response.Body, []byte(`"value"`)) {
@@ -92,11 +92,14 @@ func TestSecretLifecycleEndToEnd(t *testing.T) {
 	}
 	response = test.request(t, http.MethodGet, itemPath, nil, map[string]string{"If-None-Match": firstETag}, true)
 	assertStatus(t, response, http.StatusNotModified)
-	if len(response.Body) != 0 {
+	if len(response.Body) != 0 || response.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("conditional secret read returned a body: %q", response.Body)
 	}
 	response = test.request(t, http.MethodGet, metadataPath, nil, map[string]string{"If-None-Match": firstETag}, true)
 	assertStatus(t, response, http.StatusNotModified)
+	if response.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("conditional metadata read omitted no-store: %v", response.Header)
+	}
 
 	updatedBody := secretWriteBody(t, []byte("new-secret"), &contentType)
 	response = test.request(t, http.MethodPut, itemPath, updatedBody, map[string]string{"If-Match": `"stale"`}, true)
@@ -144,6 +147,11 @@ func TestSecretLifecycleEndToEnd(t *testing.T) {
 	assertStatus(t, response, http.StatusNoContent)
 	response = test.request(t, http.MethodGet, itemPath, nil, nil, true)
 	assertStatus(t, response, http.StatusNotFound)
+	response = test.request(t, http.MethodPut, itemPath, secretWriteBody(t, []byte("recreated"), nil), nil, true)
+	assertStatus(t, response, http.StatusCreated)
+	if response.Header.Get("ETag") == updatedETag {
+		t.Fatalf("delete/recreate reused a secret ETag: %q", response.Header.Get("ETag"))
+	}
 
 	response = test.request(t, http.MethodGet, vaultPath, nil, nil, true)
 	vaultETag := response.Header.Get("ETag")

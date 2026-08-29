@@ -1,0 +1,14 @@
+name: resourceVersion
+in: query
+required: false
+description: |
+  Opaque durable change checkpoint returned by the watch endpoint. A caller
+  that supplies a checkpoint is notified when any persisted resource changes;
+  it should then resync the collections it is responsible for. Because the
+  checkpoint is process-wide, callers need the cluster-wide watch permission.
+schema:
+  type: string
+  pattern: '^rv-[0-9]+$'
+  minLength: 3
+  maxLength: 64
+  example: rv-42

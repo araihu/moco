@@ -60,7 +60,7 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	}, false)
 	assertStatus(t, response, http.StatusOK)
 	info := decode[httpapi.ServiceInfo](t, response)
-	if !slices.Equal(info.Capabilities, []string{"tenants", "vaults", "secrets", "conditional-writes"}) {
+	if !slices.Equal(info.Capabilities, []string{"tenants", "vaults", "secrets", "conditional-writes", "resource-watch"}) {
 		t.Fatalf("unexpected capabilities: %v", info.Capabilities)
 	}
 
@@ -166,6 +166,65 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	assertStatus(t, response, http.StatusNotFound)
 }
 
+func TestWatchChangesReturnsCheckpointAndDetectsMutations(t *testing.T) {
+	t.Parallel()
+	test := newFixture(t, services.TenantServiceOptions{
+		CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes"),
+	})
+
+	response := test.request(t, http.MethodGet, "/api/v1/watch", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	initial := decode[httpapi.WatchResult](t, response)
+	if initial.ResourceVersion != "rv-0" || initial.Changed || response.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("unexpected initial watch response: %#v, headers %v", initial, response.Header)
+	}
+
+	type watchResult struct {
+		response testResponse
+		err      error
+	}
+	result := make(chan watchResult, 1)
+	go func() {
+		response, err := test.rawRequest(http.MethodGet, "/api/v1/watch?resourceVersion=rv-0&timeoutSeconds=5", nil, nil, true)
+		if err != nil {
+			result <- watchResult{err: err}
+			return
+		}
+		body, readErr := io.ReadAll(response.Body)
+		closeErr := response.Body.Close()
+		result <- watchResult{
+			response: testResponse{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: body},
+			err:      errors.Join(readErr, closeErr),
+		}
+	}()
+	time.Sleep(150 * time.Millisecond)
+	test.createTenant(t, "watch-change")
+	changedResult := <-result
+	if changedResult.err != nil {
+		t.Fatalf("watch request failed: %v", changedResult.err)
+	}
+	changed := changedResult.response
+	assertStatus(t, &changed, http.StatusOK)
+	watch := decode[httpapi.WatchResult](t, &changed)
+	if !watch.Changed || watch.ResourceVersion == "rv-0" {
+		t.Fatalf("watch did not observe mutation: %#v", watch)
+	}
+
+	response = test.request(t, http.MethodGet, "/api/v1/watch?resourceVersion="+watch.ResourceVersion+"&timeoutSeconds=0", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	unchanged := decode[httpapi.WatchResult](t, response)
+	if unchanged.Changed || unchanged.ResourceVersion != watch.ResourceVersion {
+		t.Fatalf("unexpected unchanged watch response: %#v", unchanged)
+	}
+
+	response = test.request(t, http.MethodGet, "/api/v1/watch?resourceVersion=rv-999999&timeoutSeconds=0", nil, nil, true)
+	assertStatus(t, response, http.StatusBadRequest)
+	problem := decode[httpapi.Problem](t, response)
+	if problem.Code != "resource_version_ahead" {
+		t.Fatalf("unexpected ahead checkpoint problem: %#v", problem)
+	}
+}
+
 func TestAuthorizationAdministrationIsProtectedAndAtomic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -211,7 +270,7 @@ func TestAuthorizationAdministrationIsProtectedAndAtomic(t *testing.T) {
 	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
-		Readiness: store, Authenticator: authenticator, Authorizer: authorizer,
+		Readiness: store, ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
 		Authorization: authorizationService, PrincipalCheck: authenticator.HasPrincipal,
 		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -432,7 +491,7 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
-		Readiness: store, Authenticator: authenticator, Authorizer: authorizer,
+		Readiness: store, ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
 		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

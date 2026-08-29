@@ -19,7 +19,7 @@ properties:
     type: string
     minLength: 1
     maxLength: 512
-    description: Immutable caller correlation identifier, unique within the tenant.
+    description: Immutable caller correlation identifier, unique within the tenant. Strongly recommended for automation and adoption.
     example: kubernetes://cluster-a/platform/vault-application
   labels:
     $ref: ./labels.yaml

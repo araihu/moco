@@ -1,4 +1,6 @@
-description: The caller exceeded an enforced rate limit.
+description: |
+  The caller exceeded an enforced rate limit. A deployment may enforce this in
+  Mocó or at its API gateway; clients must honor Retry-After before retrying.
 headers:
   Retry-After:
     $ref: ../headers/retry-after.yaml

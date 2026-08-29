@@ -39,7 +39,10 @@ get:
 put:
   operationId: updateTenant
   summary: Update a tenant
-  description: Replaces all mutable fields. externalId and server fields are immutable.
+  description: |
+    Replaces all mutable fields. externalId and server fields are immutable.
+    If-Match is optional; omit it only for an intentionally unconditional
+    mutation. Retrying clients should read the representation and use its ETag.
   tags: [Tenants]
   parameters:
     - $ref: ../components/parameters/if-match.yaml
@@ -90,7 +93,9 @@ delete:
   summary: Delete a tenant
   description: |
     Deletes an empty tenant. With cascade=true, also deletes all child vaults
-    and secrets. A missing tenant returns 404; reconcilers may treat it as success.
+    and secrets. A missing tenant returns 404; reconcilers may treat it as
+    success. If-Match is optional, but recommended for retries that must not
+    delete a newer revision.
   tags: [Tenants]
   parameters:
     - $ref: ../components/parameters/if-match.yaml

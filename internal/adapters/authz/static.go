@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -40,6 +41,7 @@ type Policy = ports.AuthorizationPolicy
 type StaticAuthorizer struct {
 	mu       sync.RWMutex
 	enforcer *casbin.SyncedEnforcer
+	domains  []string
 }
 
 var _ ports.Authorizer = (*StaticAuthorizer)(nil)
@@ -51,7 +53,7 @@ func NewStaticAuthorizer(bindings []RoleBinding, policies []Policy) (*StaticAuth
 	if err != nil {
 		return nil, err
 	}
-	return &StaticAuthorizer{enforcer: enforcer}, nil
+	return &StaticAuthorizer{enforcer: enforcer, domains: authorizationDomains(bindings, policies)}, nil
 }
 
 // Reload atomically swaps in a validated policy snapshot.
@@ -62,6 +64,7 @@ func (a *StaticAuthorizer) Reload(bindings []RoleBinding, policies []Policy) err
 	}
 	a.mu.Lock()
 	a.enforcer = enforcer
+	a.domains = authorizationDomains(bindings, policies)
 	a.mu.Unlock()
 	return nil
 }
@@ -124,6 +127,43 @@ func (a *StaticAuthorizer) Authorize(ctx context.Context, principal, domain, res
 		return false, fmt.Errorf("evaluate authorization policy: %w", err)
 	}
 	return allowed, nil
+}
+
+// AuthorizeAnyDomain checks a resource against each configured domain. It is
+// deliberately fail-closed when no domain grants the requested operation.
+func (a *StaticAuthorizer) AuthorizeAnyDomain(ctx context.Context, principal, resource, action string) (bool, error) {
+	a.mu.RLock()
+	domains := append([]string(nil), a.domains...)
+	a.mu.RUnlock()
+	for _, domain := range domains {
+		allowed, err := a.Authorize(ctx, principal, domain, resource, action)
+		if err != nil || allowed {
+			return allowed, err
+		}
+	}
+	return false, nil
+}
+
+// AuthorizeTenant checks the canonical tenant item route for discovery
+// filtering. A global policy naturally authorizes every tenant.
+func (a *StaticAuthorizer) AuthorizeTenant(ctx context.Context, principal, tenantID string) (bool, error) {
+	return a.Authorize(ctx, principal, tenantID, "/api/v1/tenants/"+tenantID, "GET")
+}
+
+func authorizationDomains(bindings []RoleBinding, policies []Policy) []string {
+	seen := map[string]struct{}{"*": {}}
+	for _, binding := range bindings {
+		seen[binding.Domain] = struct{}{}
+	}
+	for _, policy := range policies {
+		seen[policy.Domain] = struct{}{}
+	}
+	domains := make([]string, 0, len(seen))
+	for domain := range seen {
+		domains = append(domains, domain)
+	}
+	slices.Sort(domains)
+	return domains
 }
 
 func validDomain(value string) bool {

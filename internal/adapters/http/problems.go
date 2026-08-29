@@ -169,3 +169,10 @@ func internalResponse(problem Problem) InternalErrorApplicationProblemPlusJSONRe
 		Body: problem, Headers: InternalErrorResponseHeaders{XRequestID: problem.RequestId},
 	}
 }
+
+func serviceUnavailableResponse(problem Problem, retryAfter int32) ServiceUnavailableApplicationProblemPlusJSONResponse {
+	return ServiceUnavailableApplicationProblemPlusJSONResponse{
+		Body:    problem,
+		Headers: ServiceUnavailableResponseHeaders{RetryAfter: retryAfter, XRequestID: problem.RequestId},
+	}
+}

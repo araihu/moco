@@ -38,20 +38,31 @@ func (e ServiceInfoApiVersion) Valid() bool {
 // Example: {"app.kubernetes.io/managed-by":"moco-operator"}
 type Labels map[string]string
 
-// PageInfo Cursor state for a stable collection snapshot.
+// PageInfo Cursor state for one collection snapshot. Items are returned in ascending
+// immutable insertion-sequence order. If `hasMore` is true, `nextCursor` is
+// non-null and must be used to continue the same snapshot; if `hasMore` is
+// false, `nextCursor` is null.
 type PageInfo struct {
-	// HasMore Whether another page exists in the same snapshot.
+	// HasMore Whether another page exists in the same snapshot. True implies a non-null nextCursor.
 	//
 	// Example: false
 	HasMore bool `json:"hasMore"`
 
-	// NextCursor Opaque cursor for the next page; null on the final page.
+	// NextCursor Opaque cursor for the next page; required when hasMore is true and null on the final page.
 	NextCursor *string `json:"nextCursor"`
 }
 
 // Problem Problem Details response compatible with RFC 9457.
 type Problem struct {
-	// Code Stable machine-readable error code.
+	// Code Stable machine-readable error code. Implementations currently use
+	// unauthorized, forbidden, invalid_request, invalid_json,
+	// invalid_content_type, invalid_request_id, validation_failed,
+	// invalid_if_match, invalid_if_none_match, invalid_cursor, cursor_expired,
+	// invalid_resource_version, invalid_watch_timeout, resource_version_ahead,
+	// resource_not_found,
+	// resource_conflict, resource_has_children, idempotency_key_conflict,
+	// etag_mismatch, secret_too_large, service_unavailable, and internal_error.
+	//
 	//
 	// Example: resource_not_found
 	Code string `json:"code"`
@@ -139,12 +150,15 @@ type Secret struct {
 	Version int64 `json:"version"`
 }
 
-// SecretList One page of secret metadata from a stable snapshot; values are omitted.
+// SecretList One page of secret metadata ordered by immutable insertion sequence; values are omitted.
 type SecretList struct {
 	// Items Example: [{"contentType":"text/plain","createdAt":"2026-08-25T12:00:00Z","digest":"sha256:2bb80d537b1da3e38bd30361aa855686bde0ba53e611d8a8a5e47993629e366f","path":"prod/db/password","updatedAt":"2026-08-25T13:00:00Z","version":4}]
 	Items []SecretMetadata `json:"items"`
 
-	// Page Cursor state for a stable collection snapshot.
+	// Page Cursor state for one collection snapshot. Items are returned in ascending
+	// immutable insertion-sequence order. If `hasMore` is true, `nextCursor` is
+	// non-null and must be used to continue the same snapshot; if `hasMore` is
+	// false, `nextCursor` is null.
 	Page PageInfo `json:"page"`
 }
 
@@ -199,7 +213,7 @@ type ServiceInfo struct {
 
 	// Capabilities Stable feature identifiers available on this deployment.
 	//
-	// Example: ["tenants","vaults","secrets","conditional-writes"]
+	// Example: ["tenants","vaults","secrets","conditional-writes","resource-watch"]
 	Capabilities []string `json:"capabilities"`
 
 	// ServiceVersion Mocó server version; clients must treat it as opaque.
@@ -259,7 +273,7 @@ type TenantCreate struct {
 	// Description Example: Production workloads
 	Description *string `json:"description,omitempty"`
 
-	// ExternalId Immutable caller correlation identifier, unique across tenants.
+	// ExternalId Immutable caller correlation identifier, unique across tenants. Strongly recommended for automation and adoption.
 	//
 	// Example: kubernetes://cluster-a/platform/tenant-production
 	ExternalId *string `json:"externalId,omitempty"`
@@ -278,7 +292,10 @@ type TenantList struct {
 	// Items Example: [{"createdAt":"2026-08-25T12:00:00Z","id":"11111111-1111-4111-8111-111111111111","labels":{},"name":"production","revision":1,"updatedAt":"2026-08-25T12:00:00Z"}]
 	Items []Tenant `json:"items"`
 
-	// Page Cursor state for a stable collection snapshot.
+	// Page Cursor state for one collection snapshot. Items are returned in ascending
+	// immutable insertion-sequence order. If `hasMore` is true, `nextCursor` is
+	// non-null and must be used to continue the same snapshot; if `hasMore` is
+	// false, `nextCursor` is null.
 	Page PageInfo `json:"page"`
 }
 
@@ -343,7 +360,7 @@ type VaultCreate struct {
 	// Description Example: Application runtime secrets
 	Description *string `json:"description,omitempty"`
 
-	// ExternalId Immutable caller correlation identifier, unique within the tenant.
+	// ExternalId Immutable caller correlation identifier, unique within the tenant. Strongly recommended for automation and adoption.
 	//
 	// Example: kubernetes://cluster-a/platform/vault-application
 	ExternalId *string `json:"externalId,omitempty"`
@@ -362,7 +379,10 @@ type VaultList struct {
 	// Items Example: [{"createdAt":"2026-08-25T12:00:00Z","id":"22222222-2222-4222-8222-222222222222","labels":{},"name":"application","revision":1,"tenantId":"11111111-1111-4111-8111-111111111111","updatedAt":"2026-08-25T12:00:00Z"}]
 	Items []Vault `json:"items"`
 
-	// Page Cursor state for a stable collection snapshot.
+	// Page Cursor state for one collection snapshot. Items are returned in ascending
+	// immutable insertion-sequence order. If `hasMore` is true, `nextCursor` is
+	// non-null and must be used to continue the same snapshot; if `hasMore` is
+	// false, `nextCursor` is null.
 	Page PageInfo `json:"page"`
 }
 
@@ -380,6 +400,19 @@ type VaultUpdate struct {
 
 	// Name Example: platform
 	Name string `json:"name"`
+}
+
+// WatchResult Durable resource-version checkpoint returned by a watch poll.
+type WatchResult struct {
+	// Changed True when the current revision is newer than the supplied checkpoint.
+	//
+	// Example: true
+	Changed bool `json:"changed"`
+
+	// ResourceVersion Current durable resource revision.
+	//
+	// Example: rv-42
+	ResourceVersion string `json:"resourceVersion"`
 }
 
 // Cascade defines model for cascade.
@@ -409,6 +442,9 @@ type NameFilter = string
 // RequestId defines model for request-id.
 type RequestId = string
 
+// ResourceVersion Example: rv-42
+type ResourceVersion = string
+
 // SecretPath defines model for secret-path.
 type SecretPath = string
 
@@ -420,6 +456,9 @@ type TenantId = openapi_types.UUID
 
 // VaultId defines model for vault-id.
 type VaultId = openapi_types.UUID
+
+// WatchTimeout Example: 15
+type WatchTimeout = int32
 
 // BadRequest Problem Details response compatible with RFC 9457.
 type BadRequest = Problem
@@ -497,6 +536,8 @@ type DeleteTenantParams struct {
 
 	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
 	// applied only if the current ETag matches; otherwise the server returns 412.
+	// Omitting it performs an unconditional mutation. Retrying a mutation safely
+	// requires reading the latest representation and sending its ETag.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
@@ -517,6 +558,8 @@ type GetTenantParams struct {
 type UpdateTenantParams struct {
 	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
 	// applied only if the current ETag matches; otherwise the server returns 412.
+	// Omitting it performs an unconditional mutation. Retrying a mutation safely
+	// requires reading the latest representation and sending its ETag.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
@@ -560,6 +603,8 @@ type DeleteVaultParams struct {
 
 	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
 	// applied only if the current ETag matches; otherwise the server returns 412.
+	// Omitting it performs an unconditional mutation. Retrying a mutation safely
+	// requires reading the latest representation and sending its ETag.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
@@ -580,6 +625,8 @@ type GetVaultParams struct {
 type UpdateVaultParams struct {
 	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
 	// applied only if the current ETag matches; otherwise the server returns 412.
+	// Omitting it performs an unconditional mutation. Retrying a mutation safely
+	// requires reading the latest representation and sending its ETag.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
@@ -594,6 +641,8 @@ type DeleteSecretParams struct {
 
 	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
 	// applied only if the current ETag matches; otherwise the server returns 412.
+	// Omitting it performs an unconditional mutation. Retrying a mutation safely
+	// requires reading the latest representation and sending its ETag.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
@@ -622,6 +671,8 @@ type PutSecretParams struct {
 
 	// IfMatch Opaque ETag from the latest representation. When present, the mutation is
 	// applied only if the current ETag matches; otherwise the server returns 412.
+	// Omitting it performs an unconditional mutation. Retrying a mutation safely
+	// requires reading the latest representation and sending its ETag.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 
 	// IfNoneMatch For GET, return 304 when the current ETag matches. For PUT, only `*` is
@@ -657,6 +708,21 @@ type ListSecretsParams struct {
 
 	// Cursor Opaque next-page cursor returned by the preceding list response.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
+// WatchChangesParams defines parameters for WatchChanges.
+type WatchChangesParams struct {
+	// ResourceVersion Opaque durable change checkpoint returned by the watch endpoint. A caller
+	// that supplies a checkpoint is notified when any persisted resource changes;
+	// it should then resync the collections it is responsible for. Because the
+	// checkpoint is process-wide, callers need the cluster-wide watch permission.
+	ResourceVersion *ResourceVersion `form:"resourceVersion,omitempty" json:"resourceVersion,omitempty"`
+
+	// TimeoutSeconds Maximum number of seconds to wait for a change. Zero returns immediately. The limit leaves headroom for the server write timeout.
+	TimeoutSeconds *WatchTimeout `form:"timeoutSeconds,omitempty" json:"timeoutSeconds,omitempty"`
 
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
 	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
@@ -727,6 +793,9 @@ type ServerInterface interface {
 	// ListSecrets List secret metadata
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
 	ListSecrets(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params ListSecretsParams)
+	// WatchChanges Wait for persisted resource changes
+	// (GET /api/v1/watch)
+	WatchChanges(w http.ResponseWriter, r *http.Request, params WatchChangesParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -2051,6 +2120,73 @@ func (siw *ServerInterfaceWrapper) ListSecrets(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// WatchChanges operation middleware
+func (siw *ServerInterfaceWrapper) WatchChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params WatchChangesParams
+
+	// ------------- Optional query parameter "resourceVersion" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resourceVersion", r.URL.Query(), &params.ResourceVersion, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "resourceVersion"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resourceVersion", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "timeoutSeconds" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "timeoutSeconds", r.URL.Query(), &params.TimeoutSeconds, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "timeoutSeconds"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "timeoutSeconds", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.WatchChanges(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -2172,6 +2308,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1", wrapper.GetServiceInfo)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/watch", wrapper.WatchChanges)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants", wrapper.ListTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tenants", wrapper.CreateTenant)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tenants/{tenantId}", wrapper.DeleteTenant)
@@ -2272,6 +2409,15 @@ type PreconditionFailedApplicationProblemPlusJSONResponse struct {
 	Headers PreconditionFailedResponseHeaders
 }
 
+type SecretNotModifiedResponseHeaders struct {
+	CacheControl string
+	ETag         string
+	XRequestID   string
+}
+type SecretNotModifiedResponse struct {
+	Headers SecretNotModifiedResponseHeaders
+}
+
 type ServiceUnavailableResponseHeaders struct {
 	RetryAfter int32
 	XRequestID string
@@ -2293,7 +2439,8 @@ type TooManyRequestsApplicationProblemPlusJSONResponse struct {
 }
 
 type UnauthorizedResponseHeaders struct {
-	XRequestID string
+	WWWAuthenticate string
+	XRequestID      string
 }
 type UnauthorizedApplicationProblemPlusJSONResponse struct {
 	Body Problem
@@ -2342,6 +2489,7 @@ func (response GetServiceInfo401ApplicationProblemPlusJSONResponse) VisitGetServ
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -2476,6 +2624,7 @@ func (response ListTenants401ApplicationProblemPlusJSONResponse) VisitListTenant
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -2632,6 +2781,7 @@ func (response CreateTenant401ApplicationProblemPlusJSONResponse) VisitCreateTen
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -2776,6 +2926,7 @@ func (response DeleteTenant401ApplicationProblemPlusJSONResponse) VisitDeleteTen
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -2974,6 +3125,7 @@ func (response GetTenant401ApplicationProblemPlusJSONResponse) VisitGetTenantRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -3129,6 +3281,7 @@ func (response UpdateTenant401ApplicationProblemPlusJSONResponse) VisitUpdateTen
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -3316,6 +3469,7 @@ func (response ListVaults401ApplicationProblemPlusJSONResponse) VisitListVaultsR
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -3490,6 +3644,7 @@ func (response CreateVault401ApplicationProblemPlusJSONResponse) VisitCreateVaul
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -3652,6 +3807,7 @@ func (response DeleteVault401ApplicationProblemPlusJSONResponse) VisitDeleteVaul
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -3851,6 +4007,7 @@ func (response GetVault401ApplicationProblemPlusJSONResponse) VisitGetVaultRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -4007,6 +4164,7 @@ func (response UpdateVault401ApplicationProblemPlusJSONResponse) VisitUpdateVaul
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -4187,6 +4345,7 @@ func (response DeleteSecret401ApplicationProblemPlusJSONResponse) VisitDeleteSec
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -4334,9 +4493,10 @@ func (response GetSecret200JSONResponse) VisitGetSecretResponse(w http.ResponseW
 	return err
 }
 
-type GetSecret304Response = NotModifiedResponse
+type GetSecret304Response = SecretNotModifiedResponse
 
 func (response GetSecret304Response) VisitGetSecretResponse(w http.ResponseWriter) error {
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
 	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(304)
@@ -4371,6 +4531,7 @@ func (response GetSecret401ApplicationProblemPlusJSONResponse) VisitGetSecretRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -4501,6 +4662,7 @@ func (response PutSecret200JSONResponse) VisitPutSecretResponse(w http.ResponseW
 
 type PutSecret201ResponseHeaders struct {
 	ETag       string
+	Location   string
 	XRequestID string
 }
 
@@ -4517,6 +4679,7 @@ func (response PutSecret201JSONResponse) VisitPutSecretResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
@@ -4551,6 +4714,7 @@ func (response PutSecret401ApplicationProblemPlusJSONResponse) VisitPutSecretRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -4713,9 +4877,10 @@ func (response GetSecretMetadata200JSONResponse) VisitGetSecretMetadataResponse(
 	return err
 }
 
-type GetSecretMetadata304Response = NotModifiedResponse
+type GetSecretMetadata304Response = SecretNotModifiedResponse
 
 func (response GetSecretMetadata304Response) VisitGetSecretMetadataResponse(w http.ResponseWriter) error {
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
 	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(304)
@@ -4750,6 +4915,7 @@ func (response GetSecretMetadata401ApplicationProblemPlusJSONResponse) VisitGetS
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -4903,6 +5069,7 @@ func (response ListSecrets401ApplicationProblemPlusJSONResponse) VisitListSecret
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -5013,6 +5180,143 @@ func (response ListSecrets503ApplicationProblemPlusJSONResponse) VisitListSecret
 	return err
 }
 
+type WatchChangesRequestObject struct {
+	Params WatchChangesParams
+}
+
+type WatchChangesResponseObject interface {
+	VisitWatchChangesResponse(w http.ResponseWriter) error
+}
+
+type WatchChanges200ResponseHeaders struct {
+	CacheControl string
+	XRequestID   string
+}
+
+type WatchChanges200JSONResponse struct {
+	Body    WatchResult
+	Headers WatchChanges200ResponseHeaders
+}
+
+func (response WatchChanges200JSONResponse) VisitWatchChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchChanges400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response WatchChanges400ApplicationProblemPlusJSONResponse) VisitWatchChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchChanges401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response WatchChanges401ApplicationProblemPlusJSONResponse) VisitWatchChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchChanges403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response WatchChanges403ApplicationProblemPlusJSONResponse) VisitWatchChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchChanges429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response WatchChanges429ApplicationProblemPlusJSONResponse) VisitWatchChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchChanges500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response WatchChanges500ApplicationProblemPlusJSONResponse) VisitWatchChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchChanges503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response WatchChanges503ApplicationProblemPlusJSONResponse) VisitWatchChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetServiceInfo Get API compatibility information
@@ -5063,6 +5367,9 @@ type StrictServerInterface interface {
 	// ListSecrets List secret metadata
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
 	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
+	// WatchChanges Wait for persisted resource changes
+	// (GET /api/v1/watch)
+	WatchChanges(ctx context.Context, request WatchChangesRequestObject) (WatchChangesResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -5569,6 +5876,32 @@ func (sh *strictHandler) ListSecrets(w http.ResponseWriter, r *http.Request, ten
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListSecretsResponseObject); ok {
 		if err := validResponse.VisitListSecretsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// WatchChanges operation middleware
+func (sh *strictHandler) WatchChanges(w http.ResponseWriter, r *http.Request, params WatchChangesParams) {
+	var request WatchChangesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.WatchChanges(ctx, request.(WatchChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "WatchChanges")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(WatchChangesResponseObject); ok {
+		if err := validResponse.VisitWatchChangesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

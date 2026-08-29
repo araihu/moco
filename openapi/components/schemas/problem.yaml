@@ -22,7 +22,15 @@ properties:
   code:
     type: string
     minLength: 1
-    description: Stable machine-readable error code.
+    description: |
+      Stable machine-readable error code. Implementations currently use
+      unauthorized, forbidden, invalid_request, invalid_json,
+      invalid_content_type, invalid_request_id, validation_failed,
+      invalid_if_match, invalid_if_none_match, invalid_cursor, cursor_expired,
+      invalid_resource_version, invalid_watch_timeout, resource_version_ahead,
+      resource_not_found,
+      resource_conflict, resource_has_children, idempotency_key_conflict,
+      etag_mismatch, secret_too_large, service_unavailable, and internal_error.
     example: resource_not_found
   detail:
     type: string

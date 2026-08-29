@@ -26,6 +26,8 @@ tags:
 paths:
   /api/v1:
     $ref: ./paths/service.yaml
+  /api/v1/watch:
+    $ref: ./paths/watch.yaml
   /api/v1/tenants:
     $ref: ./paths/tenants.yaml
   /api/v1/tenants/{tenantId}:

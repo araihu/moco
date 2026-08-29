@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/araihu/moco/internal/adapters/authz"
 	"github.com/araihu/moco/internal/core/ports"
 )
 
@@ -103,6 +104,28 @@ func TestAuthorizationMiddlewareBypassesInternalAndUnknownRoutes(t *testing.T) {
 	}
 	if authorizer.calls != 0 {
 		t.Fatalf("authorizer called %d times for bypassed routes", authorizer.calls)
+	}
+}
+
+func TestAuthorizationMiddlewareRequiresGlobalWatchPermission(t *testing.T) {
+	t.Parallel()
+	authorizer, err := authz.NewStaticAuthorizer(
+		[]authz.RoleBinding{{Principal: "operator", Role: "tenant-reader", Domain: "tenant-a"}},
+		[]authz.Policy{{Subject: "tenant-reader", Domain: "tenant-a", Path: "/api/v1/watch", Method: "GET"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	})
+	handler := authorizationMiddleware(authorizer, slog.Default(), next)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/watch", nil)
+	request = request.WithContext(context.WithValue(request.Context(), principalContextKey, "operator"))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("tenant-scoped watch status = %d, want 403", recorder.Code)
 	}
 }
 

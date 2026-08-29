@@ -11,6 +11,19 @@ type Authorizer interface {
 	Authorize(context.Context, string, string, string, string) (bool, error)
 }
 
+// AnyDomainAuthorizer checks whether a principal has a permission in at least
+// one configured authorization domain. It is used only for collection routes
+// whose URL does not contain a tenant ID yet.
+type AnyDomainAuthorizer interface {
+	AuthorizeAnyDomain(context.Context, string, string, string) (bool, error)
+}
+
+// TenantVisibilityAuthorizer evaluates the tenant item permission used to
+// filter tenant discovery for principals with tenant-scoped policies.
+type TenantVisibilityAuthorizer interface {
+	AuthorizeTenant(context.Context, string, string) (bool, error)
+}
+
 // AuthorizationPrincipal identifies a bearer credential by its token digest.
 type AuthorizationPrincipal struct {
 	PrincipalID string `json:"id"`

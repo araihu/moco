@@ -4,6 +4,8 @@ required: false
 description: |
   Opaque ETag from the latest representation. When present, the mutation is
   applied only if the current ETag matches; otherwise the server returns 412.
+  Omitting it performs an unconditional mutation. Retrying a mutation safely
+  requires reading the latest representation and sending its ETag.
 schema:
   type: string
   minLength: 1

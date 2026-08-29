@@ -50,6 +50,29 @@ func TestStaticAuthorizerUsesRolesAndFailsClosed(t *testing.T) {
 	}
 }
 
+func TestStaticAuthorizerFindsScopedCollectionAccessAndTenantVisibility(t *testing.T) {
+	t.Parallel()
+	authorizer, err := authz.NewStaticAuthorizer(
+		[]authz.RoleBinding{{Principal: "operator", Role: "tenant-reader", Domain: "tenant-a"}},
+		[]authz.Policy{{Subject: "tenant-reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}", Method: "GET"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := authorizer.AuthorizeAnyDomain(t.Context(), "operator", "/api/v1/tenants/{tenantId}", "GET")
+	if err != nil || !allowed {
+		t.Fatalf("scoped collection access = %t, err=%v", allowed, err)
+	}
+	allowed, err = authorizer.AuthorizeTenant(t.Context(), "operator", "tenant-a")
+	if err != nil || !allowed {
+		t.Fatalf("visible tenant denied: allowed=%t err=%v", allowed, err)
+	}
+	allowed, err = authorizer.AuthorizeTenant(t.Context(), "operator", "tenant-b")
+	if err != nil || allowed {
+		t.Fatalf("foreign tenant unexpectedly visible: allowed=%t err=%v", allowed, err)
+	}
+}
+
 func TestStaticAuthorizerRejectsUnsafePolicies(t *testing.T) {
 	t.Parallel()
 	tests := map[string]authz.Policy{

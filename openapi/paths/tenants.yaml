@@ -4,9 +4,12 @@ get:
   operationId: listTenants
   summary: List tenants
   description: |
-    Lists tenants visible to the principal. The first request creates a stable
-    snapshot; follow `nextCursor` until `hasMore` is false. If a cursor expires,
-    restart without one. Name and externalId filters are exact and may be combined.
+    Lists tenants in the caller's collection authorization scope. The first
+    request creates a sequence-bounded snapshot; follow `nextCursor` until
+    `hasMore` is false. If a cursor expires, restart without one. Name and
+    externalId filters are exact and may be combined. For deterministic
+    adoption, controllers should use an exact immutable `externalId` filter
+    before creating a tenant.
   tags: [Tenants]
   parameters:
     - $ref: ../components/parameters/limit.yaml
@@ -15,7 +18,7 @@ get:
     - $ref: ../components/parameters/external-id-filter.yaml
   responses:
     '200':
-      description: Page of tenants from a stable snapshot.
+      description: Page of tenants ordered by immutable insertion sequence.
       headers:
         X-Request-ID:
           $ref: ../components/headers/request-id.yaml
@@ -52,9 +55,11 @@ post:
   operationId: createTenant
   summary: Create a tenant
   description: |
-    Creates a tenant. Name and externalId are independently unique. Repeating an
-    identical request with the same Idempotency-Key returns the original result;
-    reusing that key with another body returns 409.
+    Creates a tenant. Name and externalId are independently unique. Automation
+    should supply an externalId and Idempotency-Key. A uniqueness conflict
+    returns the existing resourceId when safe, allowing an atomic adoption
+    handshake. Repeating an identical request with the same Idempotency-Key
+    returns the original result; reusing that key with another body returns 409.
   tags: [Tenants]
   parameters:
     - $ref: ../components/parameters/idempotency-key.yaml

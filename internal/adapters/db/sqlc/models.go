@@ -40,6 +40,11 @@ type IdempotencyRecord struct {
 	ExpiresAt      string `json:"expires_at"`
 }
 
+type MocoResourceVersion struct {
+	ID       int64 `json:"id"`
+	Revision int64 `json:"revision"`
+}
+
 type Secret struct {
 	Sequence    int64  `json:"sequence"`
 	TenantID    string `json:"tenant_id"`

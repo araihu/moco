@@ -1,4 +1,7 @@
-description: The service is temporarily unable to process the request.
+description: |
+  The service or a required dependency is temporarily unavailable. This may be
+  emitted by Mocó or by the deployment edge; clients should retry after the
+  advertised interval with bounded exponential backoff.
 headers:
   Retry-After:
     $ref: ../headers/retry-after.yaml

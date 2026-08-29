@@ -8,7 +8,7 @@ content:
       type: https://moco.araihu.com/problems/forbidden
       title: Forbidden
       status: 403
-      code: permission_denied
+      code: forbidden
       requestId: 11111111-1111-4111-8111-111111111111
     schema:
       $ref: ../schemas/problem.yaml

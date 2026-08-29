@@ -1,16 +1,20 @@
 title: PageInfo
 type: object
-description: Cursor state for a stable collection snapshot.
+description: |
+  Cursor state for one collection snapshot. Items are returned in ascending
+  immutable insertion-sequence order. If `hasMore` is true, `nextCursor` is
+  non-null and must be used to continue the same snapshot; if `hasMore` is
+  false, `nextCursor` is null.
 additionalProperties: false
 required: [hasMore, nextCursor]
 properties:
   hasMore:
     type: boolean
-    description: Whether another page exists in the same snapshot.
+    description: Whether another page exists in the same snapshot. True implies a non-null nextCursor.
     example: false
   nextCursor:
     type: string
     minLength: 1
     nullable: true
-    description: Opaque cursor for the next page; null on the final page.
+    description: Opaque cursor for the next page; required when hasMore is true and null on the final page.
     example: null

@@ -1,0 +1,11 @@
+name: timeoutSeconds
+in: query
+required: false
+description: Maximum number of seconds to wait for a change. Zero returns immediately. The limit leaves headroom for the server write timeout.
+schema:
+  type: integer
+  format: int32
+  minimum: 0
+  maximum: 25
+  default: 0
+  example: 15

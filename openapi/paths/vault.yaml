@@ -40,7 +40,10 @@ get:
 put:
   operationId: updateVault
   summary: Update a vault
-  description: Replaces all mutable fields. externalId and server fields are immutable.
+  description: |
+    Replaces all mutable fields. externalId and server fields are immutable.
+    If-Match is optional; omit it only for an intentionally unconditional
+    mutation. Retrying clients should read the representation and use its ETag.
   tags: [Vaults]
   parameters:
     - $ref: ../components/parameters/if-match.yaml
@@ -91,7 +94,8 @@ delete:
   summary: Delete a vault
   description: |
     Deletes an empty vault. With cascade=true, also deletes all stored secrets.
-    A missing vault returns 404; reconcilers may treat it as success.
+    A missing vault returns 404; reconcilers may treat it as success. If-Match
+    is optional, but recommended for retries that must not delete a newer revision.
   tags: [Vaults]
   parameters:
     - $ref: ../components/parameters/if-match.yaml

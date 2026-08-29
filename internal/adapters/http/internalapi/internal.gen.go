@@ -109,7 +109,15 @@ type HealthStatusStatus string
 
 // Problem Problem Details response compatible with RFC 9457.
 type Problem struct {
-	// Code Stable machine-readable error code.
+	// Code Stable machine-readable error code. Implementations currently use
+	// unauthorized, forbidden, invalid_request, invalid_json,
+	// invalid_content_type, invalid_request_id, validation_failed,
+	// invalid_if_match, invalid_if_none_match, invalid_cursor, cursor_expired,
+	// invalid_resource_version, invalid_watch_timeout, resource_version_ahead,
+	// resource_not_found,
+	// resource_conflict, resource_has_children, idempotency_key_conflict,
+	// etag_mismatch, secret_too_large, service_unavailable, and internal_error.
+	//
 	//
 	// Example: resource_not_found
 	Code string `json:"code"`
@@ -549,7 +557,8 @@ type ServiceUnavailableApplicationProblemPlusJSONResponse struct {
 }
 
 type UnauthorizedResponseHeaders struct {
-	XRequestID string
+	WWWAuthenticate string
+	XRequestID      string
 }
 type UnauthorizedApplicationProblemPlusJSONResponse struct {
 	Body Problem
@@ -600,6 +609,7 @@ func (response GetAuthorizationSnapshot401ApplicationProblemPlusJSONResponse) Vi
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -719,6 +729,7 @@ func (response ReplaceAuthorizationSnapshot401ApplicationProblemPlusJSONResponse
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)

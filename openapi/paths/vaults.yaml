@@ -5,9 +5,11 @@ get:
   operationId: listVaults
   summary: List vaults
   description: |
-    Lists vaults in a stable snapshot. Follow `nextCursor` until `hasMore` is
+    Lists vaults in the caller's tenant authorization scope. The first request
+    creates a sequence-bounded snapshot; follow `nextCursor` until `hasMore` is
     false. If a cursor expires, restart without one. Name and externalId filters
-    are exact and may be combined.
+    are exact and may be combined. For deterministic adoption, controllers
+    should use an exact immutable `externalId` filter before creating a vault.
   tags: [Vaults]
   parameters:
     - $ref: ../components/parameters/limit.yaml
@@ -16,7 +18,7 @@ get:
     - $ref: ../components/parameters/external-id-filter.yaml
   responses:
     '200':
-      description: Page of vaults from a stable snapshot.
+      description: Page of vaults ordered by immutable insertion sequence.
       headers:
         X-Request-ID:
           $ref: ../components/headers/request-id.yaml
@@ -57,8 +59,10 @@ post:
   summary: Create a vault
   description: |
     Creates a tenant-scoped vault. Name and externalId are independently unique
-    within the tenant. Repeating an identical request with the same
-    Idempotency-Key returns the original result.
+    within the tenant. Automation should supply an externalId and
+    Idempotency-Key. A uniqueness conflict returns the existing resourceId when
+    safe, allowing an atomic adoption handshake. Repeating an identical request
+    with the same Idempotency-Key returns the original result.
   tags: [Vaults]
   parameters:
     - $ref: ../components/parameters/idempotency-key.yaml

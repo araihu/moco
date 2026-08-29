@@ -243,10 +243,12 @@ func (s *SecretService) Delete(ctx context.Context, tenantID, vaultID, path stri
 	return err
 }
 
-// SecretETag returns a strong validator bound to vault, path, and version.
+// SecretETag returns a strong validator bound to the immutable row sequence,
+// vault, path, and version. Including sequence prevents a delete/recreate
+// cycle from making an old validator valid for a new secret at the same path.
 func SecretETag(metadata domain.SecretMetadata) string {
 	scope := sha256.Sum256([]byte(metadata.VaultID + "\x00" + metadata.Path))
-	return fmt.Sprintf("\"secret-%s-%d\"", hex.EncodeToString(scope[:16]), metadata.Version)
+	return fmt.Sprintf("\"secret-%s-%d-%d\"", hex.EncodeToString(scope[:16]), metadata.Sequence, metadata.Version)
 }
 
 func (s *SecretService) ensureVaultKey(ctx context.Context, tenantID, vaultID string) (ports.WrappedVaultKey, error) {

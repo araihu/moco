@@ -3,8 +3,10 @@ package httpapi
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/araihu/moco/internal/core/domain"
+	"github.com/araihu/moco/internal/core/ports"
 	"github.com/araihu/moco/internal/core/services"
 	"github.com/google/uuid"
 )
@@ -12,11 +14,15 @@ import (
 // GetServiceInfo advertises only capabilities implemented by this binary.
 func (s *Server) GetServiceInfo(ctx context.Context, _ GetServiceInfoRequestObject) (GetServiceInfoResponseObject, error) {
 	id := requestID(ctx)
+	capabilities := []string{"tenants", "vaults", "secrets", "conditional-writes"}
+	if s.resourceVersion != nil {
+		capabilities = append(capabilities, "resource-watch")
+	}
 	return GetServiceInfo200JSONResponse{
 		Body: ServiceInfo{
 			ApiVersion:     V1,
 			ServiceVersion: s.serviceVersion,
-			Capabilities:   []string{"tenants", "vaults", "secrets", "conditional-writes"},
+			Capabilities:   capabilities,
 		},
 		Headers: GetServiceInfo200ResponseHeaders{XRequestID: id},
 	}, nil
@@ -46,13 +52,42 @@ func (s *Server) ListTenants(ctx context.Context, request ListTenantsRequestObje
 		}
 	}
 	items := make([]Tenant, 0, len(result.Items))
-	for _, tenant := range result.Items {
-		converted, err := tenantResponse(tenant)
-		if err != nil {
-			mapped := s.problem(ctx, "listTenants", err)
+	filterScoped := false
+	if scoped, ok := s.authorizer.(ports.TenantVisibilityAuthorizer); ok {
+		global, authErr := s.authorizer.Authorize(ctx, principalID(ctx), "*", "/api/v1/tenants", http.MethodGet)
+		if authErr != nil {
+			mapped := s.problem(ctx, "listTenants", authErr)
 			return ListTenants500ApplicationProblemPlusJSONResponse{internalResponse(mapped.problem)}, nil
 		}
-		items = append(items, converted)
+		filterScoped = !global
+		if filterScoped {
+			for _, tenant := range result.Items {
+				visible, authErr := scoped.AuthorizeTenant(ctx, principalID(ctx), tenant.ID)
+				if authErr != nil {
+					mapped := s.problem(ctx, "listTenants", authErr)
+					return ListTenants500ApplicationProblemPlusJSONResponse{internalResponse(mapped.problem)}, nil
+				}
+				if !visible {
+					continue
+				}
+				converted, conversionErr := tenantResponse(tenant)
+				if conversionErr != nil {
+					mapped := s.problem(ctx, "listTenants", conversionErr)
+					return ListTenants500ApplicationProblemPlusJSONResponse{internalResponse(mapped.problem)}, nil
+				}
+				items = append(items, converted)
+			}
+		}
+	}
+	if !filterScoped {
+		for _, tenant := range result.Items {
+			converted, err := tenantResponse(tenant)
+			if err != nil {
+				mapped := s.problem(ctx, "listTenants", err)
+				return ListTenants500ApplicationProblemPlusJSONResponse{internalResponse(mapped.problem)}, nil
+			}
+			items = append(items, converted)
+		}
 	}
 	return ListTenants200JSONResponse{
 		Body: TenantList{

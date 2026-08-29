@@ -24,9 +24,19 @@ artifacts; edit the exploded sources instead.
 ## Automation guarantees
 
 - Collection responses use opaque cursor pagination. A cursor continues a
-  stable snapshot; expired cursors return `410` and consumers restart listing.
+  sequence-bounded snapshot in ascending insertion order; expired cursors
+  return `410` and consumers restart listing. `hasMore=true` always carries a
+  continuation cursor, while the final page carries `nextCursor=null`.
+- `GET /api/v1/watch` exposes a durable `resourceVersion` long-poll. A changed
+  result is a resync signal, not an event payload or tombstone stream; clients
+  must list the collections they are authorized to reconcile. The checkpoint is
+  process-wide and therefore requires an explicit cluster-wide watch policy;
+  tenant-scoped policies cannot use it to observe another tenant.
 - Create requests accept `Idempotency-Key`, and resources expose immutable
-  `externalId` values for deterministic discovery and adoption.
+  `externalId` values for deterministic discovery and adoption. Supplying an
+  external ID makes uniqueness conflict recovery atomic: a `409` includes the
+  existing `resourceId` when it can be disclosed, so an operator can adopt it
+  instead of creating a duplicate.
 - Mutable resources expose an opaque `ETag`. Clients may use `If-Match` to
   prevent lost updates.
 - The internal authorization snapshot exposes its monotonic revision as both
@@ -37,10 +47,15 @@ artifacts; edit the exploded sources instead.
   no-store`.
 - `getSecretMetadata` returns a secret `digest` so controllers can detect drift
   without reading or logging the value.
-- `429` and `503` responses include `Retry-After`; callers must apply bounded
-  retries with jitter.
+- Secret authorization is vault-scoped; the logical `path` query parameter is
+  not an authorization boundary. Use one vault per least-privilege secret scope
+  until a path-aware policy extension is introduced.
+- `429` and `503` responses include `Retry-After`; they may be emitted by Mocó
+  or by the deployment edge, and callers must apply bounded retries with jitter.
 
 Authentication token issuance, server deployment, storage configuration,
 encryption-key lifecycle, and authorization policy administration are outside
 this first public contract. Bearer tokens may be opaque and are not required to
-be JWTs.
+be JWTs. Deployments provision bearer credentials to a CLI, operator, or
+controller through their own secret-management channel; Mocó deliberately does
+not expose login, refresh, revoke, or token-introspection endpoints.

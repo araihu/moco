@@ -1,0 +1,42 @@
+parameters:
+  - $ref: ../components/parameters/request-id.yaml
+get:
+  operationId: watchChanges
+  summary: Wait for persisted resource changes
+  description: |
+    Returns a durable, process-wide resource version. With no
+    `resourceVersion`, the endpoint returns the current checkpoint immediately.
+    With a checkpoint, it returns immediately when the checkpoint is stale or
+    waits up to `timeoutSeconds` for a newer revision. A true `changed` result
+    is a signal to resync the tenant, vault, and secret collections; this
+    endpoint does not expose payloads, ordering, or tombstones. The checkpoint
+    is process-wide, so this operation requires an explicit cluster-wide watch
+    permission (`domain: "*"`); a tenant-scoped policy cannot authorize it.
+  tags: [Service]
+  parameters:
+    - $ref: ../components/parameters/resource-version.yaml
+    - $ref: ../components/parameters/watch-timeout.yaml
+  responses:
+    '200':
+      description: Current checkpoint and whether it advanced.
+      headers:
+        Cache-Control:
+          $ref: ../components/headers/cache-control.yaml
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/watch-result.yaml
+    '400':
+      $ref: ../components/responses/bad-request.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '429':
+      $ref: ../components/responses/too-many-requests.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

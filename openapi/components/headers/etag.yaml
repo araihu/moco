@@ -1,4 +1,8 @@
-description: Opaque strong validator for conditional requests.
+description: |
+  Opaque strong validator for conditional requests. The value is a quoted
+  entity-tag; clients must treat it as opaque and send the complete value back.
+  `If-Match` accepts one or more strong tags or `*`; `If-None-Match` accepts a
+  comma-separated list (including weak tags) for reads and only `*` for PUT.
 required: true
 schema:
   type: string

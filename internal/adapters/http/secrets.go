@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"runtime"
 
 	"github.com/araihu/moco/internal/core/domain"
@@ -41,7 +43,10 @@ func (s *Server) PutSecret(ctx context.Context, request PutSecretRequestObject) 
 	body := secretMetadataResponse(result.Metadata)
 	if result.Created {
 		return PutSecret201JSONResponse{
-			Body: body, Headers: PutSecret201ResponseHeaders{ETag: etag, XRequestID: requestID(ctx)},
+			Body: body, Headers: PutSecret201ResponseHeaders{
+				ETag: etag, Location: secretLocation(request.TenantId.String(), request.VaultId.String(), string(request.Params.Path)),
+				XRequestID: requestID(ctx),
+			},
 		}, nil
 	}
 	return PutSecret200JSONResponse{
@@ -61,7 +66,7 @@ func (s *Server) GetSecret(ctx context.Context, request GetSecretRequestObject) 
 			return s.getSecretError(ctx, err)
 		}
 		if services.IfNoneMatch(string(*request.Params.IfNoneMatch), etag) {
-			return GetSecret304Response{Headers: NotModifiedResponseHeaders{ETag: etag, XRequestID: requestID(ctx)}}, nil
+			return GetSecret304Response{Headers: SecretNotModifiedResponseHeaders{CacheControl: "no-store", ETag: etag, XRequestID: requestID(ctx)}}, nil
 		}
 	}
 	secret, etag, err := s.secrets.Get(ctx, request.TenantId.String(), request.VaultId.String(), string(request.Params.Path))
@@ -100,7 +105,7 @@ func (s *Server) GetSecretMetadata(ctx context.Context, request GetSecretMetadat
 		}
 	}
 	if request.Params.IfNoneMatch != nil && services.IfNoneMatch(string(*request.Params.IfNoneMatch), etag) {
-		return GetSecretMetadata304Response{Headers: NotModifiedResponseHeaders{ETag: etag, XRequestID: requestID(ctx)}}, nil
+		return GetSecretMetadata304Response{Headers: SecretNotModifiedResponseHeaders{CacheControl: "no-store", ETag: etag, XRequestID: requestID(ctx)}}, nil
 	}
 	return GetSecretMetadata200JSONResponse{
 		Body:    secretMetadataResponse(metadata),
@@ -180,6 +185,12 @@ func secretMetadataResponse(metadata domain.SecretMetadata) SecretMetadata {
 		Path: metadata.Path, Version: metadata.Version, Digest: metadata.Digest,
 		ContentType: metadata.ContentType, CreatedAt: metadata.CreatedAt, UpdatedAt: metadata.UpdatedAt,
 	}
+}
+
+func secretLocation(tenantID, vaultID, path string) string {
+	query := url.Values{}
+	query.Set("path", path)
+	return fmt.Sprintf("/api/v1/tenants/%s/vaults/%s/secret?%s", tenantID, vaultID, query.Encode())
 }
 
 type wipingGetSecretResponse struct {

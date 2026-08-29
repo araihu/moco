@@ -32,6 +32,7 @@ type Store struct {
 }
 
 var _ ports.AuthorizationRepository = (*Store)(nil)
+var _ ports.ResourceVersionReader = (*Store)(nil)
 
 // Open opens a SQLite file, applies embedded migrations, and verifies it.
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -60,6 +61,15 @@ func (s *Store) Close() error { return s.database.Close() }
 
 // Ping verifies that the database remains available.
 func (s *Store) Ping(ctx context.Context) error { return s.database.PingContext(ctx) }
+
+// CurrentResourceVersion returns the durable revision used by change watches.
+func (s *Store) CurrentResourceVersion(ctx context.Context) (int64, error) {
+	revision, err := s.queries.GetResourceVersion(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("read resource version: %w", err)
+	}
+	return revision, nil
+}
 
 // LoadAuthorization reads the complete authoritative policy snapshot in a
 // deterministic order for reproducible Casbin reloads.

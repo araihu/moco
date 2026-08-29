@@ -37,16 +37,17 @@ type ReadinessChecker interface {
 
 // HandlerOptions contains all dependencies and deployment credentials.
 type HandlerOptions struct {
-	Tenants        *services.TenantService
-	Vaults         *services.VaultService
-	Secrets        *services.SecretService
-	Readiness      ReadinessChecker
-	Authenticator  BearerAuthenticator
-	Authorizer     ports.Authorizer
-	Authorization  *services.AuthorizationPolicyService
-	PrincipalCheck func(string) bool
-	ServiceVersion string
-	Logger         *slog.Logger
+	Tenants         *services.TenantService
+	Vaults          *services.VaultService
+	Secrets         *services.SecretService
+	Readiness       ReadinessChecker
+	ResourceVersion ports.ResourceVersionReader
+	Authenticator   BearerAuthenticator
+	Authorizer      ports.Authorizer
+	Authorization   *services.AuthorizationPolicyService
+	PrincipalCheck  func(string) bool
+	ServiceVersion  string
+	Logger          *slog.Logger
 }
 
 // NewHandler composes the generated strict server, authentication, validation,
@@ -78,14 +79,16 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	}
 
 	server := &Server{
-		tenants:        options.Tenants,
-		vaults:         options.Vaults,
-		secrets:        options.Secrets,
-		readiness:      options.Readiness,
-		authorization:  options.Authorization,
-		principalCheck: options.PrincipalCheck,
-		serviceVersion: options.ServiceVersion,
-		logger:         options.Logger,
+		tenants:         options.Tenants,
+		vaults:          options.Vaults,
+		secrets:         options.Secrets,
+		readiness:       options.Readiness,
+		resourceVersion: options.ResourceVersion,
+		authorizer:      options.Authorizer,
+		authorization:   options.Authorization,
+		principalCheck:  options.PrincipalCheck,
+		serviceVersion:  options.ServiceVersion,
+		logger:          options.Logger,
 	}
 	strict := NewStrictHandlerWithOptions(server, nil, StrictHTTPServerOptions{
 		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, _ error) {
@@ -121,14 +124,16 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 
 // Server implements the generated strict server contract.
 type Server struct {
-	tenants        *services.TenantService
-	vaults         *services.VaultService
-	secrets        *services.SecretService
-	readiness      ReadinessChecker
-	authorization  *services.AuthorizationPolicyService
-	principalCheck func(string) bool
-	serviceVersion string
-	logger         *slog.Logger
+	tenants         *services.TenantService
+	vaults          *services.VaultService
+	secrets         *services.SecretService
+	readiness       ReadinessChecker
+	resourceVersion ports.ResourceVersionReader
+	authorization   *services.AuthorizationPolicyService
+	principalCheck  func(string) bool
+	serviceVersion  string
+	logger          *slog.Logger
+	authorizer      ports.Authorizer
 }
 
 func requestIDs(next http.Handler) http.Handler {
@@ -187,6 +192,7 @@ func authorizationMiddleware(authorizer ports.Authorizer, logger *slog.Logger, n
 		}
 		principal := principalID(r.Context())
 		if principal == "" {
+			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeProblem(w, unauthorizedProblem(requestID(r.Context())))
 			return
 		}
@@ -195,6 +201,11 @@ func authorizationMiddleware(authorizer ports.Authorizer, logger *slog.Logger, n
 			action = http.MethodGet
 		}
 		allowed, err := authorizer.Authorize(r.Context(), principal, domain, resource, action)
+		if !allowed && err == nil && r.Method == http.MethodGet && r.URL.Path == "/api/v1/tenants" {
+			if scoped, ok := authorizer.(ports.AnyDomainAuthorizer); ok {
+				allowed, err = scoped.AuthorizeAnyDomain(r.Context(), principal, resourceForAnyDomain(r.URL.Path), action)
+			}
+		}
 		if err != nil {
 			logger.ErrorContext(r.Context(), "authorization failed", "requestId", requestID(r.Context()), "error", err)
 			writeProblem(w, internalProblem(requestID(r.Context())))
@@ -206,6 +217,13 @@ func authorizationMiddleware(authorizer ports.Authorizer, logger *slog.Logger, n
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func resourceForAnyDomain(path string) string {
+	if path == "/api/v1/tenants" {
+		return "/api/v1/tenants/{tenantId}"
+	}
+	return path
 }
 
 func authorizationResource(r *http.Request) (string, string, bool) {
@@ -226,6 +244,8 @@ func authorizationResource(r *http.Request) (string, string, bool) {
 	method := r.Method
 	switch {
 	case path == "/api/v1":
+		return "*", path, isReadMethod(method)
+	case path == "/api/v1/watch":
 		return "*", path, isReadMethod(method)
 	case path == "/api/v1/tenants":
 		return "*", path, isReadMethod(method) || method == http.MethodPost

@@ -1,0 +1,17 @@
+title: WatchResult
+type: object
+description: Durable resource-version checkpoint returned by a watch poll.
+additionalProperties: false
+required: [resourceVersion, changed]
+properties:
+  resourceVersion:
+    type: string
+    pattern: '^rv-[0-9]+$'
+    minLength: 3
+    maxLength: 64
+    description: Current durable resource revision.
+    example: rv-42
+  changed:
+    type: boolean
+    description: True when the current revision is newer than the supplied checkpoint.
+    example: true

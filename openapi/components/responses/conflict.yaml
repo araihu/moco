@@ -1,6 +1,8 @@
 description: |
   The request conflicts with current resource state, a uniqueness constraint,
-  existing children, or a prior idempotency-key body.
+  existing children, or a prior idempotency-key body. Uniqueness conflicts set
+  `resourceId` when the existing resource can be identified safely; clients
+  may use it to adopt rather than create a duplicate.
 headers:
   X-Request-ID:
     $ref: ../headers/request-id.yaml
