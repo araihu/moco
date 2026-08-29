@@ -469,7 +469,15 @@ func TestEncryptionRotationEndpointIsBoundedAndProtected(t *testing.T) {
 	test := newFixture(t, services.TenantServiceOptions{
 		CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes"),
 	})
-	response := test.request(t, http.MethodPost, "/internal/v1/encryption/rotation?limit=1", nil, nil, false)
+	response := test.request(t, http.MethodGet, "/internal/v1/encryption/status", nil, nil, false)
+	assertStatus(t, response, http.StatusUnauthorized)
+	response = test.request(t, http.MethodGet, "/internal/v1/encryption/status", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	status := decode[internalapi.EncryptionRotationStatus](t, response)
+	if status.ActiveRootKeyId != "test-root-v1" || status.ActiveRootKeyEpoch != 0 || status.RemainingOldKeys != 0 || !status.Complete {
+		t.Fatalf("unexpected empty rotation status: %#v", status)
+	}
+	response = test.request(t, http.MethodPost, "/internal/v1/encryption/rotation?limit=1", nil, nil, false)
 	assertStatus(t, response, http.StatusUnauthorized)
 	response = test.request(t, http.MethodPost, "/internal/v1/encryption/rotation?afterTenantId=tenant", nil, nil, true)
 	assertStatus(t, response, http.StatusBadRequest)
@@ -635,6 +643,7 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/audit", Method: "GET"},
 		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/audit/retention", Method: "POST"},
 		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/encryption/rotation", Method: "POST"},
+		{Subject: "fixture-principal", Domain: "*", Path: "/internal/v1/encryption/status", Method: "GET"},
 	})
 	if err != nil {
 		t.Fatalf("create test authorizer: %v", err)

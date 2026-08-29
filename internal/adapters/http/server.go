@@ -280,6 +280,9 @@ func authorizationResource(r *http.Request) (string, string, bool) {
 	if path == keyRotationPath {
 		return "*", path, r.Method == http.MethodPost
 	}
+	if path == keyRotationStatusPath {
+		return "*", path, r.Method == http.MethodGet
+	}
 	if !isPublicAPIPath(path) {
 		return "", "", false
 	}
@@ -374,11 +377,12 @@ const (
 	auditPath                 = "/internal/v1/audit"
 	auditRetentionPath        = "/internal/v1/audit/retention"
 	keyRotationPath           = "/internal/v1/encryption/rotation"
+	keyRotationStatusPath     = "/internal/v1/encryption/status"
 	maxAuthorizationJSONBytes = 2 << 20
 )
 
 func isProtectedAPIPath(path string) bool {
-	return isPublicAPIPath(path) || path == authorizationAdminPath || path == auditPath || path == auditRetentionPath || path == keyRotationPath
+	return isPublicAPIPath(path) || path == authorizationAdminPath || path == auditPath || path == auditRetentionPath || path == keyRotationPath || path == keyRotationStatusPath
 }
 
 func isPublicAPIPath(path string) bool {

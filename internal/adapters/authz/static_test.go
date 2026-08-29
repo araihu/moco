@@ -182,6 +182,9 @@ func TestStaticAuthorizerRejectsUnsafePolicies(t *testing.T) {
 	if _, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{Subject: "operator", Domain: "*", Path: "/internal/v1/encryption/rotation", Method: "POST"}}); err != nil {
 		t.Fatalf("internal encryption rotation policy rejected: %v", err)
 	}
+	if _, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{Subject: "operator", Domain: "*", Path: "/internal/v1/encryption/status", Method: "GET"}}); err != nil {
+		t.Fatalf("internal encryption status policy rejected: %v", err)
+	}
 	if _, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{Subject: "retention", Domain: "*", Path: "/internal/v1/audit/retention", Method: "POST"}}); err != nil {
 		t.Fatalf("internal audit retention policy rejected: %v", err)
 	}

@@ -70,6 +70,7 @@ func buildSecurityRuntime(ctx context.Context, configuration configuration, repo
 			{Subject: principalID, Domain: "*", Path: "/internal/v1/audit", Method: "GET"},
 			{Subject: principalID, Domain: "*", Path: "/internal/v1/audit/retention", Method: "POST"},
 			{Subject: principalID, Domain: "*", Path: "/internal/v1/encryption/rotation", Method: "POST"},
+			{Subject: principalID, Domain: "*", Path: "/internal/v1/encryption/status", Method: "GET"},
 		})
 		if err != nil {
 			return securityRuntime{}, fmt.Errorf("initialize legacy authorization: %w", err)

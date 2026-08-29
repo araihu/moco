@@ -77,6 +77,47 @@ func (s *Server) RotateEncryptionKeys(ctx context.Context, request internalapi.R
 	}, nil
 }
 
+// GetEncryptionStatus reports the authoritative shared root-key state without
+// requiring this process's configured keyring to match it. Deployment key
+// material is never accepted or returned by this request.
+func (s *Server) GetEncryptionStatus(ctx context.Context, _ internalapi.GetEncryptionStatusRequestObject) (internalapi.GetEncryptionStatusResponseObject, error) {
+	if s.keyRotation == nil {
+		return internalapi.GetEncryptionStatus503ApplicationProblemPlusJSONResponse{
+			ServiceUnavailableApplicationProblemPlusJSONResponse: internalapi.ServiceUnavailableApplicationProblemPlusJSONResponse{
+				Body:    internalProblemBody(serviceUnavailableProblem(requestID(ctx))),
+				Headers: internalapi.ServiceUnavailableResponseHeaders{RetryAfter: 1, XRequestID: requestID(ctx)},
+			},
+		}, nil
+	}
+	status, err := s.keyRotation.Status(ctx)
+	if err != nil {
+		mapped := s.problem(ctx, "getEncryptionStatus", err)
+		if mapped.problem.Status == 409 {
+			return internalapi.GetEncryptionStatus409ApplicationProblemPlusJSONResponse{
+				ConflictApplicationProblemPlusJSONResponse: internalapi.ConflictApplicationProblemPlusJSONResponse{
+					Body:    internalProblemBody(mapped.problem),
+					Headers: internalapi.ConflictResponseHeaders{XRequestID: requestID(ctx)},
+				},
+			}, nil
+		}
+		return internalapi.GetEncryptionStatus500ApplicationProblemPlusJSONResponse{
+			InternalErrorApplicationProblemPlusJSONResponse: internalapi.InternalErrorApplicationProblemPlusJSONResponse{
+				Body:    internalProblemBody(mapped.problem),
+				Headers: internalapi.InternalErrorResponseHeaders{XRequestID: requestID(ctx)},
+			},
+		}, nil
+	}
+	return internalapi.GetEncryptionStatus200JSONResponse{
+		Body: internalapi.EncryptionRotationStatus{
+			ActiveRootKeyEpoch: status.ActiveRootKeyEpoch,
+			ActiveRootKeyId:    status.ActiveRootKeyID,
+			Complete:           status.Complete,
+			RemainingOldKeys:   status.RemainingOldKeys,
+		},
+		Headers: internalapi.GetEncryptionStatus200ResponseHeaders{XRequestID: requestID(ctx)},
+	}, nil
+}
+
 func rotationCount(value int) int32 {
 	// #nosec G115 -- the rotation service caps every batch count at 200.
 	return int32(value)

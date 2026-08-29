@@ -104,6 +104,27 @@ func TestVaultKeyRotationServicePropagatesMutationFence(t *testing.T) {
 	}
 }
 
+func TestVaultKeyRotationStatusUsesAuthoritativeSharedState(t *testing.T) {
+	t.Parallel()
+	repository := &fakeVaultKeyRotationRepository{rows: []ports.VaultKeyRecord{
+		{TenantID: "tenant-a", VaultID: "vault-a", Key: ports.WrappedVaultKey{RootKeyID: "root-v2"}},
+		{TenantID: "tenant-a", VaultID: "vault-b", Key: ports.WrappedVaultKey{RootKeyID: "root-v3"}},
+	}}
+	service, err := services.NewVaultKeyRotationService(repository, fakeVaultKeyRewrapper{}, services.VaultKeyRotationServiceOptions{
+		KeyState: fakeEncryptionKeyStateReader{state: ports.EncryptionKeyState{ActiveRootKeyID: "root-v3", Epoch: 8}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ActiveRootKeyID != "root-v3" || status.ActiveRootKeyEpoch != 8 || status.RemainingOldKeys != 1 || status.Complete {
+		t.Fatalf("unexpected rotation status: %#v", status)
+	}
+}
+
 type fakeVaultKeyRotationRepository struct {
 	rows          []ports.VaultKeyRecord
 	replacements  []ports.ReplaceVaultKeyCommand

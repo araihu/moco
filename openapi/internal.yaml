@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.8.0
+  version: 0.9.0
   description: |
     Process probes, deployment-scoped authorization administration, and a
     restricted request audit ledger for security observability. The audit
@@ -9,9 +9,10 @@ info:
     use the public watch endpoint and relist contract for convergence. A
     bounded local retention operation removes events before an operator-supplied
     cutoff without changing public resource history.
-    The encryption operation performs bounded online rewraps of vault data keys
-    under the configured active root-key era; key material is supplied only by
-    deployment configuration and is never accepted or returned by this API.
+    The encryption operations report the shared root-key state and perform
+    bounded online rewraps of vault data keys under the configured active
+    root-key era; key material is supplied only by deployment configuration and
+    is never accepted or returned by this API.
     Administrative operations are intended for a restricted deployment origin;
     they never expose bearer token digests or request payloads.
   contact:
@@ -30,7 +31,7 @@ tags:
   - name: Audit
     description: Restricted request metadata ledger for security observability; not a reconciliation feed.
   - name: Encryption
-    description: Restricted bounded root-key rewrap maintenance; never accepts or returns key material.
+    description: Restricted root-key status and bounded rewrap maintenance; never accepts or returns key material.
 paths:
   /livez:
     $ref: ./paths/livez.yaml
@@ -44,6 +45,8 @@ paths:
     $ref: ./paths/audit-retention.yaml
   /internal/v1/encryption/rotation:
     $ref: ./paths/encryption-rotation.yaml
+  /internal/v1/encryption/status:
+    $ref: ./paths/encryption-status.yaml
 components:
   securitySchemes:
     bearerAuth:

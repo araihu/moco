@@ -1,0 +1,32 @@
+title: EncryptionRotationStatus
+type: object
+additionalProperties: false
+required: [activeRootKeyEpoch, activeRootKeyId, complete, remainingOldKeys]
+description: Current shared root-key rotation state. Counts are point-in-time diagnostics, not a lock or a snapshot; no key material is returned.
+properties:
+  activeRootKeyId:
+    type: string
+    minLength: 1
+    maxLength: 128
+    readOnly: true
+    description: Identifier of the deployment key era currently recorded in the shared store.
+    example: root-v2
+  activeRootKeyEpoch:
+    type: integer
+    format: int64
+    minimum: 0
+    readOnly: true
+    description: Monotonic deployment epoch currently recorded in the shared store.
+    example: 2
+  remainingOldKeys:
+    type: integer
+    format: int64
+    minimum: 0
+    readOnly: true
+    description: Current count of vault keys whose root-key ID differs from the active era; this is not a snapshot.
+    example: 3
+  complete:
+    type: boolean
+    readOnly: true
+    description: True when no persisted vault key currently uses an older root-key era.
+    example: false

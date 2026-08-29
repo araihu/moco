@@ -256,6 +256,29 @@ type EncryptionRotationResult struct {
 	Skipped int32 `json:"skipped"`
 }
 
+// EncryptionRotationStatus Current shared root-key rotation state. Counts are point-in-time diagnostics, not a lock or a snapshot; no key material is returned.
+type EncryptionRotationStatus struct {
+	// ActiveRootKeyEpoch Monotonic deployment epoch currently recorded in the shared store.
+	//
+	// Example: 2
+	ActiveRootKeyEpoch int64 `json:"activeRootKeyEpoch"`
+
+	// ActiveRootKeyId Identifier of the deployment key era currently recorded in the shared store.
+	//
+	// Example: root-v2
+	ActiveRootKeyId string `json:"activeRootKeyId"`
+
+	// Complete True when no persisted vault key currently uses an older root-key era.
+	//
+	// Example: false
+	Complete bool `json:"complete"`
+
+	// RemainingOldKeys Current count of vault keys whose root-key ID differs from the active era; this is not a snapshot.
+	//
+	// Example: 3
+	RemainingOldKeys int64 `json:"remainingOldKeys"`
+}
+
 // HealthStatus Minimal probe result with no deployment details.
 type HealthStatus struct {
 	// Status Example: ok
@@ -463,6 +486,9 @@ type ServerInterface interface {
 	// RotateEncryptionKeys Rewrap one bounded page of vault data keys
 	// (POST /internal/v1/encryption/rotation)
 	RotateEncryptionKeys(w http.ResponseWriter, r *http.Request, params RotateEncryptionKeysParams)
+	// GetEncryptionStatus Read root-key rotation status
+	// (GET /internal/v1/encryption/status)
+	GetEncryptionStatus(w http.ResponseWriter, r *http.Request)
 	// GetLiveness Check process liveness
 	// (GET /livez)
 	GetLiveness(w http.ResponseWriter, r *http.Request)
@@ -812,6 +838,20 @@ func (siw *ServerInterfaceWrapper) RotateEncryptionKeys(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// GetEncryptionStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetEncryptionStatus(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetEncryptionStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetLiveness operation middleware
 func (siw *ServerInterfaceWrapper) GetLiveness(w http.ResponseWriter, r *http.Request) {
 
@@ -967,6 +1007,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/internal/v1/audit", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/internal/v1/audit/retention", wrapper.PurgeAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/internal/v1/encryption/rotation", wrapper.RotateEncryptionKeys)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/internal/v1/encryption/status", wrapper.GetEncryptionStatus)
 
 	return m
 }
@@ -1645,6 +1686,122 @@ func (response RotateEncryptionKeys503ApplicationProblemPlusJSONResponse) VisitR
 	return err
 }
 
+type GetEncryptionStatusRequestObject struct {
+}
+
+type GetEncryptionStatusResponseObject interface {
+	VisitGetEncryptionStatusResponse(w http.ResponseWriter) error
+}
+
+type GetEncryptionStatus200ResponseHeaders struct {
+	XRequestID string
+}
+
+type GetEncryptionStatus200JSONResponse struct {
+	Body    EncryptionRotationStatus
+	Headers GetEncryptionStatus200ResponseHeaders
+}
+
+func (response GetEncryptionStatus200JSONResponse) VisitGetEncryptionStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEncryptionStatus401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetEncryptionStatus401ApplicationProblemPlusJSONResponse) VisitGetEncryptionStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEncryptionStatus403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetEncryptionStatus403ApplicationProblemPlusJSONResponse) VisitGetEncryptionStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEncryptionStatus409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response GetEncryptionStatus409ApplicationProblemPlusJSONResponse) VisitGetEncryptionStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEncryptionStatus500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetEncryptionStatus500ApplicationProblemPlusJSONResponse) VisitGetEncryptionStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEncryptionStatus503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetEncryptionStatus503ApplicationProblemPlusJSONResponse) VisitGetEncryptionStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetLivenessRequestObject struct {
 }
 
@@ -1726,6 +1883,9 @@ type StrictServerInterface interface {
 	// RotateEncryptionKeys Rewrap one bounded page of vault data keys
 	// (POST /internal/v1/encryption/rotation)
 	RotateEncryptionKeys(ctx context.Context, request RotateEncryptionKeysRequestObject) (RotateEncryptionKeysResponseObject, error)
+	// GetEncryptionStatus Read root-key rotation status
+	// (GET /internal/v1/encryption/status)
+	GetEncryptionStatus(ctx context.Context, request GetEncryptionStatusRequestObject) (GetEncryptionStatusResponseObject, error)
 	// GetLiveness Check process liveness
 	// (GET /livez)
 	GetLiveness(ctx context.Context, request GetLivenessRequestObject) (GetLivenessResponseObject, error)
@@ -1903,6 +2063,30 @@ func (sh *strictHandler) RotateEncryptionKeys(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RotateEncryptionKeysResponseObject); ok {
 		if err := validResponse.VisitRotateEncryptionKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetEncryptionStatus operation middleware
+func (sh *strictHandler) GetEncryptionStatus(w http.ResponseWriter, r *http.Request) {
+	var request GetEncryptionStatusRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetEncryptionStatus(ctx, request.(GetEncryptionStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetEncryptionStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetEncryptionStatusResponseObject); ok {
+		if err := validResponse.VisitGetEncryptionStatusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

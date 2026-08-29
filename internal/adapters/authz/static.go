@@ -36,6 +36,7 @@ const (
 	auditPolicyPath              = "/internal/v1/audit"
 	auditRetentionPolicyPath     = "/internal/v1/audit/retention"
 	keyRotationPolicyPath        = "/internal/v1/encryption/rotation"
+	keyRotationStatusPolicyPath  = "/internal/v1/encryption/status"
 
 	secretItemPolicyPath = "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret" //nolint:gosec // route pattern, not a credential.
 )
@@ -246,7 +247,7 @@ func validMethod(value string) bool {
 }
 
 func validatePolicyPath(value string) error {
-	if value == authorizationAdminPolicyPath || value == auditPolicyPath || value == auditRetentionPolicyPath || value == keyRotationPolicyPath {
+	if value == authorizationAdminPolicyPath || value == auditPolicyPath || value == auditRetentionPolicyPath || value == keyRotationPolicyPath || value == keyRotationStatusPolicyPath {
 		return nil
 	}
 	if len(value) < len("/api/v1") || len(value) > 512 || (value != "/api/v1" && !strings.HasPrefix(value, "/api/v1/")) {

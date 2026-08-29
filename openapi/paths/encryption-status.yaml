@@ -1,0 +1,30 @@
+get:
+  operationId: getEncryptionStatus
+  summary: Read root-key rotation status
+  description: Reads the current shared root-key era, deployment epoch, and count of vault keys still using an older era. The result is a point-in-time diagnostic, not a lock or a snapshot; it never accepts or returns key material, plaintext, ciphertext, or secret paths. Use it to coordinate bounded POST /internal/v1/encryption/rotation pages and remove an old deployment key only after a fresh sweep reports complete=true and remainingOldKeys=0. A concurrent writer or rotation worker can change the result immediately.
+  tags: [Encryption]
+  responses:
+    '200':
+      description: Current shared rotation status.
+      headers:
+        X-Request-ID:
+          $ref: ../components/headers/request-id.yaml
+      content:
+        application/json:
+          example:
+            activeRootKeyId: root-v2
+            activeRootKeyEpoch: 2
+            remainingOldKeys: 3
+            complete: false
+          schema:
+            $ref: ../components/schemas/encryption-rotation-status.yaml
+    '401':
+      $ref: ../components/responses/unauthorized.yaml
+    '403':
+      $ref: ../components/responses/forbidden.yaml
+    '409':
+      $ref: ../components/responses/conflict.yaml
+    '500':
+      $ref: ../components/responses/internal-error.yaml
+    '503':
+      $ref: ../components/responses/service-unavailable.yaml

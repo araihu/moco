@@ -79,6 +79,12 @@ a page is safe. The operation changes only wrapped-key bytes, does not expose
 key material, and does not advance the public resource-watch revision. Do not
 configure a keyring and the legacy `MOCO_ENCRYPTION_KEY` at the same time.
 
+`GET /internal/v1/encryption/status` is a read-only deployment diagnostic. It
+reports the shared active root-key ID, epoch, and current count of vault keys
+still using an older era. Run a fresh rotation sweep and confirm
+`complete=true` with `remainingOldKeys=0` before removing an old key from the
+deployment keyring; the status is point-in-time and does not reserve the state.
+
 The local `MOCO_BEARER_TOKEN` mode creates one backwards-compatible principal
 with full API access. Multi-principal deployments set `MOCO_AUTH_CONFIG` to a
 JSON file containing only SHA-256 token digests, role bindings, and allow

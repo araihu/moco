@@ -76,6 +76,12 @@ artifacts; edit the exploded sources instead.
   `remaining=0`; the count is a current diagnostic, not a snapshot. Sequence
   allocation and the public watch revision are unaffected, and the operation
   requires its own exact-path `POST` policy.
+- `GET /internal/v1/encryption/status` reports the shared active root-key era,
+  epoch, and current count of vault keys still using an older era. It is a
+  point-in-time diagnostic for coordinating bounded rotation pages; it never
+  returns key material and requires its own exact-path `GET` policy.
+- `POST /internal/v1/encryption/rotation` rewraps at most 200 vault keys per
+  request. Complete a fresh sweep before removing an older deployment key.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.

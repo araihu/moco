@@ -36,6 +36,16 @@ type VaultKeyRotationResult struct {
 	Complete           bool
 }
 
+// VaultKeyRotationStatus reports the current shared root-key state and the
+// number of persisted vault keys that still use an older era. Counts are
+// point-in-time diagnostics, not a lock or a snapshot.
+type VaultKeyRotationStatus struct {
+	ActiveRootKeyID    string
+	ActiveRootKeyEpoch int64
+	RemainingOldKeys   int64
+	Complete           bool
+}
+
 // VaultKeyRotationService coordinates bounded, retry-safe root-key rewraps.
 type VaultKeyRotationService struct {
 	repository ports.VaultKeyRotationRepository
@@ -144,6 +154,37 @@ func (s *VaultKeyRotationService) Rotate(ctx context.Context, request VaultKeyRo
 	result.RemainingOldKeys = remaining
 	result.Complete = remaining == 0
 	return result, nil
+}
+
+// Status reads the authoritative shared key state and counts vault keys that
+// do not use its active era. Unlike Rotate, it does not require this process's
+// configured rewrapper to already match the shared state; that makes the
+// read-only status useful while a stale process is fencing its writes.
+func (s *VaultKeyRotationService) Status(ctx context.Context) (VaultKeyRotationStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return VaultKeyRotationStatus{}, err
+	}
+	state := ports.EncryptionKeyState{ActiveRootKeyID: s.rewrapper.ActiveRootKeyID()}
+	if s.keyState != nil {
+		var err error
+		state, err = s.keyState.CurrentEncryptionKeyState(ctx)
+		if err != nil {
+			return VaultKeyRotationStatus{}, fmt.Errorf("read encryption key state: %w", err)
+		}
+		if state.Epoch < 1 || state.ActiveRootKeyID == "" {
+			return VaultKeyRotationStatus{}, ports.ErrEncryptionKeyStateConflict
+		}
+	}
+	remaining, err := s.repository.CountVaultKeysNotUsingRootKey(ctx, state.ActiveRootKeyID)
+	if err != nil {
+		return VaultKeyRotationStatus{}, fmt.Errorf("count vault keys pending rotation: %w", err)
+	}
+	return VaultKeyRotationStatus{
+		ActiveRootKeyID:    state.ActiveRootKeyID,
+		ActiveRootKeyEpoch: state.Epoch,
+		RemainingOldKeys:   remaining,
+		Complete:           remaining == 0,
+	}, nil
 }
 
 func (s *VaultKeyRotationService) currentState(ctx context.Context) (ports.EncryptionKeyState, error) {
