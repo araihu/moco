@@ -14,7 +14,7 @@ secret lifecycles:
 - path-based secret create/replace, value read, metadata read/list, and conditional delete;
 - HKDF-SHA-256/AES-256-GCM envelope encryption with one random wrapped data key per vault;
 - multi-principal bearer authentication from token digests and default-deny Casbin policies;
-- SQLite authorization policy snapshots with atomic replacement and coalesced reload signals;
+- SQLite authorization policy snapshots with atomic revision-guarded replacement, coalesced local signals, and shared-store polling reloads;
 - restricted internal `GET`/`PUT /internal/v1/authorization` snapshot administration;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
@@ -24,9 +24,9 @@ secret lifecycles:
 
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. Root-key rotation, external
-KMS/HSM providers, auditing, distributed policy change propagation, and
-production deployment hardening are not implemented yet. Treat this as a
-development slice, not a production secret store.
+KMS/HSM providers, cross-host policy transport when instances do not share the
+SQLite store, auditing, and production deployment hardening are not implemented
+yet. Treat this as a development slice, not a production secret store.
 
 ## Run locally
 

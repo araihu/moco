@@ -110,7 +110,7 @@ func buildSecurityRuntime(ctx context.Context, configuration configuration, repo
 				bus.Close()
 				return securityRuntime{}, fmt.Errorf("initialize configured authorization: %w", err)
 			}
-			seed := ports.AuthorizationState{RoleBindings: roleBindings, Policies: policies}
+			seed := ports.AuthorizationState{Revision: state.Revision, RoleBindings: roleBindings, Policies: policies}
 			if replaceErr := policyService.ReplaceAuthorization(ctx, seed); replaceErr != nil {
 				bus.Close()
 				return securityRuntime{}, fmt.Errorf("bootstrap persisted authorization: %w", replaceErr)

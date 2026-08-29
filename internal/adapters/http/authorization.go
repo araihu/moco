@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/araihu/moco/internal/adapters/authz"
@@ -51,7 +53,7 @@ func (s *Server) GetAuthorizationSnapshot(ctx context.Context, _ internalapi.Get
 	}
 	return internalapi.GetAuthorizationSnapshot200JSONResponse{
 		Body:    authorizationSnapshotResponse(state),
-		Headers: internalapi.GetAuthorizationSnapshot200ResponseHeaders{XRequestID: requestID(ctx)},
+		Headers: internalapi.GetAuthorizationSnapshot200ResponseHeaders{ETag: authorizationETag(state.Revision), XRequestID: requestID(ctx)},
 	}, nil
 }
 
@@ -82,8 +84,8 @@ func (s *Server) ReplaceAuthorizationSnapshot(ctx context.Context, request inter
 			},
 		}, nil
 	}
-	state := authorizationSnapshotState(*request.Body)
-	if err := s.authorization.ReplaceAuthorization(ctx, state); err != nil {
+	current, err := s.authorization.LoadAuthorization(ctx)
+	if err != nil {
 		mapped := s.problem(ctx, "replaceAuthorizationSnapshot", err)
 		return internalapi.ReplaceAuthorizationSnapshot500ApplicationProblemPlusJSONResponse{
 			InternalErrorApplicationProblemPlusJSONResponse: internalapi.InternalErrorApplicationProblemPlusJSONResponse{
@@ -92,7 +94,43 @@ func (s *Server) ReplaceAuthorizationSnapshot(ctx context.Context, request inter
 			},
 		}, nil
 	}
-	state, err := s.authorization.LoadAuthorization(ctx)
+	matched, validIfMatch := authorizationIfMatchMatches(request.Params.IfMatch, authorizationETag(current.Revision))
+	if !validIfMatch {
+		return internalapi.ReplaceAuthorizationSnapshot400ApplicationProblemPlusJSONResponse{
+			BadRequestApplicationProblemPlusJSONResponse: internalapi.BadRequestApplicationProblemPlusJSONResponse{
+				Body:    internalProblemBody(badRequestProblem(requestID(ctx), "invalid_if_match", "If-Match must contain a strong ETag.")),
+				Headers: internalapi.BadRequestResponseHeaders{XRequestID: requestID(ctx)},
+			},
+		}, nil
+	}
+	if !matched {
+		return authorizationPreconditionResponse(requestID(ctx), current.Revision), nil
+	}
+	state := authorizationSnapshotState(*request.Body)
+	state.Revision = current.Revision
+	if err := s.authorization.ReplaceAuthorization(ctx, state); err != nil {
+		if errors.Is(err, ports.ErrAuthorizationRevisionConflict) {
+			latest, loadErr := s.authorization.LoadAuthorization(ctx)
+			if loadErr != nil {
+				mapped := s.problem(ctx, "replaceAuthorizationSnapshot", loadErr)
+				return internalapi.ReplaceAuthorizationSnapshot500ApplicationProblemPlusJSONResponse{
+					InternalErrorApplicationProblemPlusJSONResponse: internalapi.InternalErrorApplicationProblemPlusJSONResponse{
+						Body:    internalProblemBody(mapped.problem),
+						Headers: internalapi.InternalErrorResponseHeaders{XRequestID: requestID(ctx)},
+					},
+				}, nil
+			}
+			return authorizationPreconditionResponse(requestID(ctx), latest.Revision), nil
+		}
+		mapped := s.problem(ctx, "replaceAuthorizationSnapshot", err)
+		return internalapi.ReplaceAuthorizationSnapshot500ApplicationProblemPlusJSONResponse{
+			InternalErrorApplicationProblemPlusJSONResponse: internalapi.InternalErrorApplicationProblemPlusJSONResponse{
+				Body:    internalProblemBody(mapped.problem),
+				Headers: internalapi.InternalErrorResponseHeaders{XRequestID: requestID(ctx)},
+			},
+		}, nil
+	}
+	state, err = s.authorization.LoadAuthorization(ctx)
 	if err != nil {
 		mapped := s.problem(ctx, "replaceAuthorizationSnapshot", err)
 		return internalapi.ReplaceAuthorizationSnapshot500ApplicationProblemPlusJSONResponse{
@@ -104,8 +142,49 @@ func (s *Server) ReplaceAuthorizationSnapshot(ctx context.Context, request inter
 	}
 	return internalapi.ReplaceAuthorizationSnapshot200JSONResponse{
 		Body:    authorizationSnapshotResponse(state),
-		Headers: internalapi.ReplaceAuthorizationSnapshot200ResponseHeaders{XRequestID: requestID(ctx)},
+		Headers: internalapi.ReplaceAuthorizationSnapshot200ResponseHeaders{ETag: authorizationETag(state.Revision), XRequestID: requestID(ctx)},
 	}, nil
+}
+
+func authorizationETag(revision int64) string {
+	return fmt.Sprintf("\"authorization-%d\"", revision)
+}
+
+func authorizationIfMatchMatches(header, currentETag string) (matched, valid bool) {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return false, false
+	}
+	candidates := strings.Split(header, ",")
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" {
+			if len(candidates) != 1 {
+				return false, false
+			}
+			return true, true
+		}
+		if len(candidate) < 2 || candidate[0] != '"' || candidate[len(candidate)-1] != '"' || strings.HasPrefix(candidate, "W/") {
+			return false, false
+		}
+		if candidate == currentETag {
+			matched = true
+		}
+	}
+	return matched, true
+}
+
+func authorizationPreconditionResponse(requestID string, revision int64) internalapi.ReplaceAuthorizationSnapshot412ApplicationProblemPlusJSONResponse {
+	detail := "The supplied ETag does not match the current authorization snapshot revision."
+	problem := newProblem(requestID, 412, "Precondition Failed", "etag_mismatch", "precondition-failed", &detail)
+	return internalapi.ReplaceAuthorizationSnapshot412ApplicationProblemPlusJSONResponse{
+		PreconditionFailedApplicationProblemPlusJSONResponse: internalapi.PreconditionFailedApplicationProblemPlusJSONResponse{
+			Body: internalProblemBody(problem),
+			Headers: internalapi.PreconditionFailedResponseHeaders{
+				ETag: authorizationETag(revision), XRequestID: requestID,
+			},
+		},
+	}
 }
 
 func (s *Server) validateAuthorizationSnapshot(snapshot internalapi.AuthorizationSnapshotInput) error {
@@ -165,6 +244,7 @@ func authorizationSnapshotState(snapshot internalapi.AuthorizationSnapshotInput)
 func authorizationSnapshotResponse(state ports.AuthorizationState) internalapi.AuthorizationSnapshot {
 	response := internalapi.AuthorizationSnapshot{
 		Initialized:  state.Initialized,
+		Revision:     state.Revision,
 		RoleBindings: make([]internalapi.AuthorizationRoleBinding, 0, len(state.RoleBindings)),
 		Policies:     make([]internalapi.AuthorizationPolicy, 0, len(state.Policies)),
 	}

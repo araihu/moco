@@ -17,9 +17,9 @@ func TestPolicyReloaderLoadsAndAppliesCommittedSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository := &reloadRepository{states: []ports.AuthorizationState{{Policies: []ports.AuthorizationPolicy{
+	repository := &reloadRepository{states: []ports.AuthorizationState{{Revision: 1, Policies: []ports.AuthorizationPolicy{
 		{Subject: "reader", Domain: "*", Path: "/api/v1", Method: "GET"},
-	}}, {Policies: []ports.AuthorizationPolicy{
+	}}, {Revision: 2, Policies: []ports.AuthorizationPolicy{
 		{Subject: "reader", Domain: "*", Path: "/api/v1/tenants", Method: "GET"},
 	}}}}
 	bus := authz.NewMemoryPolicyChangesBus()
@@ -53,7 +53,7 @@ func TestPolicyReloaderKeepsPreviousPolicyWhenReloadFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository := &reloadRepository{states: []ports.AuthorizationState{{Policies: []ports.AuthorizationPolicy{{Subject: "reader", Domain: "*", Path: "/api/v1", Method: "GET"}}}, {Policies: []ports.AuthorizationPolicy{{Subject: "reader", Domain: "*", Path: "/api/v1/unsafe?query", Method: "GET"}}}}}
+	repository := &reloadRepository{states: []ports.AuthorizationState{{Revision: 1, Policies: []ports.AuthorizationPolicy{{Subject: "reader", Domain: "*", Path: "/api/v1", Method: "GET"}}}, {Revision: 2, Policies: []ports.AuthorizationPolicy{{Subject: "reader", Domain: "*", Path: "/api/v1/unsafe?query", Method: "GET"}}}}}
 	bus := authz.NewMemoryPolicyChangesBus()
 	reloader, err := authz.NewPolicyReloader(authorizer, repository, bus)
 	if err != nil {
@@ -82,6 +82,38 @@ func TestPolicyReloaderKeepsPreviousPolicyWhenReloadFails(t *testing.T) {
 	}
 }
 
+func TestPolicyReloaderPollsRevisionWithoutBusSignal(t *testing.T) {
+	t.Parallel()
+	authorizer, err := authz.NewStaticAuthorizer(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &reloadRepository{states: []ports.AuthorizationState{{Revision: 1, Policies: []ports.AuthorizationPolicy{
+		{Subject: "reader", Domain: "*", Path: "/api/v1", Method: "GET"},
+	}}, {Revision: 2, Policies: []ports.AuthorizationPolicy{
+		{Subject: "reader", Domain: "*", Path: "/api/v1/tenants", Method: "GET"},
+	}}}}
+	bus := authz.NewMemoryPolicyChangesBus()
+	reloader, err := authz.NewPolicyReloaderWithInterval(authorizer, repository, bus, 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runErrors := make(chan error, 1)
+	go func() { runErrors <- reloader.Run(ctx) }()
+	waitForLoad(t, repository)
+	waitForDecision(t, authorizer, "/api/v1", true)
+	repository.advance()
+	waitForDecision(t, authorizer, "/api/v1", false)
+	waitForDecision(t, authorizer, "/api/v1/tenants", true)
+	cancel()
+	select {
+	case <-runErrors:
+	case <-time.After(time.Second):
+		t.Fatal("polling reloader did not stop after context cancellation")
+	}
+}
+
 type reloadRepository struct {
 	mu     sync.Mutex
 	states []ports.AuthorizationState
@@ -96,7 +128,10 @@ func (repository *reloadRepository) LoadAuthorization(context.Context) (ports.Au
 		repository.loads = make(chan struct{}, 8)
 	}
 	state := repository.states[repository.index]
-	repository.loads <- struct{}{}
+	select {
+	case repository.loads <- struct{}{}:
+	default:
+	}
 	return state, nil
 }
 

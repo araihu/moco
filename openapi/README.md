@@ -29,6 +29,9 @@ artifacts; edit the exploded sources instead.
   `externalId` values for deterministic discovery and adoption.
 - Mutable resources expose an opaque `ETag`. Clients may use `If-Match` to
   prevent lost updates.
+- The internal authorization snapshot exposes its monotonic revision as both
+  `revision` and an `ETag`; `PUT /internal/v1/authorization` requires
+  `If-Match` and returns `412` for a stale writer.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.

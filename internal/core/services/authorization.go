@@ -40,9 +40,10 @@ func (s *AuthorizationPolicyService) LoadAuthorization(ctx context.Context) (por
 	return state, nil
 }
 
-// ReplaceAuthorization commits a complete snapshot and then broadcasts one
+// ReplaceAuthorization commits a complete snapshot using its observed
+// revision as an optimistic-concurrency precondition, then broadcasts one
 // coalesced invalidation signal. A publish failure means persistence succeeded
-// but another instance may need an out-of-band reload.
+// but another instance can still converge through repository polling.
 func (s *AuthorizationPolicyService) ReplaceAuthorization(ctx context.Context, state ports.AuthorizationState) error {
 	if err := ctx.Err(); err != nil {
 		return err

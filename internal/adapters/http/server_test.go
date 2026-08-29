@@ -218,13 +218,18 @@ func TestAuthorizationAdministrationIsProtectedAndAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := func(method string, body []byte, authenticated bool) *httptest.ResponseRecorder {
+	request := func(method string, body []byte, authenticated bool, headerValues ...map[string]string) *httptest.ResponseRecorder {
 		request := httptest.NewRequestWithContext(ctx, method, "/internal/v1/authorization", bytes.NewReader(body))
 		if body != nil {
 			request.Header.Set("Content-Type", "application/json")
 		}
 		if authenticated {
 			request.Header.Set("Authorization", "Bearer authorization-admin-token-with-32-bytes")
+		}
+		if len(headerValues) > 0 {
+			for name, value := range headerValues[0] {
+				request.Header.Set(name, value)
+			}
 		}
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, request)
@@ -239,22 +244,28 @@ func TestAuthorizationAdministrationIsProtectedAndAtomic(t *testing.T) {
 		t.Fatalf("initial admin read status = %d, body=%s", response.Code, response.Body.String())
 	}
 	initial := decode[internalapi.AuthorizationSnapshot](t, &testResponse{StatusCode: response.Code, Header: response.Header(), Body: response.Body.Bytes()})
-	if initial.Initialized || len(initial.RoleBindings) != 0 || len(initial.Policies) != 0 {
+	initialETag := response.Header().Get("ETag")
+	if initial.Initialized || initial.Revision != 0 || len(initial.RoleBindings) != 0 || len(initial.Policies) != 0 || initialETag != `"authorization-0"` {
 		t.Fatalf("unexpected initial authorization snapshot: %#v", initial)
 	}
 
 	valid := []byte(`{"roleBindings":[{"principal":"admin","role":"authorization-admin","domain":"*"}],"policies":[{"subject":"authorization-admin","domain":"*","path":"/internal/v1/authorization","method":"GET"},{"subject":"authorization-admin","domain":"*","path":"/internal/v1/authorization","method":"PUT"}]}`)
-	response = request(http.MethodPut, valid, true)
+	response = request(http.MethodPut, valid, true, map[string]string{"If-Match": initialETag})
 	if response.Code != http.StatusOK {
 		t.Fatalf("admin replacement status = %d, body=%s", response.Code, response.Body.String())
 	}
 	replaced := decode[internalapi.AuthorizationSnapshot](t, &testResponse{StatusCode: response.Code, Header: response.Header(), Body: response.Body.Bytes()})
-	if !replaced.Initialized || len(replaced.RoleBindings) != 1 || len(replaced.Policies) != 2 {
+	replacedETag := response.Header().Get("ETag")
+	if !replaced.Initialized || replaced.Revision != 1 || len(replaced.RoleBindings) != 1 || len(replaced.Policies) != 2 || replacedETag == initialETag {
 		t.Fatalf("unexpected replaced snapshot: %#v", replaced)
+	}
+	stale := request(http.MethodPut, valid, true, map[string]string{"If-Match": initialETag})
+	if stale.Code != http.StatusPreconditionFailed || stale.Header().Get("ETag") != replacedETag {
+		t.Fatalf("stale admin replacement status=%d etag=%q, want 412 etag=%q", stale.Code, stale.Header().Get("ETag"), replacedETag)
 	}
 
 	invalid := []byte(`{"roleBindings":[{"principal":"admin","role":"authorization-admin","domain":"*"}],"policies":[{"subject":"authorization-admin","domain":"*","path":"/api/v1/invalid?query","method":"GET"}]}`)
-	response = request(http.MethodPut, invalid, true)
+	response = request(http.MethodPut, invalid, true, map[string]string{"If-Match": replacedETag})
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid admin replacement status = %d, body=%s", response.Code, response.Body.String())
 	}

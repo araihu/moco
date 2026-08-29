@@ -3,10 +3,10 @@
 ## Scope
 
 The server composition root now connects configured bearer principals,
-SQLite-backed authorization snapshots, and the in-process policy reloader. The
-public API contract is unchanged. Restricted snapshot administration is covered
-by the follow-up administration slice; distributed change transport remains
-future work.
+SQLite-backed authorization snapshots, and the policy reloader. The public API
+contract is unchanged. Restricted snapshot administration is covered by the
+follow-up administration slice; reloader polling handles convergence between
+processes that share the authoritative store.
 
 ## Bootstrap and authority
 
@@ -29,14 +29,15 @@ compatibility path and does not create a persisted policy snapshot.
 
 Configured startup creates a `MemoryPolicyChangesBus` and a
 `PolicyReloader`. The reloader performs an initial authoritative load, then
-reloads atomically after each committed change signal. Its context is tied to
-the HTTP server's signal-driven shutdown. A load or validation failure is
-reported to the composition root, which gracefully stops the listener and
-returns an error instead of serving with a stale policy.
+reloads atomically after each committed change signal or when polling observes
+a newer snapshot revision. Its context is tied to the HTTP server's
+signal-driven shutdown. A load or validation failure is reported to the
+composition root, which gracefully stops the listener and returns an error
+instead of serving with a stale policy.
 
 ## Deferred work
 
-Principal administration endpoints, distributed bus transport, audit records,
-and token issuance/revocation are not part of this slice. The internal policy
-writer uses the authorization application service so persistence commits before
-reload signals are published.
+Principal administration endpoints, an external cross-host change transport,
+audit records, and token issuance/revocation are not part of this slice. The
+internal policy writer uses the authorization application service so persistence
+commits before reload signals are published.

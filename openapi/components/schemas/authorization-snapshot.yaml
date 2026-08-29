@@ -2,12 +2,19 @@ title: AuthorizationSnapshot
 type: object
 description: Persisted authorization state; token digests are intentionally omitted.
 additionalProperties: false
-required: [initialized, roleBindings, policies]
+required: [initialized, revision, roleBindings, policies]
 properties:
   initialized:
     type: boolean
     readOnly: true
     example: true
+  revision:
+    type: integer
+    format: int64
+    minimum: 0
+    readOnly: true
+    description: Monotonic snapshot revision used by ETag and optimistic concurrency.
+    example: 3
   roleBindings:
     type: array
     maxItems: 10000

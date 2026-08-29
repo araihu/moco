@@ -3,18 +3,21 @@ parameters:
 get:
   operationId: getAuthorizationSnapshot
   summary: Read the persisted authorization snapshot
-  description: Returns the complete role-binding and policy snapshot without token digests.
+  description: Returns the complete role-binding and policy snapshot without token digests. The ETag is the authoritative snapshot revision.
   tags: [Authorization]
   responses:
     '200':
       description: Persisted authorization snapshot.
       headers:
+        ETag:
+          $ref: ../components/headers/etag.yaml
         X-Request-ID:
           $ref: ../components/headers/request-id.yaml
       content:
         application/json:
           example:
             initialized: true
+            revision: 3
             roleBindings:
               - principal: controller
                 role: secret-reader
@@ -37,8 +40,16 @@ get:
 put:
   operationId: replaceAuthorizationSnapshot
   summary: Replace the persisted authorization snapshot
-  description: Atomically replaces all role bindings and policies, then signals local reloaders.
+  description: Atomically replaces all role bindings and policies when If-Match identifies the revision observed by the writer. A committed change signals local reloaders and is discovered by shared-store polling in other processes.
   tags: [Authorization]
+  parameters:
+    - name: If-Match
+      in: header
+      required: true
+      description: Strong ETag returned by the latest GET or PUT response. Use `*` to apply against the revision observed immediately before this request.
+      schema:
+        type: string
+        minLength: 1
   requestBody:
     required: true
     description: Complete replacement snapshot; empty arrays mean default-deny.
@@ -60,12 +71,15 @@ put:
     '200':
       description: Newly persisted authorization snapshot.
       headers:
+        ETag:
+          $ref: ../components/headers/etag.yaml
         X-Request-ID:
           $ref: ../components/headers/request-id.yaml
       content:
         application/json:
           example:
             initialized: true
+            revision: 4
             roleBindings:
               - principal: controller
                 role: secret-reader
@@ -79,6 +93,8 @@ put:
             $ref: ../components/schemas/authorization-snapshot.yaml
     '400':
       $ref: ../components/responses/bad-request.yaml
+    '412':
+      $ref: ../components/responses/precondition-failed.yaml
     '401':
       $ref: ../components/responses/unauthorized.yaml
     '403':

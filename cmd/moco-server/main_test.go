@@ -236,6 +236,7 @@ func (repository *runtimeAuthorizationRepository) ReplaceAuthorization(_ context
 	}
 	repository.state = ports.AuthorizationState{
 		Initialized:  true,
+		Revision:     state.Revision + 1,
 		RoleBindings: append([]ports.AuthorizationRoleBinding(nil), state.RoleBindings...),
 		Policies:     append([]ports.AuthorizationPolicy(nil), state.Policies...),
 	}

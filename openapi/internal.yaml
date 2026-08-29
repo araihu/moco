@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Mocó Internal Operations API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Process probes and deployment-scoped authorization administration. The
     administration operation is intended for a restricted deployment origin;

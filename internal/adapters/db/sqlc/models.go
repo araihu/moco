@@ -18,6 +18,7 @@ type AuthorizationPolicy struct {
 type AuthorizationPolicyState struct {
 	ID          int64 `json:"id"`
 	Initialized int64 `json:"initialized"`
+	Revision    int64 `json:"revision"`
 }
 
 type AuthorizationRoleBinding struct {

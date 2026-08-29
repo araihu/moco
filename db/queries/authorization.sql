@@ -9,7 +9,7 @@ FROM authorization_policies
 ORDER BY subject, domain, path, method;
 
 -- name: GetAuthorizationPolicyState :one
-SELECT initialized
+SELECT id, initialized, revision
 FROM authorization_policy_state
 WHERE id = 1;
 
@@ -27,7 +27,7 @@ VALUES (?, ?, ?);
 INSERT INTO authorization_policies (subject, domain, path, method)
 VALUES (?, ?, ?, ?);
 
--- name: MarkAuthorizationPolicyStateInitialized :exec
+-- name: AdvanceAuthorizationPolicyState :execrows
 UPDATE authorization_policy_state
-SET initialized = 1
-WHERE id = 1;
+SET initialized = 1, revision = revision + 1
+WHERE id = 1 AND revision = ?;

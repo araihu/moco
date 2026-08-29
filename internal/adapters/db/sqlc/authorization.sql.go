@@ -9,6 +9,20 @@ import (
 	"context"
 )
 
+const advanceAuthorizationPolicyState = `-- name: AdvanceAuthorizationPolicyState :execrows
+UPDATE authorization_policy_state
+SET initialized = 1, revision = revision + 1
+WHERE id = 1 AND revision = ?
+`
+
+func (q *Queries) AdvanceAuthorizationPolicyState(ctx context.Context, revision int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, advanceAuthorizationPolicyState, revision)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteAuthorizationPolicies = `-- name: DeleteAuthorizationPolicies :exec
 DELETE FROM authorization_policies
 `
@@ -28,16 +42,16 @@ func (q *Queries) DeleteAuthorizationRoleBindings(ctx context.Context) error {
 }
 
 const getAuthorizationPolicyState = `-- name: GetAuthorizationPolicyState :one
-SELECT initialized
+SELECT id, initialized, revision
 FROM authorization_policy_state
 WHERE id = 1
 `
 
-func (q *Queries) GetAuthorizationPolicyState(ctx context.Context) (int64, error) {
+func (q *Queries) GetAuthorizationPolicyState(ctx context.Context) (AuthorizationPolicyState, error) {
 	row := q.db.QueryRowContext(ctx, getAuthorizationPolicyState)
-	var initialized int64
-	err := row.Scan(&initialized)
-	return initialized, err
+	var i AuthorizationPolicyState
+	err := row.Scan(&i.ID, &i.Initialized, &i.Revision)
+	return i, err
 }
 
 const insertAuthorizationPolicy = `-- name: InsertAuthorizationPolicy :exec
@@ -139,15 +153,4 @@ func (q *Queries) ListAuthorizationRoleBindings(ctx context.Context) ([]Authoriz
 		return nil, err
 	}
 	return items, nil
-}
-
-const markAuthorizationPolicyStateInitialized = `-- name: MarkAuthorizationPolicyStateInitialized :exec
-UPDATE authorization_policy_state
-SET initialized = 1
-WHERE id = 1
-`
-
-func (q *Queries) MarkAuthorizationPolicyStateInitialized(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, markAuthorizationPolicyStateInitialized)
-	return err
 }

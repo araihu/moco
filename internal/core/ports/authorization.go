@@ -1,6 +1,9 @@
 package ports
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Authorizer evaluates one authenticated principal against an API resource.
 // Implementations must fail closed when no policy matches.
@@ -31,13 +34,23 @@ type AuthorizationPolicy struct {
 
 // AuthorizationState is the authoritative persisted policy snapshot.
 type AuthorizationState struct {
-	Initialized  bool
+	Initialized bool
+	// Revision is the monotonic snapshot revision. Loaders use it to detect
+	// changes made by another writer, while writers supply the revision they
+	// observed as an optimistic-concurrency precondition.
+	Revision     int64
 	RoleBindings []AuthorizationRoleBinding
 	Policies     []AuthorizationPolicy
 }
 
+// ErrAuthorizationRevisionConflict means that a writer attempted to replace
+// a snapshot based on a stale revision. The persisted state is unchanged.
+var ErrAuthorizationRevisionConflict = errors.New("authorization snapshot revision conflict")
+
 // AuthorizationRepository stores and loads the authoritative policy snapshot.
-// ReplaceAuthorization must commit the complete snapshot before returning.
+// ReplaceAuthorization must atomically replace the complete snapshot only when
+// state.Revision is still current, increment that revision, and commit before
+// returning. A stale revision returns ErrAuthorizationRevisionConflict.
 type AuthorizationRepository interface {
 	LoadAuthorization(context.Context) (AuthorizationState, error)
 	ReplaceAuthorization(context.Context, AuthorizationState) error

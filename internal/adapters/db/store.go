@@ -64,7 +64,7 @@ func (s *Store) Ping(ctx context.Context) error { return s.database.PingContext(
 // LoadAuthorization reads the complete authoritative policy snapshot in a
 // deterministic order for reproducible Casbin reloads.
 func (s *Store) LoadAuthorization(ctx context.Context) (ports.AuthorizationState, error) {
-	initialized, err := s.queries.GetAuthorizationPolicyState(ctx)
+	policyState, err := s.queries.GetAuthorizationPolicyState(ctx)
 	if err != nil {
 		return ports.AuthorizationState{}, fmt.Errorf("read authorization policy state: %w", err)
 	}
@@ -77,7 +77,8 @@ func (s *Store) LoadAuthorization(ctx context.Context) (ports.AuthorizationState
 		return ports.AuthorizationState{}, fmt.Errorf("list authorization policies: %w", err)
 	}
 	state := ports.AuthorizationState{
-		Initialized:  initialized == 1,
+		Initialized:  policyState.Initialized == 1,
+		Revision:     policyState.Revision,
 		RoleBindings: make([]ports.AuthorizationRoleBinding, 0, len(bindings)),
 		Policies:     make([]ports.AuthorizationPolicy, 0, len(policies)),
 	}
@@ -99,9 +100,10 @@ func (s *Store) LoadAuthorization(ctx context.Context) (ports.AuthorizationState
 	return state, nil
 }
 
-// ReplaceAuthorization atomically replaces the complete policy snapshot.
-// Publication of a change signal is deliberately owned by the application
-// service so callers can guarantee commit-before-publish ordering.
+// ReplaceAuthorization atomically replaces the complete policy snapshot when
+// the caller's observed revision is still current. Publication of a change
+// signal is deliberately owned by the application service so callers can
+// guarantee commit-before-publish ordering.
 func (s *Store) ReplaceAuthorization(ctx context.Context, state ports.AuthorizationState) error {
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
@@ -109,6 +111,13 @@ func (s *Store) ReplaceAuthorization(ctx context.Context, state ports.Authorizat
 	}
 	defer func() { _ = tx.Rollback() }()
 	queries := s.queries.WithTx(tx)
+	advanced, err := queries.AdvanceAuthorizationPolicyState(ctx, state.Revision)
+	if err != nil {
+		return fmt.Errorf("advance authorization policy state: %w", err)
+	}
+	if advanced != 1 {
+		return ports.ErrAuthorizationRevisionConflict
+	}
 	if err := queries.DeleteAuthorizationPolicies(ctx); err != nil {
 		return fmt.Errorf("clear authorization policies: %w", err)
 	}
@@ -128,9 +137,6 @@ func (s *Store) ReplaceAuthorization(ctx context.Context, state ports.Authorizat
 		}); err != nil {
 			return fmt.Errorf("insert authorization role binding %d: %w", index, err)
 		}
-	}
-	if err := queries.MarkAuthorizationPolicyStateInitialized(ctx); err != nil {
-		return fmt.Errorf("mark authorization policy state initialized: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit authorization replacement: %w", err)

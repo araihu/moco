@@ -21,8 +21,23 @@ Casbin candidate before calling `AuthorizationPolicyService`. The service
 commits the replacement atomically and publishes the local reload signal only
 after commit. A failed validation leaves the previous snapshot untouched.
 
-`GET` reads the authoritative SQLite snapshot, including its initialized marker.
+`GET` reads the authoritative SQLite snapshot, including its initialized marker
+and monotonic revision. The revision is also returned as an opaque strong ETag.
 The endpoint never reads or serializes the configured token-digest keyring.
+
+## Concurrency and propagation
+
+Writers must send the ETag they observed in `If-Match`; `*` means "use the
+revision observed immediately before this request". SQLite advances the
+revision conditionally in the same transaction as the complete replacement, so
+concurrent writers have one winner and stale writers receive `412` without
+changing the snapshot. The service still publishes only after commit.
+
+The in-process bus gives local reloaders a fast path. Each reloader also polls
+the authoritative revision (one second by default), allowing separate
+processes to converge when they share the SQLite store. A deployment that puts
+instances on hosts without a shared SQLite volume needs an external repository
+and change transport, which is intentionally outside this slice.
 
 ## Lifecycle and compatibility
 
@@ -31,6 +46,5 @@ reloader. Legacy `MOCO_BEARER_TOKEN` deployments keep their compatibility
 authorization path; the administrative operation reports service unavailable
 because no persisted policy writer is composed in that mode.
 
-Distributed change propagation, optimistic concurrency for concurrent writers,
-principal administration, audit records, and token issuance/revocation remain
+Principal administration, audit records, and token issuance/revocation remain
 future slices.

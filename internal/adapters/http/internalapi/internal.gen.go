@@ -80,6 +80,11 @@ type AuthorizationSnapshot struct {
 	// Policies Example: [{"domain":"tenant-a","method":"GET","path":"/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret","subject":"secret-reader"}]
 	Policies []AuthorizationPolicy `json:"policies"`
 
+	// Revision Monotonic snapshot revision used by ETag and optimistic concurrency.
+	//
+	// Example: 3
+	Revision int64 `json:"revision"`
+
 	// RoleBindings Example: [{"domain":"tenant-a","principal":"controller","role":"secret-reader"}]
 	RoleBindings []AuthorizationRoleBinding `json:"roleBindings"`
 }
@@ -183,6 +188,9 @@ type Forbidden = Problem
 // InternalError Problem Details response compatible with RFC 9457.
 type InternalError = Problem
 
+// PreconditionFailed Problem Details response compatible with RFC 9457.
+type PreconditionFailed = Problem
+
 // ServiceUnavailable Problem Details response compatible with RFC 9457.
 type ServiceUnavailable = Problem
 
@@ -197,6 +205,9 @@ type GetAuthorizationSnapshotParams struct {
 
 // ReplaceAuthorizationSnapshotParams defines parameters for ReplaceAuthorizationSnapshot.
 type ReplaceAuthorizationSnapshotParams struct {
+	// IfMatch Strong ETag returned by the latest GET or PUT response. Use `*` to apply against the revision observed immediately before this request.
+	IfMatch string `json:"If-Match"`
+
 	// XRequestID Optional caller correlation ID; the server returns the effective ID.
 	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
 }
@@ -280,6 +291,29 @@ func (siw *ServerInterfaceWrapper) ReplaceAuthorizationSnapshot(w http.ResponseW
 	var params ReplaceAuthorizationSnapshotParams
 
 	headers := r.Header
+
+	// ------------- Required header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = IfMatch
+
+	} else {
+		err := fmt.Errorf("Header parameter If-Match is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "If-Match", Err: err})
+		return
+	}
 
 	// ------------- Optional header parameter "X-Request-ID" -------------
 	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
@@ -494,6 +528,16 @@ type InternalErrorApplicationProblemPlusJSONResponse struct {
 	Headers InternalErrorResponseHeaders
 }
 
+type PreconditionFailedResponseHeaders struct {
+	ETag       string
+	XRequestID string
+}
+type PreconditionFailedApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers PreconditionFailedResponseHeaders
+}
+
 type ServiceUnavailableResponseHeaders struct {
 	RetryAfter int32
 	XRequestID string
@@ -522,6 +566,7 @@ type GetAuthorizationSnapshotResponseObject interface {
 }
 
 type GetAuthorizationSnapshot200ResponseHeaders struct {
+	ETag       string
 	XRequestID string
 }
 
@@ -537,6 +582,7 @@ func (response GetAuthorizationSnapshot200JSONResponse) VisitGetAuthorizationSna
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
@@ -622,6 +668,7 @@ type ReplaceAuthorizationSnapshotResponseObject interface {
 }
 
 type ReplaceAuthorizationSnapshot200ResponseHeaders struct {
+	ETag       string
 	XRequestID string
 }
 
@@ -637,6 +684,7 @@ func (response ReplaceAuthorizationSnapshot200JSONResponse) VisitReplaceAuthoriz
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
@@ -690,6 +738,24 @@ func (response ReplaceAuthorizationSnapshot403ApplicationProblemPlusJSONResponse
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplaceAuthorizationSnapshot412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response ReplaceAuthorizationSnapshot412ApplicationProblemPlusJSONResponse) VisitReplaceAuthorizationSnapshotResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
 	return err
 }
