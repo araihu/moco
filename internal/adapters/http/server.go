@@ -200,7 +200,7 @@ func authorizationMiddleware(authorizer ports.Authorizer, logger *slog.Logger, n
 		if action == http.MethodHead {
 			action = http.MethodGet
 		}
-		allowed, err := authorizer.Authorize(r.Context(), principal, domain, resource, action)
+		allowed, err := authorizeRequest(r, authorizer, principal, domain, resource, action)
 		if !allowed && err == nil && r.Method == http.MethodGet && r.URL.Path == "/api/v1/tenants" {
 			if scoped, ok := authorizer.(ports.AnyDomainAuthorizer); ok {
 				allowed, err = scoped.AuthorizeAnyDomain(r.Context(), principal, resourceForAnyDomain(r.URL.Path), action)
@@ -217,6 +217,16 @@ func authorizationMiddleware(authorizer ports.Authorizer, logger *slog.Logger, n
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func authorizeRequest(r *http.Request, authorizer ports.Authorizer, principal, domain, resource, action string) (bool, error) {
+	if pathAuthorizer, ok := authorizer.(ports.SecretPathAuthorizer); ok && strings.HasSuffix(resource, "/secret") {
+		values := r.URL.Query()["path"]
+		if len(values) == 1 && values[0] != "" {
+			return pathAuthorizer.AuthorizeSecretPath(r.Context(), principal, domain, resource, action, values[0])
+		}
+	}
+	return authorizer.Authorize(r.Context(), principal, domain, resource, action)
 }
 
 func resourceForAnyDomain(path string) string {

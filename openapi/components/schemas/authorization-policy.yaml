@@ -1,6 +1,6 @@
 title: AuthorizationPolicy
 type: object
-description: Allow policy for a role or principal, domain, path pattern, and HTTP method.
+description: Allow policy for a role or principal, domain, path pattern, and HTTP method. Secret item policies may additionally narrow access to a literal logical secret path prefix.
 additionalProperties: false
 required: [subject, domain, path, method]
 properties:
@@ -24,3 +24,9 @@ properties:
     minLength: 1
     maxLength: 16
     example: GET
+  secretPathPrefix:
+    type: string
+    minLength: 1
+    maxLength: 1024
+    description: Literal logical secret path prefix. Only valid when path is /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret; the prefix is matched byte-for-byte after URL decoding.
+    example: prod/database/

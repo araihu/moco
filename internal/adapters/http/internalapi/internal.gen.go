@@ -45,7 +45,7 @@ func (e UnavailableStatusStatus) Valid() bool {
 	}
 }
 
-// AuthorizationPolicy Allow policy for a role or principal, domain, path pattern, and HTTP method.
+// AuthorizationPolicy Allow policy for a role or principal, domain, path pattern, and HTTP method. Secret item policies may additionally narrow access to a literal logical secret path prefix.
 type AuthorizationPolicy struct {
 	// Domain Example: 11111111-1111-4111-8111-111111111111
 	Domain string `json:"domain"`
@@ -55,6 +55,11 @@ type AuthorizationPolicy struct {
 
 	// Path Example: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
 	Path string `json:"path"`
+
+	// SecretPathPrefix Literal logical secret path prefix. Only valid when path is /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret; the prefix is matched byte-for-byte after URL decoding.
+	//
+	// Example: prod/database/
+	SecretPathPrefix *string `json:"secretPathPrefix,omitempty"`
 
 	// Subject Example: secret-reader
 	Subject string `json:"subject"`

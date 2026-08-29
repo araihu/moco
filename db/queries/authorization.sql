@@ -4,9 +4,9 @@ FROM authorization_role_bindings
 ORDER BY principal_id, role, domain;
 
 -- name: ListAuthorizationPolicies :many
-SELECT subject, domain, path, method
+SELECT subject, domain, path, method, secret_path_prefix
 FROM authorization_policies
-ORDER BY subject, domain, path, method;
+ORDER BY subject, domain, path, method, secret_path_prefix;
 
 -- name: GetAuthorizationPolicyState :one
 SELECT id, initialized, revision
@@ -24,8 +24,8 @@ INSERT INTO authorization_role_bindings (principal_id, role, domain)
 VALUES (?, ?, ?);
 
 -- name: InsertAuthorizationPolicy :exec
-INSERT INTO authorization_policies (subject, domain, path, method)
-VALUES (?, ?, ?, ?);
+INSERT INTO authorization_policies (subject, domain, path, method, secret_path_prefix)
+VALUES (?, ?, ?, ?, ?);
 
 -- name: AdvanceAuthorizationPolicyState :execrows
 UPDATE authorization_policy_state

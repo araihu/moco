@@ -55,15 +55,16 @@ func (q *Queries) GetAuthorizationPolicyState(ctx context.Context) (Authorizatio
 }
 
 const insertAuthorizationPolicy = `-- name: InsertAuthorizationPolicy :exec
-INSERT INTO authorization_policies (subject, domain, path, method)
-VALUES (?, ?, ?, ?)
+INSERT INTO authorization_policies (subject, domain, path, method, secret_path_prefix)
+VALUES (?, ?, ?, ?, ?)
 `
 
 type InsertAuthorizationPolicyParams struct {
-	Subject string `json:"subject"`
-	Domain  string `json:"domain"`
-	Path    string `json:"path"`
-	Method  string `json:"method"`
+	Subject          string `json:"subject"`
+	Domain           string `json:"domain"`
+	Path             string `json:"path"`
+	Method           string `json:"method"`
+	SecretPathPrefix string `json:"secret_path_prefix"`
 }
 
 func (q *Queries) InsertAuthorizationPolicy(ctx context.Context, arg InsertAuthorizationPolicyParams) error {
@@ -72,6 +73,7 @@ func (q *Queries) InsertAuthorizationPolicy(ctx context.Context, arg InsertAutho
 		arg.Domain,
 		arg.Path,
 		arg.Method,
+		arg.SecretPathPrefix,
 	)
 	return err
 }
@@ -93,9 +95,9 @@ func (q *Queries) InsertAuthorizationRoleBinding(ctx context.Context, arg Insert
 }
 
 const listAuthorizationPolicies = `-- name: ListAuthorizationPolicies :many
-SELECT subject, domain, path, method
+SELECT subject, domain, path, method, secret_path_prefix
 FROM authorization_policies
-ORDER BY subject, domain, path, method
+ORDER BY subject, domain, path, method, secret_path_prefix
 `
 
 func (q *Queries) ListAuthorizationPolicies(ctx context.Context) ([]AuthorizationPolicy, error) {
@@ -112,6 +114,7 @@ func (q *Queries) ListAuthorizationPolicies(ctx context.Context) ([]Authorizatio
 			&i.Domain,
 			&i.Path,
 			&i.Method,
+			&i.SecretPathPrefix,
 		); err != nil {
 			return nil, err
 		}

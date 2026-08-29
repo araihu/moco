@@ -62,6 +62,33 @@ func TestAuthorizationSnapshotPersistsAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestAuthorizationSnapshotPersistsMultipleSecretPathPrefixes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "moco.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	prod := "prod/"
+	staging := "staging/"
+	want := ports.AuthorizationState{Initialized: true, RoleBindings: []ports.AuthorizationRoleBinding{}, Policies: []ports.AuthorizationPolicy{
+		{Subject: "reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", Method: "GET", SecretPathPrefix: &prod},
+		{Subject: "reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", Method: "GET", SecretPathPrefix: &staging},
+	}}
+	if err := store.ReplaceAuthorization(ctx, want); err != nil {
+		t.Fatalf("replace authorization: %v", err)
+	}
+	want.Revision = 1
+	got, err := store.LoadAuthorization(ctx)
+	if err != nil {
+		t.Fatalf("load authorization: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("loaded state = %#v, want %#v", got, want)
+	}
+}
+
 func TestAuthorizationSnapshotReplacementRollsBackOnDuplicate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

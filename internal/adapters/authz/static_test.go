@@ -50,6 +50,34 @@ func TestStaticAuthorizerUsesRolesAndFailsClosed(t *testing.T) {
 	}
 }
 
+func TestStaticAuthorizerNarrowSecretPoliciesByLogicalPath(t *testing.T) {
+	t.Parallel()
+	prefix := "prod/database/"
+	authorizer, err := authz.NewStaticAuthorizer(
+		[]authz.RoleBinding{{Principal: "operator", Role: "secret-reader", Domain: "tenant-a"}},
+		[]authz.Policy{{
+			Subject: "secret-reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", Method: "GET",
+			SecretPathPrefix: &prefix,
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := "/api/v1/tenants/tenant-a/vaults/vault-a/secret"
+	allowed, err := authorizer.AuthorizeSecretPath(t.Context(), "operator", "tenant-a", resource, "GET", "prod/database/password")
+	if err != nil || !allowed {
+		t.Fatalf("prefixed secret was denied: allowed=%t err=%v", allowed, err)
+	}
+	allowed, err = authorizer.AuthorizeSecretPath(t.Context(), "operator", "tenant-a", resource, "GET", "dev/database/password")
+	if err != nil || allowed {
+		t.Fatalf("out-of-prefix secret was allowed: allowed=%t err=%v", allowed, err)
+	}
+	allowed, err = authorizer.Authorize(t.Context(), "operator", "tenant-a", resource, "GET")
+	if err != nil || allowed {
+		t.Fatalf("path-scoped policy bypassed by route-only authorization: allowed=%t err=%v", allowed, err)
+	}
+}
+
 func TestStaticAuthorizerFindsScopedCollectionAccessAndTenantVisibility(t *testing.T) {
 	t.Parallel()
 	authorizer, err := authz.NewStaticAuthorizer(
@@ -93,6 +121,18 @@ func TestStaticAuthorizerRejectsUnsafePolicies(t *testing.T) {
 	}
 	if _, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{Subject: "admin", Domain: "*", Path: "/internal/v1/authorization", Method: "PUT"}}); err != nil {
 		t.Fatalf("internal administration policy rejected: %v", err)
+	}
+	prefix := "prod/"
+	if _, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{
+		Subject: "reader", Domain: "*", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/vault", Method: "GET", SecretPathPrefix: &prefix,
+	}}); err == nil {
+		t.Fatal("secret path prefix on a non-secret route unexpectedly accepted")
+	}
+	emptyPrefix := ""
+	if _, err := authz.NewStaticAuthorizer(nil, []authz.Policy{{
+		Subject: "reader", Domain: "*", Path: "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret", Method: "GET", SecretPathPrefix: &emptyPrefix,
+	}}); err == nil {
+		t.Fatal("empty secret path prefix unexpectedly accepted")
 	}
 }
 

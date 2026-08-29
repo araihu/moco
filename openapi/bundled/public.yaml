@@ -656,8 +656,10 @@ paths:
       description: |
         Returns one secret including its base64-encoded value. Clients must keep the
         response out of logs, status fields, events, metrics, traces, and caches.
-        Authorization is evaluated at vault granularity; `path` is not a policy
-        boundary, so use a dedicated vault when a secret needs a separate scope.
+        Authorization is evaluated at vault granularity unless the deployment's
+        internal authorization policy sets `secretPathPrefix` for this route. When
+        present, the decoded logical `path` must begin with that literal prefix.
+        Use a dedicated vault when a secret needs an independent policy scope.
       tags: [Secrets]
       parameters:
         - $ref: '#/components/parameters/if-none-match'
@@ -699,8 +701,9 @@ paths:
         create-only; `If-Match` makes it replace-only at a known ETag. Sending both
         headers returns 400. Without either header the operation is an unconditional,
         idempotent upsert. The response contains metadata, never the submitted value.
-        Authorization remains vault-scoped; the logical path does not narrow a
-        vault policy.
+        Authorization remains vault-scoped for policies without a path prefix. A
+        deployment may narrow this operation with `secretPathPrefix` on its
+        internal authorization snapshot.
       tags: [Secrets]
       parameters:
         - $ref: '#/components/parameters/if-match'

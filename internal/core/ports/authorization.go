@@ -24,6 +24,13 @@ type TenantVisibilityAuthorizer interface {
 	AuthorizeTenant(context.Context, string, string) (bool, error)
 }
 
+// SecretPathAuthorizer evaluates a secret item request against its logical
+// path. Implementations must retain the route-level resource and action
+// checks, while allowing a policy to narrow access to a literal path prefix.
+type SecretPathAuthorizer interface {
+	AuthorizeSecretPath(context.Context, string, string, string, string, string) (bool, error)
+}
+
 // AuthorizationPrincipal identifies a bearer credential by its token digest.
 type AuthorizationPrincipal struct {
 	PrincipalID string `json:"id"`
@@ -39,10 +46,11 @@ type AuthorizationRoleBinding struct {
 
 // AuthorizationPolicy grants one role or principal access to a resource.
 type AuthorizationPolicy struct {
-	Subject string `json:"subject"`
-	Domain  string `json:"domain"`
-	Path    string `json:"path"`
-	Method  string `json:"method"`
+	Subject          string  `json:"subject"`
+	Domain           string  `json:"domain"`
+	Path             string  `json:"path"`
+	Method           string  `json:"method"`
+	SecretPathPrefix *string `json:"secretPathPrefix,omitempty"`
 }
 
 // AuthorizationState is the authoritative persisted policy snapshot.

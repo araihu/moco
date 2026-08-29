@@ -9,10 +9,11 @@ import (
 )
 
 type AuthorizationPolicy struct {
-	Subject string `json:"subject"`
-	Domain  string `json:"domain"`
-	Path    string `json:"path"`
-	Method  string `json:"method"`
+	Subject          string `json:"subject"`
+	Domain           string `json:"domain"`
+	Path             string `json:"path"`
+	Method           string `json:"method"`
+	SecretPathPrefix string `json:"secret_path_prefix"`
 }
 
 type AuthorizationPolicyState struct {

@@ -101,10 +101,11 @@ func (s *Store) LoadAuthorization(ctx context.Context) (ports.AuthorizationState
 	}
 	for _, policy := range policies {
 		state.Policies = append(state.Policies, ports.AuthorizationPolicy{
-			Subject: policy.Subject,
-			Domain:  policy.Domain,
-			Path:    policy.Path,
-			Method:  policy.Method,
+			Subject:          policy.Subject,
+			Domain:           policy.Domain,
+			Path:             policy.Path,
+			Method:           policy.Method,
+			SecretPathPrefix: optionalAuthorizationSecretPathPrefix(policy.SecretPathPrefix),
 		})
 	}
 	return state, nil
@@ -137,6 +138,7 @@ func (s *Store) ReplaceAuthorization(ctx context.Context, state ports.Authorizat
 	for index, policy := range state.Policies {
 		if err := queries.InsertAuthorizationPolicy(ctx, sqlc.InsertAuthorizationPolicyParams{
 			Subject: policy.Subject, Domain: policy.Domain, Path: policy.Path, Method: policy.Method,
+			SecretPathPrefix: authorizationSecretPathPrefixValue(policy.SecretPathPrefix),
 		}); err != nil {
 			return fmt.Errorf("insert authorization policy %d: %w", index, err)
 		}
@@ -152,6 +154,21 @@ func (s *Store) ReplaceAuthorization(ctx context.Context, state ports.Authorizat
 		return fmt.Errorf("commit authorization replacement: %w", err)
 	}
 	return nil
+}
+
+func optionalAuthorizationSecretPathPrefix(value string) *string {
+	if value == "" {
+		return nil
+	}
+	copy := value
+	return &copy
+}
+
+func authorizationSecretPathPrefixValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // CreateTenant atomically stores a tenant and its optional idempotency result.

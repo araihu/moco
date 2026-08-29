@@ -205,10 +205,11 @@ func (s *Server) validateAuthorizationSnapshot(snapshot internalapi.Authorizatio
 	policies := make([]ports.AuthorizationPolicy, 0, len(snapshot.Policies))
 	for _, policy := range snapshot.Policies {
 		policies = append(policies, ports.AuthorizationPolicy{
-			Subject: policy.Subject,
-			Domain:  policy.Domain,
-			Path:    policy.Path,
-			Method:  policy.Method,
+			Subject:          policy.Subject,
+			Domain:           policy.Domain,
+			Path:             policy.Path,
+			Method:           policy.Method,
+			SecretPathPrefix: policy.SecretPathPrefix,
 		})
 	}
 	if _, err := authz.NewStaticAuthorizer(bindings, policies); err != nil {
@@ -232,10 +233,11 @@ func authorizationSnapshotState(snapshot internalapi.AuthorizationSnapshotInput)
 	}
 	for _, policy := range snapshot.Policies {
 		state.Policies = append(state.Policies, ports.AuthorizationPolicy{
-			Subject: policy.Subject,
-			Domain:  policy.Domain,
-			Path:    policy.Path,
-			Method:  policy.Method,
+			Subject:          policy.Subject,
+			Domain:           policy.Domain,
+			Path:             policy.Path,
+			Method:           policy.Method,
+			SecretPathPrefix: policy.SecretPathPrefix,
 		})
 	}
 	return state
@@ -257,10 +259,11 @@ func authorizationSnapshotResponse(state ports.AuthorizationState) internalapi.A
 	}
 	for _, policy := range state.Policies {
 		response.Policies = append(response.Policies, internalapi.AuthorizationPolicy{
-			Subject: policy.Subject,
-			Domain:  policy.Domain,
-			Path:    policy.Path,
-			Method:  policy.Method,
+			Subject:          policy.Subject,
+			Domain:           policy.Domain,
+			Path:             policy.Path,
+			Method:           policy.Method,
+			SecretPathPrefix: policy.SecretPathPrefix,
 		})
 	}
 	return response

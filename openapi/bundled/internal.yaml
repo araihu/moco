@@ -65,7 +65,7 @@ paths:
     get:
       operationId: getAuthorizationSnapshot
       summary: Read the persisted authorization snapshot
-      description: Returns the complete role-binding and policy snapshot without token digests. The ETag is the authoritative snapshot revision.
+      description: Returns the complete role-binding and policy snapshot without token digests. The ETag is the authoritative snapshot revision. A policy's optional secretPathPrefix narrows only the decoded logical path of the secret item route and is a literal prefix match.
       tags: [Authorization]
       responses:
         '200':
@@ -102,7 +102,7 @@ paths:
     put:
       operationId: replaceAuthorizationSnapshot
       summary: Replace the persisted authorization snapshot
-      description: Atomically replaces all role bindings and policies when If-Match identifies the revision observed by the writer. A committed change signals local reloaders and is discovered by shared-store polling in other processes.
+      description: Atomically replaces all role bindings and policies when If-Match identifies the revision observed by the writer. A committed change signals local reloaders and is discovered by shared-store polling in other processes. Set secretPathPrefix only on a policy for the canonical secret item route; policies without it remain vault-scoped.
       tags: [Authorization]
       parameters:
         - name: If-Match
@@ -295,7 +295,7 @@ components:
     authorization-policy:
       title: AuthorizationPolicy
       type: object
-      description: Allow policy for a role or principal, domain, path pattern, and HTTP method.
+      description: Allow policy for a role or principal, domain, path pattern, and HTTP method. Secret item policies may additionally narrow access to a literal logical secret path prefix.
       additionalProperties: false
       required:
         - subject
@@ -323,6 +323,12 @@ components:
           minLength: 1
           maxLength: 16
           example: GET
+        secretPathPrefix:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: Literal logical secret path prefix. Only valid when path is /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret; the prefix is matched byte-for-byte after URL decoding.
+          example: prod/database/
     problem:
       title: Problem
       type: object

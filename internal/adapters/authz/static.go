@@ -9,16 +9,17 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/araihu/moco/internal/core/domain"
 	"github.com/araihu/moco/internal/core/ports"
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
 )
 
 const modelText = `[request_definition]
-r = sub, dom, obj, act
+r = sub, dom, obj, act, secret_path
 
 [policy_definition]
-p = sub, dom, obj, act
+p = sub, dom, obj, act, secret_path
 
 [role_definition]
 g = _, _, _
@@ -27,8 +28,10 @@ g = _, _, _
 e = some(where (p.eft == allow))
 
 [matchers]
-m = (r.sub == p.sub || g(r.sub, p.sub, r.dom) || g(r.sub, p.sub, "*")) && (p.dom == "*" || r.dom == p.dom) && keyMatch3(r.obj, p.obj) && (p.act == "*" || r.act == p.act)
+m = (r.sub == p.sub || g(r.sub, p.sub, r.dom) || g(r.sub, p.sub, "*")) && (p.dom == "*" || r.dom == p.dom) && keyMatch3(r.obj, p.obj) && (p.act == "*" || r.act == p.act) && secretPathMatch(r.secret_path, p.secret_path)
 `
+
+const secretItemPolicyPath = "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret" //nolint:gosec // route pattern, not a credential.
 
 // RoleBinding assigns one configured principal to a role.
 type RoleBinding = ports.AuthorizationRoleBinding
@@ -45,6 +48,7 @@ type StaticAuthorizer struct {
 }
 
 var _ ports.Authorizer = (*StaticAuthorizer)(nil)
+var _ ports.SecretPathAuthorizer = (*StaticAuthorizer)(nil)
 
 // NewStaticAuthorizer builds a default-deny Casbin enforcer from validated
 // role bindings and allow policies.
@@ -78,6 +82,7 @@ func buildEnforcer(bindings []RoleBinding, policies []Policy) (*casbin.SyncedEnf
 	if err != nil {
 		return nil, fmt.Errorf("create authorization enforcer: %w", err)
 	}
+	enforcer.AddFunction("secretPathMatch", secretPathMatch)
 	for index, binding := range bindings {
 		if !validIdentifier(binding.Principal) || !validIdentifier(binding.Role) || !validDomain(binding.Domain) {
 			return nil, fmt.Errorf("role binding %d contains an invalid principal, role, or domain", index)
@@ -97,10 +102,17 @@ func buildEnforcer(bindings []RoleBinding, policies []Policy) (*casbin.SyncedEnf
 		if err := validatePolicyPath(policy.Path); err != nil {
 			return nil, fmt.Errorf("policy %d path: %w", index, err)
 		}
+		if err := validateSecretPathPrefix(policy); err != nil {
+			return nil, fmt.Errorf("policy %d secretPathPrefix: %w", index, err)
+		}
 		if !validMethod(policy.Method) {
 			return nil, fmt.Errorf("policy %d method must be an uppercase HTTP method or '*': %q", index, policy.Method)
 		}
-		added, err := enforcer.AddPolicy(policy.Subject, policy.Domain, policy.Path, policy.Method)
+		secretPathPrefix := "*"
+		if policy.SecretPathPrefix != nil {
+			secretPathPrefix = *policy.SecretPathPrefix
+		}
+		added, err := enforcer.AddPolicy(policy.Subject, policy.Domain, policy.Path, policy.Method, secretPathPrefix)
 		if err != nil {
 			return nil, fmt.Errorf("add policy %d: %w", index, err)
 		}
@@ -114,6 +126,10 @@ func buildEnforcer(bindings []RoleBinding, policies []Policy) (*casbin.SyncedEnf
 // Authorize evaluates one request. Empty values fail closed without invoking
 // the policy engine.
 func (a *StaticAuthorizer) Authorize(ctx context.Context, principal, domain, resource, action string) (bool, error) {
+	return a.authorize(ctx, principal, domain, resource, action, "*")
+}
+
+func (a *StaticAuthorizer) authorize(ctx context.Context, principal, domain, resource, action, secretPath string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -122,11 +138,21 @@ func (a *StaticAuthorizer) Authorize(ctx context.Context, principal, domain, res
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	allowed, err := a.enforcer.Enforce(principal, domain, resource, action)
+	allowed, err := a.enforcer.Enforce(principal, domain, resource, action, secretPath)
 	if err != nil {
 		return false, fmt.Errorf("evaluate authorization policy: %w", err)
 	}
 	return allowed, nil
+}
+
+// AuthorizeSecretPath evaluates a secret item request including its decoded
+// logical path. A policy without SecretPathPrefix uses "*" and therefore
+// preserves the existing vault-scoped behavior.
+func (a *StaticAuthorizer) AuthorizeSecretPath(ctx context.Context, principal, domain, resource, action, secretPath string) (bool, error) {
+	if secretPath == "" {
+		return a.Authorize(ctx, principal, domain, resource, action)
+	}
+	return a.authorize(ctx, principal, domain, resource, action, secretPath)
 }
 
 // AuthorizeAnyDomain checks a resource against each configured domain. It is
@@ -239,4 +265,35 @@ func validatePolicyPath(value string) error {
 		}
 	}
 	return nil
+}
+
+func validateSecretPathPrefix(policy Policy) error {
+	if policy.SecretPathPrefix == nil {
+		return nil
+	}
+	if policy.Path != secretItemPolicyPath {
+		return fmt.Errorf("is only valid with path %q", secretItemPolicyPath)
+	}
+	if err := domain.ValidateSecretPrefix(policy.SecretPathPrefix); err != nil {
+		return errors.New("must be a valid literal secret path prefix")
+	}
+	return nil
+}
+
+func secretPathMatch(args ...interface{}) (interface{}, error) {
+	if len(args) != 2 {
+		return false, fmt.Errorf("secretPathMatch: expected 2 arguments, got %d", len(args))
+	}
+	requestPath, ok := args[0].(string)
+	if !ok {
+		return false, errors.New("secretPathMatch: request path must be a string")
+	}
+	policyPath, ok := args[1].(string)
+	if !ok {
+		return false, errors.New("secretPathMatch: policy path must be a string")
+	}
+	if policyPath == "*" {
+		return true, nil
+	}
+	return strings.HasPrefix(requestPath, policyPath), nil
 }

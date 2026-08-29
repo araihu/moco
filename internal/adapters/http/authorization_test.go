@@ -129,6 +129,29 @@ func TestAuthorizationMiddlewareRequiresGlobalWatchPermission(t *testing.T) {
 	}
 }
 
+func TestAuthorizationMiddlewarePassesDecodedSecretPathToAuthorizer(t *testing.T) {
+	t.Parallel()
+	authorizer := &recordingSecretPathAuthorizer{allowed: true}
+	next := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	})
+	handler := authorizationMiddleware(authorizer, slog.Default(), next)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		"/api/v1/tenants/tenant-a/vaults/vault-a/secret?path=prod%2Fdatabase%2Fpassword", nil)
+	request = request.WithContext(context.WithValue(request.Context(), principalContextKey, "operator"))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+	if authorizer.secretCalls != 1 || authorizer.secretPath != "prod/database/password" {
+		t.Fatalf("secret path authorization = calls %d path %q", authorizer.secretCalls, authorizer.secretPath)
+	}
+	if authorizer.calls != 0 {
+		t.Fatalf("route-only authorizer was called %d times", authorizer.calls)
+	}
+}
+
 type recordingAuthorizer struct {
 	allowed   bool
 	principal string
@@ -142,6 +165,24 @@ var _ ports.Authorizer = (*recordingAuthorizer)(nil)
 
 func (authorizer *recordingAuthorizer) Authorize(_ context.Context, principal, domain, resource, action string) (bool, error) {
 	authorizer.calls++
+	authorizer.principal = principal
+	authorizer.domain = domain
+	authorizer.resource = resource
+	authorizer.action = action
+	return authorizer.allowed, nil
+}
+
+type recordingSecretPathAuthorizer struct {
+	recordingAuthorizer
+	secretCalls int
+	secretPath  string
+}
+
+var _ ports.SecretPathAuthorizer = (*recordingSecretPathAuthorizer)(nil)
+
+func (authorizer *recordingSecretPathAuthorizer) AuthorizeSecretPath(_ context.Context, principal, domain, resource, action, secretPath string) (bool, error) {
+	authorizer.secretCalls++
+	authorizer.secretPath = secretPath
 	authorizer.principal = principal
 	authorizer.domain = domain
 	authorizer.resource = resource
