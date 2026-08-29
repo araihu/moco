@@ -138,11 +138,22 @@ destination with mode `0600` without overwriting an existing file. Use
 `--after-sequence` to resume after a previous export; rows appended after the
 snapshot boundary are intentionally left for the next run. `-output -` streams
 JSONL to stdout and leaves the caller responsible for protecting the pipe.
+Supplying `--manifest` writes a second private JSON file containing the
+snapshot bounds, count, and SHA-256 of the exact JSONL bytes; pass both files
+back with `--verify` to validate the checksum, schema, ordering, and bounds
+without opening SQLite.
 
 ```bash
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 go run ./cmd/moco-audit-export \
   --database ./moco.db \
-  --output ./audit-$(date -u +%Y%m%dT%H%M%SZ).jsonl
+  --output "./audit-$STAMP.jsonl" \
+  --manifest "./audit-$STAMP.manifest.json"
+
+go run ./cmd/moco-audit-export \
+  --verify \
+  --output ./audit-20260829T000000Z.jsonl \
+  --manifest ./audit-20260829T000000Z.manifest.json
 ```
 
 The internal encryption rotation endpoint requires its own explicit `POST`

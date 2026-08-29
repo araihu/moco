@@ -18,7 +18,8 @@ authentication mechanism.
 
 The offline `moco-audit-export` command is intentionally outside OpenAPI: it
 opens the local SQLite file read-only and writes JSONL to a deployment-owned
-filesystem destination without a network hop.
+filesystem destination without a network hop. Its optional private manifest
+contains only sequence bounds, count, and a local JSONL checksum.
 
 The contracts are intentionally split into small files below `paths/` and
 `components/`. Relative `$ref` values are part of the source contract. Run

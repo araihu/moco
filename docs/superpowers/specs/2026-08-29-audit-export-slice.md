@@ -35,3 +35,12 @@ permissions and durability in that mode.
 The command emits its summary only on stderr so stdout remains valid JSONL.
 The exporter is read-only and does not alter audit sequences or the public
 resource-watch revision.
+
+When `--manifest` is supplied, a second private JSON file records the format,
+exclusive start sequence, captured upper sequence, last exported sequence,
+count, completion flag, and SHA-256 of the exact JSONL bytes. `--verify`
+requires both paths and performs a streaming checksum, schema, ordering, and
+sequence-bound check without opening SQLite. The manifest and JSONL are both
+published without overwriting existing destinations; they are committed in
+sequence, so an operator should treat a failed manifest publication as an
+incomplete export and rerun with fresh paths.
