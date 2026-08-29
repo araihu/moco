@@ -24,6 +24,8 @@ func TestAuthorizationResourceRecognizesOnlyContractRoutes(t *testing.T) {
 		{name: "service", method: http.MethodGet, path: "/api/v1", resource: "/api/v1", matches: true},
 		{name: "service HEAD", method: http.MethodHead, path: "/api/v1", resource: "/api/v1", matches: true},
 		{name: "tenant item", method: http.MethodGet, path: "/api/v1/tenants/t", resource: "/api/v1/tenants/t", matches: true},
+		{name: "tenant watch", method: http.MethodGet, path: "/api/v1/tenants/t/watch", resource: "/api/v1/tenants/t/watch", matches: true},
+		{name: "tenant watch unsupported", method: http.MethodPost, path: "/api/v1/tenants/t/watch", matches: false},
 		{name: "vault collection", method: http.MethodPost, path: "/api/v1/tenants/t/vaults", resource: "/api/v1/tenants/t/vaults", matches: true},
 		{name: "secret item", method: http.MethodGet, path: "/api/v1/tenants/t/vaults/v/secret", resource: "/api/v1/tenants/t/vaults/v/secret", matches: true},
 		{name: "metadata", method: http.MethodGet, path: "/api/v1/tenants/t/vaults/v/secret/metadata", resource: "/api/v1/tenants/t/vaults/v/secret/metadata", matches: true},
@@ -49,7 +51,7 @@ func TestAuthorizationResourceRecognizesOnlyContractRoutes(t *testing.T) {
 			request := httptest.NewRequestWithContext(t.Context(), test.method, test.path, nil)
 			domain, resource, matches := authorizationResource(request)
 			wantDomain := "*"
-			if test.name == "tenant item" || test.name == "vault collection" || test.name == "secret item" || test.name == "metadata" {
+			if test.name == "tenant item" || test.name == "tenant watch" || test.name == "vault collection" || test.name == "secret item" || test.name == "metadata" {
 				wantDomain = "t"
 			}
 			if matches != test.matches || (matches && (resource != test.resource || domain != wantDomain)) {
@@ -134,6 +136,28 @@ func TestAuthorizationMiddlewareRequiresGlobalWatchPermission(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("tenant-scoped watch status = %d, want 403", recorder.Code)
+	}
+}
+
+func TestAuthorizationMiddlewareAllowsTenantWatchWithLiteralDomain(t *testing.T) {
+	t.Parallel()
+	authorizer, err := authz.NewStaticAuthorizer(
+		[]authz.RoleBinding{{Principal: "operator", Role: "tenant-reader", Domain: "tenant-a"}},
+		[]authz.Policy{{Subject: "tenant-reader", Domain: "tenant-a", Path: "/api/v1/tenants/{tenantId}/watch", Method: "GET"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	})
+	handler := authorizationMiddleware(authorizer, slog.Default(), next)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tenants/tenant-a/watch", nil)
+	request = request.WithContext(context.WithValue(request.Context(), principalContextKey, "operator"))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("tenant watch status = %d, want 204", recorder.Code)
 	}
 }
 

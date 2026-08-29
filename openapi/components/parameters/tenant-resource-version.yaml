@@ -1,0 +1,6 @@
+name: resourceVersion
+in: query
+required: false
+description: Opaque durable change checkpoint scoped to this tenant. When supplied, the endpoint reports changed=true after a newer tenant, vault, or secret mutation; use the public collection endpoints to relist resources after a change.
+schema:
+  $ref: ../schemas/tenant-resource-version.yaml

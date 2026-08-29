@@ -215,7 +215,7 @@ type ServiceInfo struct {
 
 	// Capabilities Stable feature identifiers available on this deployment.
 	//
-	// Example: ["tenants","vaults","secrets","conditional-writes","resource-watch"]
+	// Example: ["tenants","vaults","secrets","conditional-writes","resource-watch","tenant-resource-watch"]
 	Capabilities []string `json:"capabilities"`
 
 	// ServiceVersion Mocó server version; clients must treat it as opaque.
@@ -301,6 +301,11 @@ type TenantList struct {
 	Page PageInfo `json:"page"`
 }
 
+// TenantResourceVersion Opaque durable resource checkpoint scoped to one tenant.
+//
+// Example: trv-42
+type TenantResourceVersion = string
+
 // TenantUpdate Complete mutable tenant state used for replacement updates.
 type TenantUpdate struct {
 	// Description Set to null to clear the description.
@@ -315,6 +320,19 @@ type TenantUpdate struct {
 
 	// Name Example: platform
 	Name string `json:"name"`
+}
+
+// TenantWatchResult Durable tenant-scoped resource-version checkpoint returned by a watch poll.
+type TenantWatchResult struct {
+	// Changed True when the current tenant revision is newer than the supplied checkpoint.
+	//
+	// Example: true
+	Changed bool `json:"changed"`
+
+	// ResourceVersion Current durable resource revision for the tenant.
+	//
+	// Example: trv-42
+	ResourceVersion string `json:"resourceVersion"`
 }
 
 // Vault Tenant-scoped vault identity, automation metadata, and lifecycle state.
@@ -717,6 +735,18 @@ type ListSecretsParams struct {
 	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
 }
 
+// WatchTenantChangesParams defines parameters for WatchTenantChanges.
+type WatchTenantChangesParams struct {
+	// ResourceVersion Opaque durable change checkpoint scoped to this tenant. When supplied, the endpoint reports changed=true after a newer tenant, vault, or secret mutation; use the public collection endpoints to relist resources after a change.
+	ResourceVersion *TenantResourceVersion `form:"resourceVersion,omitempty" json:"resourceVersion,omitempty"`
+
+	// TimeoutSeconds Maximum number of seconds to wait for a change. Zero returns immediately. The limit leaves headroom for the server write timeout.
+	TimeoutSeconds *WatchTimeout `form:"timeoutSeconds,omitempty" json:"timeoutSeconds,omitempty"`
+
+	// XRequestID Optional caller correlation ID; the server returns the effective ID.
+	XRequestID *RequestId `json:"X-Request-ID,omitempty"`
+}
+
 // WatchChangesParams defines parameters for WatchChanges.
 type WatchChangesParams struct {
 	// ResourceVersion Opaque durable change checkpoint returned by the watch endpoint. A caller
@@ -797,6 +827,9 @@ type ServerInterface interface {
 	// ListSecrets List secret metadata
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
 	ListSecrets(w http.ResponseWriter, r *http.Request, tenantId TenantId, vaultId VaultId, params ListSecretsParams)
+	// WatchTenantChanges Wait for changes within one tenant
+	// (GET /api/v1/tenants/{tenantId}/watch)
+	WatchTenantChanges(w http.ResponseWriter, r *http.Request, tenantId TenantId, params WatchTenantChangesParams)
 	// WatchChanges Wait for persisted resource changes
 	// (GET /api/v1/watch)
 	WatchChanges(w http.ResponseWriter, r *http.Request, params WatchChangesParams)
@@ -2124,6 +2157,82 @@ func (siw *ServerInterfaceWrapper) ListSecrets(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// WatchTenantChanges operation middleware
+func (siw *ServerInterfaceWrapper) WatchTenantChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenantId" -------------
+	var tenantId TenantId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenantId", r.PathValue("tenantId"), &tenantId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenantId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params WatchTenantChangesParams
+
+	// ------------- Optional query parameter "resourceVersion" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resourceVersion", r.URL.Query(), &params.ResourceVersion, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "resourceVersion"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resourceVersion", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "timeoutSeconds" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "timeoutSeconds", r.URL.Query(), &params.TimeoutSeconds, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "timeoutSeconds"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "timeoutSeconds", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Request-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Request-ID")]; found {
+		var XRequestID RequestId
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Request-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Request-ID", valueList[0], &XRequestID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Request-ID", Err: err})
+			return
+		}
+
+		params.XRequestID = &XRequestID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.WatchTenantChanges(w, r, tenantId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // WatchChanges operation middleware
 func (siw *ServerInterfaceWrapper) WatchChanges(w http.ResponseWriter, r *http.Request) {
 
@@ -2313,6 +2422,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1", wrapper.GetServiceInfo)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/watch", wrapper.WatchChanges)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants/{tenantId}/watch", wrapper.WatchTenantChanges)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tenants", wrapper.ListTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tenants", wrapper.CreateTenant)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tenants/{tenantId}", wrapper.DeleteTenant)
@@ -5184,6 +5294,161 @@ func (response ListSecrets503ApplicationProblemPlusJSONResponse) VisitListSecret
 	return err
 }
 
+type WatchTenantChangesRequestObject struct {
+	TenantId TenantId `json:"tenantId"`
+	Params   WatchTenantChangesParams
+}
+
+type WatchTenantChangesResponseObject interface {
+	VisitWatchTenantChangesResponse(w http.ResponseWriter) error
+}
+
+type WatchTenantChanges200ResponseHeaders struct {
+	CacheControl string
+	XRequestID   string
+}
+
+type WatchTenantChanges200JSONResponse struct {
+	Body    TenantWatchResult
+	Headers WatchTenantChanges200ResponseHeaders
+}
+
+func (response WatchTenantChanges200JSONResponse) VisitWatchTenantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchTenantChanges400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response WatchTenantChanges400ApplicationProblemPlusJSONResponse) VisitWatchTenantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchTenantChanges401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response WatchTenantChanges401ApplicationProblemPlusJSONResponse) VisitWatchTenantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchTenantChanges403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response WatchTenantChanges403ApplicationProblemPlusJSONResponse) VisitWatchTenantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchTenantChanges404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response WatchTenantChanges404ApplicationProblemPlusJSONResponse) VisitWatchTenantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchTenantChanges429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response WatchTenantChanges429ApplicationProblemPlusJSONResponse) VisitWatchTenantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchTenantChanges500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response WatchTenantChanges500ApplicationProblemPlusJSONResponse) VisitWatchTenantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchTenantChanges503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response WatchTenantChanges503ApplicationProblemPlusJSONResponse) VisitWatchTenantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-ID", fmt.Sprint(response.Headers.XRequestID))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type WatchChangesRequestObject struct {
 	Params WatchChangesParams
 }
@@ -5371,6 +5636,9 @@ type StrictServerInterface interface {
 	// ListSecrets List secret metadata
 	// (GET /api/v1/tenants/{tenantId}/vaults/{vaultId}/secrets)
 	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
+	// WatchTenantChanges Wait for changes within one tenant
+	// (GET /api/v1/tenants/{tenantId}/watch)
+	WatchTenantChanges(ctx context.Context, request WatchTenantChangesRequestObject) (WatchTenantChangesResponseObject, error)
 	// WatchChanges Wait for persisted resource changes
 	// (GET /api/v1/watch)
 	WatchChanges(ctx context.Context, request WatchChangesRequestObject) (WatchChangesResponseObject, error)
@@ -5880,6 +6148,33 @@ func (sh *strictHandler) ListSecrets(w http.ResponseWriter, r *http.Request, ten
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListSecretsResponseObject); ok {
 		if err := validResponse.VisitListSecretsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// WatchTenantChanges operation middleware
+func (sh *strictHandler) WatchTenantChanges(w http.ResponseWriter, r *http.Request, tenantId TenantId, params WatchTenantChangesParams) {
+	var request WatchTenantChangesRequestObject
+
+	request.TenantId = tenantId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.WatchTenantChanges(ctx, request.(WatchTenantChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "WatchTenantChanges")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(WatchTenantChangesResponseObject); ok {
+		if err := validResponse.VisitWatchTenantChangesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

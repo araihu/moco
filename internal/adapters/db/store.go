@@ -33,6 +33,7 @@ type Store struct {
 
 var _ ports.AuthorizationRepository = (*Store)(nil)
 var _ ports.ResourceVersionReader = (*Store)(nil)
+var _ ports.TenantResourceVersionReader = (*Store)(nil)
 var _ ports.AuditRepository = (*Store)(nil)
 var _ ports.AuditExportRepository = (*Store)(nil)
 var _ ports.AuditRetentionRepository = (*Store)(nil)
@@ -93,6 +94,20 @@ func (s *Store) CurrentResourceVersion(ctx context.Context) (int64, error) {
 	revision, err := s.queries.GetResourceVersion(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("read resource version: %w", err)
+	}
+	return revision, nil
+}
+
+// CurrentTenantResourceVersion returns the durable resource revision for one
+// tenant. Deleted tenants retain a tombstone checkpoint; an ID never observed
+// by this store returns ErrTenantNotFound.
+func (s *Store) CurrentTenantResourceVersion(ctx context.Context, tenantID string) (int64, error) {
+	revision, err := s.queries.GetTenantResourceVersion(ctx, tenantID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ports.ErrTenantNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read tenant resource version: %w", err)
 	}
 	return revision, nil
 }

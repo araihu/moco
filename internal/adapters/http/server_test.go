@@ -62,7 +62,7 @@ func TestTenantLifecycleEndToEnd(t *testing.T) {
 	}, false)
 	assertStatus(t, response, http.StatusOK)
 	info := decode[httpapi.ServiceInfo](t, response)
-	if !slices.Equal(info.Capabilities, []string{"tenants", "vaults", "secrets", "conditional-writes", "resource-watch"}) {
+	if !slices.Equal(info.Capabilities, []string{"tenants", "vaults", "secrets", "conditional-writes", "resource-watch", "tenant-resource-watch"}) {
 		t.Fatalf("unexpected capabilities: %v", info.Capabilities)
 	}
 
@@ -224,6 +224,63 @@ func TestWatchChangesReturnsCheckpointAndDetectsMutations(t *testing.T) {
 	problem := decode[httpapi.Problem](t, response)
 	if problem.Code != "resource_version_ahead" {
 		t.Fatalf("unexpected ahead checkpoint problem: %#v", problem)
+	}
+}
+
+func TestTenantWatchIsScopedAndRetainsDeletionTombstone(t *testing.T) {
+	t.Parallel()
+	test := newFixture(t, services.TenantServiceOptions{
+		CursorHMACKey: []byte("test-cursor-key-with-at-least-32-bytes"),
+	})
+	response := test.request(t, http.MethodGet, "/api/v1/tenants/11111111-1111-4111-8111-111111111111/watch", nil, nil, false)
+	assertStatus(t, response, http.StatusUnauthorized)
+	unknownPath := "/api/v1/tenants/99999999-9999-4999-8999-999999999999/watch"
+	response = test.request(t, http.MethodGet, unknownPath, nil, nil, true)
+	assertStatus(t, response, http.StatusNotFound)
+	problem := decode[httpapi.Problem](t, response)
+	if problem.Code != "resource_not_found" {
+		t.Fatalf("unexpected unknown tenant problem: %#v", problem)
+	}
+
+	tenantA := test.createTenant(t, "tenant-watch-a")
+	tenantB := test.createTenant(t, "tenant-watch-b")
+	watchPath := "/api/v1/tenants/" + tenantA.Id.String() + "/watch"
+	response = test.request(t, http.MethodGet, watchPath, nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	initial := decode[httpapi.TenantWatchResult](t, response)
+	if initial.ResourceVersion != "trv-1" || initial.Changed {
+		t.Fatalf("unexpected initial tenant watch: %#v", initial)
+	}
+	response = test.request(t, http.MethodGet, watchPath+"?resourceVersion=rv-1", nil, nil, true)
+	assertStatus(t, response, http.StatusBadRequest)
+	problem = decode[httpapi.Problem](t, response)
+	if problem.Code != "invalid_resource_version" {
+		t.Fatalf("unexpected tenant checkpoint problem: %#v", problem)
+	}
+
+	_ = test.createVault(t, "/api/v1/tenants/"+tenantB.Id.String()+"/vaults", "unrelated")
+	response = test.request(t, http.MethodGet, watchPath+"?resourceVersion=trv-1", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	unchanged := decode[httpapi.TenantWatchResult](t, response)
+	if unchanged.Changed || unchanged.ResourceVersion != "trv-1" {
+		t.Fatalf("tenant B mutation changed tenant A watch: %#v", unchanged)
+	}
+
+	_ = test.createVault(t, "/api/v1/tenants/"+tenantA.Id.String()+"/vaults", "related")
+	response = test.request(t, http.MethodGet, watchPath+"?resourceVersion=trv-1", nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	changed := decode[httpapi.TenantWatchResult](t, response)
+	if !changed.Changed || changed.ResourceVersion == "trv-1" {
+		t.Fatalf("tenant A mutation did not change scoped watch: %#v", changed)
+	}
+
+	response = test.request(t, http.MethodDelete, "/api/v1/tenants/"+tenantA.Id.String()+"?cascade=true", nil, nil, true)
+	assertStatus(t, response, http.StatusNoContent)
+	response = test.request(t, http.MethodGet, watchPath+"?resourceVersion="+changed.ResourceVersion, nil, nil, true)
+	assertStatus(t, response, http.StatusOK)
+	tombstone := decode[httpapi.TenantWatchResult](t, response)
+	if !tombstone.Changed || tombstone.ResourceVersion == changed.ResourceVersion {
+		t.Fatalf("tenant deletion tombstone was not observable: %#v", tombstone)
 	}
 }
 
@@ -662,7 +719,7 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	}
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
-		Readiness: store, ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
+		Readiness: store, ResourceVersion: store, TenantResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
 		Audit:            auditService,
 		AuditRetention:   auditRetentionService,
 		AuditPathHMACKey: []byte("test-audit-path-key-with-at-least-32-bytes"),

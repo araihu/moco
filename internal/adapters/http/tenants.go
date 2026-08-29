@@ -18,6 +18,9 @@ func (s *Server) GetServiceInfo(ctx context.Context, _ GetServiceInfoRequestObje
 	if s.resourceVersion != nil {
 		capabilities = append(capabilities, "resource-watch")
 	}
+	if s.tenantResourceVersion != nil {
+		capabilities = append(capabilities, "tenant-resource-watch")
+	}
 	return GetServiceInfo200JSONResponse{
 		Body: ServiceInfo{
 			ApiVersion:     V1,

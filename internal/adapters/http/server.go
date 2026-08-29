@@ -37,21 +37,22 @@ type ReadinessChecker interface {
 
 // HandlerOptions contains all dependencies and deployment credentials.
 type HandlerOptions struct {
-	Tenants          *services.TenantService
-	Vaults           *services.VaultService
-	Secrets          *services.SecretService
-	Readiness        ReadinessChecker
-	ResourceVersion  ports.ResourceVersionReader
-	Authenticator    BearerAuthenticator
-	Authorizer       ports.Authorizer
-	Authorization    *services.AuthorizationPolicyService
-	Audit            *services.AuditService
-	AuditRetention   *services.AuditRetentionService
-	AuditPathHMACKey []byte
-	KeyRotation      *services.VaultKeyRotationService
-	PrincipalCheck   func(string) bool
-	ServiceVersion   string
-	Logger           *slog.Logger
+	Tenants               *services.TenantService
+	Vaults                *services.VaultService
+	Secrets               *services.SecretService
+	Readiness             ReadinessChecker
+	ResourceVersion       ports.ResourceVersionReader
+	TenantResourceVersion ports.TenantResourceVersionReader
+	Authenticator         BearerAuthenticator
+	Authorizer            ports.Authorizer
+	Authorization         *services.AuthorizationPolicyService
+	Audit                 *services.AuditService
+	AuditRetention        *services.AuditRetentionService
+	AuditPathHMACKey      []byte
+	KeyRotation           *services.VaultKeyRotationService
+	PrincipalCheck        func(string) bool
+	ServiceVersion        string
+	Logger                *slog.Logger
 }
 
 // NewHandler composes the generated strict server, authentication, validation,
@@ -86,19 +87,20 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	}
 
 	server := &Server{
-		tenants:         options.Tenants,
-		vaults:          options.Vaults,
-		secrets:         options.Secrets,
-		readiness:       options.Readiness,
-		resourceVersion: options.ResourceVersion,
-		authorizer:      options.Authorizer,
-		authorization:   options.Authorization,
-		audit:           options.Audit,
-		auditRetention:  options.AuditRetention,
-		keyRotation:     options.KeyRotation,
-		principalCheck:  options.PrincipalCheck,
-		serviceVersion:  options.ServiceVersion,
-		logger:          options.Logger,
+		tenants:               options.Tenants,
+		vaults:                options.Vaults,
+		secrets:               options.Secrets,
+		readiness:             options.Readiness,
+		resourceVersion:       options.ResourceVersion,
+		tenantResourceVersion: options.TenantResourceVersion,
+		authorizer:            options.Authorizer,
+		authorization:         options.Authorization,
+		audit:                 options.Audit,
+		auditRetention:        options.AuditRetention,
+		keyRotation:           options.KeyRotation,
+		principalCheck:        options.PrincipalCheck,
+		serviceVersion:        options.ServiceVersion,
+		logger:                options.Logger,
 	}
 	strict := NewStrictHandlerWithOptions(server, nil, StrictHTTPServerOptions{
 		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, _ error) {
@@ -137,19 +139,20 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 
 // Server implements the generated strict server contract.
 type Server struct {
-	tenants         *services.TenantService
-	vaults          *services.VaultService
-	secrets         *services.SecretService
-	readiness       ReadinessChecker
-	resourceVersion ports.ResourceVersionReader
-	authorization   *services.AuthorizationPolicyService
-	audit           *services.AuditService
-	auditRetention  *services.AuditRetentionService
-	keyRotation     *services.VaultKeyRotationService
-	principalCheck  func(string) bool
-	serviceVersion  string
-	logger          *slog.Logger
-	authorizer      ports.Authorizer
+	tenants               *services.TenantService
+	vaults                *services.VaultService
+	secrets               *services.SecretService
+	readiness             ReadinessChecker
+	resourceVersion       ports.ResourceVersionReader
+	tenantResourceVersion ports.TenantResourceVersionReader
+	authorization         *services.AuthorizationPolicyService
+	audit                 *services.AuditService
+	auditRetention        *services.AuditRetentionService
+	keyRotation           *services.VaultKeyRotationService
+	principalCheck        func(string) bool
+	serviceVersion        string
+	logger                *slog.Logger
+	authorizer            ports.Authorizer
 }
 
 func requestIDs(next http.Handler) http.Handler {
@@ -298,6 +301,8 @@ func authorizationResource(r *http.Request) (string, string, bool) {
 		return "*", path, isReadMethod(method)
 	case path == "/api/v1/tenants":
 		return "*", path, isReadMethod(method) || method == http.MethodPost
+	case len(parts) == 5 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "" && parts[4] == "watch":
+		return parts[3], path, isReadMethod(method)
 	case len(parts) == 4 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "":
 		return parts[3], path, isReadMethod(method) || method == http.MethodPut || method == http.MethodDelete
 	case len(parts) == 5 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "" && parts[4] == "vaults":

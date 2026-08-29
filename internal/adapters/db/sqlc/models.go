@@ -64,6 +64,11 @@ type MocoResourceVersion struct {
 	Revision int64 `json:"revision"`
 }
 
+type MocoTenantResourceVersion struct {
+	TenantID string `json:"tenant_id"`
+	Revision int64  `json:"revision"`
+}
+
 type Secret struct {
 	Sequence    int64  `json:"sequence"`
 	TenantID    string `json:"tenant_id"`

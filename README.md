@@ -26,6 +26,7 @@ secret lifecycles:
 - creation idempotency scoped to the authenticated principal for at least 24 hours;
 - HMAC-authenticated, expiring cursors over stable insertion snapshots;
 - durable `resourceVersion` watch polling for cross-process reconciliation;
+- tenant-scoped `trv-*` watch polling for least-privilege reconciliation;
 - unauthenticated `/livez` and `/readyz` process probes.
 
 Secret metadata operations never select or return ciphertext or plaintext, and
@@ -221,8 +222,11 @@ The public watch endpoint is a full-resync signal: it reports only a monotonic
 checkpoint and intentionally does not expose event payloads or tombstones. A
 controller or operator should persist its last checkpoint, poll with a bounded
 timeout, and relist the collections it is authorized to manage after a change.
-Because the checkpoint is process-wide, deployments must grant its explicit
-cluster-wide watch permission separately from tenant-scoped resource policies.
+The process-wide `/api/v1/watch` endpoint requires its explicit cluster-wide
+watch permission. A tenant-scoped controller can instead use
+`/api/v1/tenants/{tenantId}/watch`; its checkpoint advances for that tenant's
+tenant, vault, and secret mutations, survives deletion as a tombstone, and
+accepts a literal tenant-domain policy.
 
 ## Development
 

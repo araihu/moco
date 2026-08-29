@@ -1,0 +1,7 @@
+title: TenantResourceVersion
+type: string
+pattern: '^trv-[0-9]+$'
+minLength: 5
+maxLength: 64
+description: Opaque durable resource checkpoint scoped to one tenant.
+example: trv-42

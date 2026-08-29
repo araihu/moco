@@ -102,21 +102,22 @@ func run(logger *slog.Logger) error {
 	}
 	defer security.close()
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
-		Tenants:          tenantService,
-		Vaults:           vaultService,
-		Secrets:          secretService,
-		Readiness:        store,
-		ResourceVersion:  store,
-		Authenticator:    security.authenticator,
-		Authorizer:       security.authorizer,
-		Authorization:    security.policyService,
-		Audit:            auditService,
-		AuditRetention:   auditRetentionService,
-		AuditPathHMACKey: auditPathHMACKey,
-		KeyRotation:      keyRotationService,
-		PrincipalCheck:   security.authenticator.HasPrincipal,
-		ServiceVersion:   version,
-		Logger:           logger,
+		Tenants:               tenantService,
+		Vaults:                vaultService,
+		Secrets:               secretService,
+		Readiness:             store,
+		ResourceVersion:       store,
+		TenantResourceVersion: store,
+		Authenticator:         security.authenticator,
+		Authorizer:            security.authorizer,
+		Authorization:         security.policyService,
+		Audit:                 auditService,
+		AuditRetention:        auditRetentionService,
+		AuditPathHMACKey:      auditPathHMACKey,
+		KeyRotation:           keyRotationService,
+		PrincipalCheck:        security.authenticator.HasPrincipal,
+		ServiceVersion:        version,
+		Logger:                logger,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize HTTP handler: %w", err)

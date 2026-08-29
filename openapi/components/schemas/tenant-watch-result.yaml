@@ -1,0 +1,17 @@
+title: TenantWatchResult
+type: object
+description: Durable tenant-scoped resource-version checkpoint returned by a watch poll.
+additionalProperties: false
+required: [resourceVersion, changed]
+properties:
+  resourceVersion:
+    type: string
+    pattern: '^trv-[0-9]+$'
+    minLength: 5
+    maxLength: 64
+    description: Current durable resource revision for the tenant.
+    example: trv-42
+  changed:
+    type: boolean
+    description: True when the current tenant revision is newer than the supplied checkpoint.
+    example: true

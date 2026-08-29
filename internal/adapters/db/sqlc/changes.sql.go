@@ -21,3 +21,16 @@ func (q *Queries) GetResourceVersion(ctx context.Context) (int64, error) {
 	err := row.Scan(&revision)
 	return revision, err
 }
+
+const getTenantResourceVersion = `-- name: GetTenantResourceVersion :one
+SELECT revision
+FROM moco_tenant_resource_version
+WHERE tenant_id = ?
+`
+
+func (q *Queries) GetTenantResourceVersion(ctx context.Context, tenantID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getTenantResourceVersion, tenantID)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}

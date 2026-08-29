@@ -40,6 +40,10 @@ artifacts; edit the exploded sources instead.
   must list the collections they are authorized to reconcile. The checkpoint is
   process-wide and therefore requires an explicit cluster-wide watch policy;
   tenant-scoped policies cannot use it to observe another tenant.
+- `GET /api/v1/tenants/{tenantId}/watch` exposes a durable `trv-*` long-poll for
+  one tenant. Its checkpoint advances for tenant, vault, and secret mutations,
+  survives deletion as a tombstone, and permits a literal tenant-domain watch
+  policy. A changed result remains only a relist signal, not an event stream.
 - Create requests accept `Idempotency-Key`, and resources expose immutable
   `externalId` values for deterministic discovery and adoption. Supplying an
   external ID makes uniqueness conflict recovery atomic: a `409` includes the

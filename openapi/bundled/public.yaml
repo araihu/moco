@@ -67,6 +67,9 @@ paths:
         endpoint does not expose payloads, ordering, or tombstones. The checkpoint
         is process-wide, so this operation requires an explicit cluster-wide watch
         permission (`domain: "*"`); a tenant-scoped policy cannot authorize it.
+        Deployments that need least privilege can use
+        `GET /api/v1/tenants/{tenantId}/watch`, whose checkpoint is scoped to one
+        tenant and accepts a literal tenant-domain policy.
       tags: [Service]
       parameters:
         - $ref: '#/components/parameters/resource-version'
@@ -89,6 +92,53 @@ paths:
           $ref: '#/components/responses/unauthorized'
         '403':
           $ref: '#/components/responses/forbidden'
+        '429':
+          $ref: '#/components/responses/too-many-requests'
+        '500':
+          $ref: '#/components/responses/internal-error'
+        '503':
+          $ref: '#/components/responses/service-unavailable'
+  /api/v1/tenants/{tenantId}/watch:
+    parameters:
+      - $ref: '#/components/parameters/tenant-id'
+      - $ref: '#/components/parameters/request-id'
+    get:
+      operationId: watchTenantChanges
+      summary: Wait for changes within one tenant
+      description: |
+        Returns a durable resource checkpoint scoped to the tenant. With no
+        `resourceVersion`, the endpoint returns the current checkpoint immediately.
+        With a checkpoint, it returns immediately when that checkpoint is stale or
+        waits up to `timeoutSeconds` for a newer tenant, vault, or secret mutation.
+        A true `changed` result is only a signal to relist the collections the
+        caller is authorized to manage; this endpoint does not expose payloads,
+        ordering, or tombstones. The checkpoint survives tenant deletion as a
+        tombstone, so a watcher that already knows the tenant can observe its final
+        mutation. A tenant that has never existed returns 404.
+      tags: [Service]
+      parameters:
+        - $ref: '#/components/parameters/tenant-resource-version'
+        - $ref: '#/components/parameters/watch-timeout'
+      responses:
+        '200':
+          description: Current tenant checkpoint and whether it advanced.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/cache-control'
+            X-Request-ID:
+              $ref: '#/components/headers/request-id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/tenant-watch-result'
+        '400':
+          $ref: '#/components/responses/bad-request'
+        '401':
+          $ref: '#/components/responses/unauthorized'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '404':
+          $ref: '#/components/responses/not-found'
         '429':
           $ref: '#/components/responses/too-many-requests'
         '500':
@@ -830,7 +880,7 @@ components:
           items:
             type: string
             minLength: 1
-          example: [tenants, vaults, secrets, conditional-writes, resource-watch]
+          example: [tenants, vaults, secrets, conditional-writes, resource-watch, tenant-resource-watch]
     problem:
       title: Problem
       type: object
@@ -941,6 +991,34 @@ components:
           type: boolean
           description: True when the current revision is newer than the supplied checkpoint.
           example: true
+    tenant-watch-result:
+      title: TenantWatchResult
+      type: object
+      description: Durable tenant-scoped resource-version checkpoint returned by a watch poll.
+      additionalProperties: false
+      required:
+        - resourceVersion
+        - changed
+      properties:
+        resourceVersion:
+          type: string
+          pattern: '^trv-[0-9]+$'
+          minLength: 5
+          maxLength: 64
+          description: Current durable resource revision for the tenant.
+          example: trv-42
+        changed:
+          type: boolean
+          description: True when the current tenant revision is newer than the supplied checkpoint.
+          example: true
+    tenant-resource-version:
+      title: TenantResourceVersion
+      type: string
+      pattern: '^trv-[0-9]+$'
+      minLength: 5
+      maxLength: 64
+      description: Opaque durable resource checkpoint scoped to one tenant.
+      example: trv-42
     tenant-list:
       title: TenantList
       type: object
@@ -1499,6 +1577,21 @@ components:
             requestId: 11111111-1111-4111-8111-111111111111
           schema:
             $ref: '#/components/schemas/problem'
+    not-found:
+      description: The requested tenant, vault, or secret does not exist.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/request-id'
+      content:
+        application/problem+json:
+          example:
+            type: https://moco.araihu.com/problems/not-found
+            title: Not Found
+            status: 404
+            code: resource_not_found
+            requestId: 11111111-1111-4111-8111-111111111111
+          schema:
+            $ref: '#/components/schemas/problem'
     cursor-expired:
       description: The cursor snapshot expired; restart listing without a cursor.
       headers:
@@ -1540,21 +1633,6 @@ components:
           $ref: '#/components/headers/etag'
         X-Request-ID:
           $ref: '#/components/headers/request-id'
-    not-found:
-      description: The requested tenant, vault, or secret does not exist.
-      headers:
-        X-Request-ID:
-          $ref: '#/components/headers/request-id'
-      content:
-        application/problem+json:
-          example:
-            type: https://moco.araihu.com/problems/not-found
-            title: Not Found
-            status: 404
-            code: resource_not_found
-            requestId: 11111111-1111-4111-8111-111111111111
-          schema:
-            $ref: '#/components/schemas/problem'
     precondition-failed:
       description: A conditional request header does not match current resource state.
       headers:
@@ -1633,6 +1711,21 @@ components:
         maximum: 25
         default: 0
         example: 15
+    tenant-id:
+      name: tenantId
+      in: path
+      required: true
+      description: Tenant UUID.
+      schema:
+        type: string
+        format: uuid
+    tenant-resource-version:
+      name: resourceVersion
+      in: query
+      required: false
+      description: Opaque durable change checkpoint scoped to this tenant. When supplied, the endpoint reports changed=true after a newer tenant, vault, or secret mutation; use the public collection endpoints to relist resources after a change.
+      schema:
+        $ref: '#/components/schemas/tenant-resource-version'
     limit:
       name: limit
       in: query
@@ -1684,14 +1777,6 @@ components:
         minLength: 8
         maxLength: 128
         pattern: '^[\x21-\x7E]+$'
-    tenant-id:
-      name: tenantId
-      in: path
-      required: true
-      description: Tenant UUID.
-      schema:
-        type: string
-        format: uuid
     if-none-match:
       name: If-None-Match
       in: header

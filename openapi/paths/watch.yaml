@@ -12,6 +12,9 @@ get:
     endpoint does not expose payloads, ordering, or tombstones. The checkpoint
     is process-wide, so this operation requires an explicit cluster-wide watch
     permission (`domain: "*"`); a tenant-scoped policy cannot authorize it.
+    Deployments that need least privilege can use
+    `GET /api/v1/tenants/{tenantId}/watch`, whose checkpoint is scoped to one
+    tenant and accepts a literal tenant-domain policy.
   tags: [Service]
   parameters:
     - $ref: ../components/parameters/resource-version.yaml

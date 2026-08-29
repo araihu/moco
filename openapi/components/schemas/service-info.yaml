@@ -21,4 +21,4 @@ properties:
     items:
       type: string
       minLength: 1
-    example: [tenants, vaults, secrets, conditional-writes, resource-watch]
+    example: [tenants, vaults, secrets, conditional-writes, resource-watch, tenant-resource-watch]

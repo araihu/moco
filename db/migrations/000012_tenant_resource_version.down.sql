@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_secrets_delete;
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_secrets_update;
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_secrets_insert;
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_vaults_delete;
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_vaults_update;
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_vaults_insert;
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_tenants_delete;
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_tenants_update;
+DROP TRIGGER IF EXISTS moco_tenant_resource_version_tenants_insert;
+DROP TABLE IF EXISTS moco_tenant_resource_version;
