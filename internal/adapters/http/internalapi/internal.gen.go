@@ -89,7 +89,7 @@ type AuditEvent struct {
 	// Example: /api/v1/tenants/11111111-1111-4111-8111-111111111111
 	Route string `json:"route"`
 
-	// SecretPathSha256 SHA-256 digest of the decoded logical secret path or list prefix; the plaintext is never persisted.
+	// SecretPathSha256 Keyed HMAC-SHA-256 digest of the decoded logical secret path or list prefix; the plaintext is never persisted and the deployment key is never returned.
 	//
 	// Example: 2bb80d537b1da3e38bd30361aa855686bde0ba53e611d8a8a5e47993629e366f
 	SecretPathSha256 *string `json:"secretPathSha256,omitempty"`

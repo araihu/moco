@@ -16,14 +16,16 @@ operator can resume from a durable checkpoint without an opaque cursor secret.
 
 Protected API attempts are recorded after their HTTP response is produced,
 including authentication, authorization, validation, not-found, and server
-errors. Liveness and readiness probes are excluded. An event contains only:
+errors. Liveness, readiness, and reads from `/internal/v1/audit` are excluded;
+excluding the reader prevents a tailing client from generating self-events. An
+event contains only:
 
 - the durable sequence and UTC occurrence time;
 - the request ID, authenticated principal when available, method, and path
   without a query string;
 - the final status code and a coarse `success`/`failure` outcome; and
-- a SHA-256 digest for a decoded secret `path` or collection `prefix` query
-  value when one was supplied.
+- a keyed HMAC-SHA-256 digest for a decoded secret `path` or collection
+  `prefix` query value when one was supplied.
 
 Request bodies, query strings, bearer credentials, ciphertext, and plaintext
 logical secret paths are never persisted or returned by the endpoint. Audit

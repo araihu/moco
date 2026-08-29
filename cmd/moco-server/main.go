@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -79,24 +80,27 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize audit service: %w", err)
 	}
+	auditPathHMACKey := deriveAuditPathHMACKey(configuration.cursorHMACKey)
+	defer wipeConfigurationKey(auditPathHMACKey)
 	security, err := buildSecurityRuntime(startupContext, configuration, store)
 	if err != nil {
 		return fmt.Errorf("initialize access control: %w", err)
 	}
 	defer security.close()
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
-		Tenants:         tenantService,
-		Vaults:          vaultService,
-		Secrets:         secretService,
-		Readiness:       store,
-		ResourceVersion: store,
-		Authenticator:   security.authenticator,
-		Authorizer:      security.authorizer,
-		Authorization:   security.policyService,
-		Audit:           auditService,
-		PrincipalCheck:  security.authenticator.HasPrincipal,
-		ServiceVersion:  version,
-		Logger:          logger,
+		Tenants:          tenantService,
+		Vaults:           vaultService,
+		Secrets:          secretService,
+		Readiness:        store,
+		ResourceVersion:  store,
+		Authenticator:    security.authenticator,
+		Authorizer:       security.authorizer,
+		Authorization:    security.policyService,
+		Audit:            auditService,
+		AuditPathHMACKey: auditPathHMACKey,
+		PrincipalCheck:   security.authenticator.HasPrincipal,
+		ServiceVersion:   version,
+		Logger:           logger,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize HTTP handler: %w", err)
@@ -151,6 +155,13 @@ func run(logger *slog.Logger) error {
 		}
 		return nil
 	}
+}
+
+func deriveAuditPathHMACKey(cursorHMACKey string) []byte {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("moco/audit-path-hmac/v1\x00"))
+	_, _ = hash.Write([]byte(cursorHMACKey))
+	return hash.Sum(nil)
 }
 
 type configuration struct {

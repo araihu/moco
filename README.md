@@ -87,10 +87,12 @@ restrict the direct deployment origin with network policy as well.
 The internal audit endpoint requires its own explicit `GET` policy for
 `/internal/v1/audit`. It records protected API attempts after the response is
 produced, including status and principal metadata, without request bodies,
-query strings, bearer credentials, or plaintext secret paths. Logical secret
-paths and list prefixes are represented only by SHA-256 digests. A ledger write
-failure is logged and does not change the already-produced response; retention
-and export remain deployment responsibilities.
+query strings, bearer credentials, or plaintext secret paths. The audit read
+itself is excluded so a tailing client cannot create a self-sustaining stream
+of its own polls. Logical secret paths and list prefixes are represented only
+by keyed HMAC-SHA-256 digests. A ledger write failure is logged and does not
+change the already-produced response; retention and export remain deployment
+responsibilities.
 
 Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
 tenant-scoped requests through `domain`; use the literal tenant ID for an

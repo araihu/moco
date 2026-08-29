@@ -3,7 +3,7 @@ parameters:
 get:
   operationId: listAuditEvents
   summary: List request audit events
-  description: Returns request metadata in ascending durable sequence order. Query strings, request bodies, bearer credentials, and plaintext logical secret paths are never returned; secret paths are represented only by SHA-256 digests. The endpoint is internal and requires an explicit authorization policy for its exact path.
+  description: Returns request metadata in ascending durable sequence order. Query strings, request bodies, bearer credentials, and plaintext logical secret paths are never returned; secret paths are represented only by keyed HMAC-SHA-256 digests. Reads from this endpoint are not themselves recorded, so a tailing client cannot create self-events. The endpoint is internal and requires an explicit authorization policy for its exact path.
   tags: [Audit]
   parameters:
     - $ref: ../components/parameters/audit-after-sequence.yaml

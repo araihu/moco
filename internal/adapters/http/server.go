@@ -37,18 +37,19 @@ type ReadinessChecker interface {
 
 // HandlerOptions contains all dependencies and deployment credentials.
 type HandlerOptions struct {
-	Tenants         *services.TenantService
-	Vaults          *services.VaultService
-	Secrets         *services.SecretService
-	Readiness       ReadinessChecker
-	ResourceVersion ports.ResourceVersionReader
-	Authenticator   BearerAuthenticator
-	Authorizer      ports.Authorizer
-	Authorization   *services.AuthorizationPolicyService
-	Audit           *services.AuditService
-	PrincipalCheck  func(string) bool
-	ServiceVersion  string
-	Logger          *slog.Logger
+	Tenants          *services.TenantService
+	Vaults           *services.VaultService
+	Secrets          *services.SecretService
+	Readiness        ReadinessChecker
+	ResourceVersion  ports.ResourceVersionReader
+	Authenticator    BearerAuthenticator
+	Authorizer       ports.Authorizer
+	Authorization    *services.AuthorizationPolicyService
+	Audit            *services.AuditService
+	AuditPathHMACKey []byte
+	PrincipalCheck   func(string) bool
+	ServiceVersion   string
+	Logger           *slog.Logger
 }
 
 // NewHandler composes the generated strict server, authentication, validation,
@@ -68,6 +69,9 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	}
 	if options.Authorizer == nil {
 		return nil, errors.New("authorizer is required")
+	}
+	if options.Audit != nil && len(options.AuditPathHMACKey) < 32 {
+		return nil, errors.New("audit path HMAC key must contain at least 32 bytes")
 	}
 	if options.Readiness == nil {
 		return nil, errors.New("readiness checker is required")
@@ -121,7 +125,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	handler = authorizationMiddleware(options.Authorizer, options.Logger, handler)
 	handler = bearerAuthentication(options.Authenticator, handler)
 	if options.Audit != nil {
-		handler = auditMiddleware(options.Audit, options.Logger, handler)
+		handler = auditMiddleware(options.Audit, options.AuditPathHMACKey, options.Logger, handler)
 	}
 	handler = requestIDs(handler)
 	return handler, nil

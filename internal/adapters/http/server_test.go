@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -255,8 +256,8 @@ func TestAuditLedgerCapturesProtectedRequestWithoutQueryOrPlaintextPath(t *testi
 	response = test.request(t, http.MethodGet, "/internal/v1/audit?afterSequence=1&limit=10", nil, nil, true)
 	assertStatus(t, response, http.StatusOK)
 	continuation := decode[internalapi.AuditEventList](t, response)
-	if len(continuation.Items) != 1 || continuation.Items[0].Route != "/internal/v1/audit" {
-		t.Fatalf("unexpected audit continuation: %#v", continuation)
+	if len(continuation.Items) != 0 || continuation.HasMore || continuation.NextAfterSequence != nil {
+		t.Fatalf("audit reader was unexpectedly recorded: %#v", continuation)
 	}
 }
 
@@ -301,7 +302,8 @@ func TestAuditLedgerRequiresExplicitPermission(t *testing.T) {
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService, Readiness: store,
 		ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer, Audit: auditService,
-		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		AuditPathHMACKey: []byte("test-audit-path-key-with-at-least-32-bytes"),
+		ServiceVersion:   "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -587,8 +589,9 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
 		Readiness: store, ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
-		Audit:          auditService,
-		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Audit:            auditService,
+		AuditPathHMACKey: []byte("test-audit-path-key-with-at-least-32-bytes"),
+		ServiceVersion:   "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatalf("create HTTP handler: %v", err)
@@ -660,6 +663,7 @@ func decode[T any](t *testing.T, response *testResponse) T {
 }
 
 func sha256Hex(value string) string {
-	digest := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(digest[:])
+	mac := hmac.New(sha256.New, []byte("test-audit-path-key-with-at-least-32-bytes"))
+	_, _ = mac.Write([]byte(value))
+	return hex.EncodeToString(mac.Sum(nil))
 }

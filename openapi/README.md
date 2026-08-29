@@ -46,8 +46,9 @@ artifacts; edit the exploded sources instead.
 - `GET /internal/v1/audit` exposes an ascending sequence ledger of request
   metadata. `afterSequence` is exclusive and `nextAfterSequence` continues the
   page; query strings and request payloads are omitted, while logical secret
-  paths are represented only by SHA-256 digests. Audit writes happen after the
-  response and cannot change its status.
+  paths are represented only by keyed HMAC-SHA-256 digests. The audit read
+  itself is excluded to keep tailing from producing self-events. Audit writes
+  happen after the response and cannot change its status.
 - Secret lists and write responses contain metadata only. Secret values appear
   only in the explicit `getSecret` response and are marked `Cache-Control:
   no-store`.

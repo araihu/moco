@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
@@ -92,9 +93,9 @@ func auditEventResponse(event ports.AuditEvent) internalapi.AuditEvent {
 	return response
 }
 
-func auditMiddleware(audit *services.AuditService, logger *slog.Logger, next http.Handler) http.Handler {
+func auditMiddleware(audit *services.AuditService, pathHMACKey []byte, logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isProtectedAPIPath(r.URL.Path) {
+		if !isProtectedAPIPath(r.URL.Path) || r.URL.Path == auditPath {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -105,7 +106,7 @@ func auditMiddleware(audit *services.AuditService, logger *slog.Logger, next htt
 			OccurredAt: time.Now().UTC(), RequestID: requestID(r.Context()),
 			PrincipalID: optionalAuditString(principalID(r.Context())), Method: r.Method,
 			Route: r.URL.Path, StatusCode: statusCode, Outcome: auditOutcome(statusCode),
-			SecretPathSHA256: auditSecretPathDigest(r),
+			SecretPathSHA256: auditSecretPathDigest(r, pathHMACKey),
 		}
 		writeContext, cancel := context.WithTimeout(context.Background(), auditWriteTimeout)
 		defer cancel()
@@ -167,7 +168,7 @@ func optionalAuditString(value string) *string {
 	return &value
 }
 
-func auditSecretPathDigest(r *http.Request) *string {
+func auditSecretPathDigest(r *http.Request, pathHMACKey []byte) *string {
 	var value string
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/secret"), strings.HasSuffix(r.URL.Path, "/secret/metadata"):
@@ -178,7 +179,8 @@ func auditSecretPathDigest(r *http.Request) *string {
 	if value == "" {
 		return nil
 	}
-	digest := sha256.Sum256([]byte(value))
-	encoded := hex.EncodeToString(digest[:])
+	mac := hmac.New(sha256.New, pathHMACKey)
+	_, _ = mac.Write([]byte(value))
+	encoded := hex.EncodeToString(mac.Sum(nil))
 	return &encoded
 }
