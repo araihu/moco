@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -130,6 +131,7 @@ func run(logger *slog.Logger) error {
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		TLSConfig:         configuration.tlsConfig,
 	}
 	shutdownContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
@@ -144,6 +146,10 @@ func run(logger *slog.Logger) error {
 	}
 	go func() {
 		logger.Info("Mocó server listening", "address", configuration.address, "version", version)
+		if server.TLSConfig != nil {
+			serverErrors <- server.ListenAndServeTLS("", "")
+			return
+		}
 		serverErrors <- server.ListenAndServe()
 	}()
 
@@ -182,6 +188,7 @@ func deriveAuditPathHMACKey(cursorHMACKey string) []byte {
 }
 
 type configuration struct {
+	tlsConfig          *tls.Config
 	address            string
 	databasePath       string
 	bearerToken        string
@@ -194,7 +201,12 @@ type configuration struct {
 }
 
 func loadConfiguration() (configuration, error) {
+	transport, err := loadTLSConfiguration(os.Getenv("MOCO_TLS_CERT_FILE"), os.Getenv("MOCO_TLS_KEY_FILE"))
+	if err != nil {
+		return configuration{}, err
+	}
 	config := configuration{
+		tlsConfig:       transport,
 		address:         environmentOrDefault("MOCO_ADDR", ":8080"),
 		databasePath:    environmentOrDefault("MOCO_DB_PATH", "./moco.db"),
 		bearerToken:     os.Getenv("MOCO_BEARER_TOKEN"),

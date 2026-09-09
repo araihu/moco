@@ -28,6 +28,7 @@ secret lifecycles:
 - durable `resourceVersion` watch polling for cross-process reconciliation;
 - tenant-scoped `trv-*` watch polling for least-privilege reconciliation;
 - unauthenticated `/livez` and `/readyz` process probes.
+- optional native HTTPS with locally supplied certificate and private key files.
 
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. External KMS/HSM providers,
@@ -50,8 +51,14 @@ make run
 
 The server listens on `:8080` and stores data in `./moco.db` by default. Override
 those values with `MOCO_ADDR` and `MOCO_DB_PATH`. Startup automatically applies
-embedded migrations. The listener is plain HTTP; terminate TLS in front of it
-before sending bearer credentials across a network.
+embedded migrations. To enable native HTTPS, set both `MOCO_TLS_CERT_FILE` and
+`MOCO_TLS_KEY_FILE` to PEM files and optionally set `MOCO_ADDR=:8443`. TLS 1.2 or
+newer is required. Certificates are loaded and validated as a matching pair
+before opening the database; missing or invalid files abort startup. Restart
+the server after replacing certificates. Probes use HTTPS on the same listener.
+Certificate issuance and renewal are managed by the deployment. When both
+variables are absent the listener uses HTTP, suitable for local development or
+a deployment with TLS termination in front of it.
 
 `MOCO_ENCRYPTION_KEY_ID` is stored with wrapped vault keys and defaults to
 `local-v1`. Keep the exact encryption key with database backups. For a rotation,
