@@ -20,12 +20,12 @@ func TestWorkflowUsesPinnedDaggerAndIsolatedRunners(t *testing.T) {
 		"hostinger-vps-trusted",
 		"dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77",
 		"version: '0.21.11'",
-		"dagger call build-tools entries",
+		"dagger --silent call build-tools entries",
 		"dagger functions",
 		"dagger develop",
 		"git diff --exit-code -- dagger.json dagger/go.mod dagger/go.sum",
 		"docker-image://registry.dagger.io/engine:v0.21.11@sha256:6b557cc8b5fdfee0e2e8c82d451ac922097a1255482143e1b96c0be3ff2a303c",
-		"dagger call check --run-nonce=\"$RUN_NONCE\"",
+		"dagger --silent call check --run-nonce=\"$RUN_NONCE\"",
 	}
 	for _, value := range required {
 		if !strings.Contains(workflow, value) {
@@ -38,10 +38,10 @@ func TestWorkflowUsesPinnedDaggerAndIsolatedRunners(t *testing.T) {
 	if strings.Contains(workflow, "if: runner.environment == 'github-hosted'") {
 		t.Fatal("self-hosted runners must install the same pinned CLI as hosted runners")
 	}
-	if strings.Index(workflow, "dagger call build-tools entries") > strings.Index(workflow, "dagger call check") {
+	if strings.Index(workflow, "dagger --silent call build-tools entries") > strings.Index(workflow, "dagger --silent call check") {
 		t.Fatal("the explicit Go tool build must precede the required checks")
 	}
-	if strings.Index(workflow, "dagger functions") > strings.Index(workflow, "dagger call build-tools entries") {
+	if strings.Index(workflow, "dagger functions") > strings.Index(workflow, "dagger --silent call build-tools entries") {
 		t.Fatal("current-Go bootstrap must pass before tools are built")
 	}
 }

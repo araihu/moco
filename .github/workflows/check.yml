@@ -67,13 +67,14 @@ jobs:
 
       - name: Build Go tools
         shell: bash
-        run: dagger call build-tools entries
+        # Large cold-build progress traces can delay CLI shutdown after success.
+        run: dagger --silent call build-tools entries
 
       - name: Run required checks
         shell: bash
         env:
           RUN_NONCE: ${{ github.run_id }}-${{ github.run_attempt }}
-        run: dagger call check --run-nonce="$RUN_NONCE"
+        run: dagger --silent call check --run-nonce="$RUN_NONCE"
 
   production-profile:
     runs-on: ubuntu-24.04
