@@ -29,6 +29,40 @@ The contracts are intentionally split into small files below `paths/` and
 produce typed Go server boundaries. The bundled files are generated distribution
 artifacts; edit the exploded sources instead.
 
+## CLI metadata overlays
+
+CLI names live in `overlays/cli.public.yaml` and `overlays/cli.internal.yaml`,
+using OpenAPI Overlay 1.0. They select operations by `operationId` and add only
+`x-cli-group` and `x-cli-name`. For example, `createTenant` maps explicitly to
+`tenants create`; HTTP operation IDs, tags, schemas and authorization stay in
+the principal contracts without CLI extensions.
+
+Run `make cli-spec-bundle` to build the CLI distributions, or
+`make cli-spec-check` to build them and exercise the contract-boundary checks.
+Both use the pinned Vacuum tool: bundle the base contract, apply the matching
+overlay with `--fail-on-warnings`, and bundle the enriched document as JSON:
+
+```text
+public.yaml + paths/components -> Vacuum bundle -> bundled/public.yaml
+                                              + overlays/cli.public.yaml
+                                              -> Vacuum apply-overlay
+                                              -> Vacuum bundle
+                                              -> bundled/cli/public.json
+```
+
+The internal contract follows the same pipeline into `bundled/cli/internal.json`.
+Temporary outputs are checked before publication: every operation must have a
+unique CLI command, the base must contain no CLI metadata, and removing CLI
+extensions from the enriched bundle must reproduce the entire base contract.
+Unmatched selectors and changes to authentication, schemas, operation IDs or
+responses fail the build. `make check` includes this gate; the existing Dagger
+generated-file gate covers the CLI bundles too.
+
+Consumers such as [oapi-cli-gen](https://github.com/araihu/oapi-cli-gen) read these
+prepared bundles. They do not apply overlays or infer short command names.
+Server generation continues to consume `bundled/public.yaml` and
+`bundled/internal.yaml`.
+
 ## Automation guarantees
 
 - Collection responses use opaque cursor pagination. A cursor continues a

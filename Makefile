@@ -33,7 +33,7 @@ GOVULNCHECK := $(abspath $(TOOL_BIN_DIR))/govulncheck
 GOLANGCI_LINT := $(abspath $(TOOL_BIN_DIR))/golangci-lint
 endif
 
-.PHONY: workflow-lint spec-lint spec-bundle api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test load-test image image-check monitoring-check
+.PHONY: workflow-lint spec-lint spec-bundle cli-spec-bundle cli-spec-check api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test load-test image image-check monitoring-check
 workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
 
@@ -44,6 +44,20 @@ spec-lint:
 spec-bundle:
 	GOWORK=off $(VACUUM) bundle --composed --no-style --base openapi openapi/public.yaml openapi/bundled/public.yaml
 	GOWORK=off $(VACUUM) bundle --composed --no-style --base openapi openapi/internal.yaml openapi/bundled/internal.yaml
+
+cli-spec-bundle: spec-bundle
+	@set -eu; mkdir -p openapi/bundled/cli; \
+	build_dir=$$(mktemp -d openapi/bundled/cli/.build.XXXXXX); trap 'rm -rf "$$build_dir"' EXIT; \
+	for contract in public internal; do \
+		GOWORK=off $(VACUUM) bundle --composed --no-style --format json "openapi/bundled/$$contract.yaml" "$$build_dir/$$contract.base.json"; \
+		GOWORK=off $(VACUUM) apply-overlay --fail-on-warnings --no-style --stdout "openapi/bundled/$$contract.yaml" "openapi/overlays/cli.$$contract.yaml" > "$$build_dir/$$contract.overlay.yaml"; \
+		GOWORK=off $(VACUUM) bundle --composed --no-style --format json "$$build_dir/$$contract.overlay.yaml" "$$build_dir/$$contract.json"; \
+		python3 -B scripts/check_cli_specs.py --base "$$build_dir/$$contract.base.json" --cli "$$build_dir/$$contract.json"; \
+		mv "$$build_dir/$$contract.json" "openapi/bundled/cli/$$contract.json"; \
+	done
+
+cli-spec-check: cli-spec-bundle
+	python3 -B -m unittest discover -s scripts -p test_cli_specs.py
 
 api-generate: spec-bundle
 	cd tools && GOWORK=off $(OAPI_CODEGEN) --config ../openapi/oapi-codegen.yaml ../openapi/bundled/public.yaml
@@ -109,7 +123,7 @@ monitoring-check:
 	docker start -a "$$fixture"; \
 	test "$$(docker inspect --format '{{.State.ExitCode}}' "$$fixture")" = 0
 
-check: workflow-lint spec-lint api-generate sqlc-generate test lint vulncheck operational-test load-test
+check: workflow-lint spec-lint api-generate cli-spec-check sqlc-generate test lint vulncheck operational-test load-test
 	GOWORK=off $(GO) vet ./...
 	GOWORK=off $(GO) -C dagger/third_party/otel-go vet ./...
 	@if [ -f dagger/dagger.gen.go ]; then GOWORK=off $(GO) -C dagger vet ./...; fi

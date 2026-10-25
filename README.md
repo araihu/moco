@@ -348,6 +348,14 @@ live in `openapi/internal.yaml`. Both are exploded into paths and reusable
 components. Generated bundles under `openapi/bundled/` and generated Go code are
 checked in for deterministic review.
 
+CLI metadata is maintained separately in `openapi/overlays/cli.*.yaml`.
+`make cli-spec-bundle` uses Vacuum to apply these overlays and publish
+`openapi/bundled/cli/public.json` and `internal.json` for
+[oapi-cli-gen](https://github.com/araihu/oapi-cli-gen). These bundles explicitly
+name commands such as `moco tenants create` and `moco secrets get`, while
+preserving the principal API contracts. See the
+[OpenAPI pipeline](openapi/README.md#cli-metadata-overlays).
+
 ## Secret addressing
 
 The secret API uses S3-like logical paths in query parameters. Item
