@@ -63,6 +63,11 @@ prepared bundles. They do not apply overlays or infer short command names.
 Server generation continues to consume `bundled/public.yaml` and
 `bundled/internal.yaml`.
 
+The public bundle generates Moco's own [`../cli/`](../cli/README.md) Go module.
+Run `make cli-generate` to rebuild both the bundle and CLI source. The generator
+is pinned under `cli/tools/`; `make cli-check` validates generated source and
+tests the CLI against the real server. Application acceptance belongs to Moco.
+
 ## Automation guarantees
 
 - Collection responses use opaque cursor pagination. A cursor continues a

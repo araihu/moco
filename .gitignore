@@ -6,3 +6,4 @@ tools/bin/
 /.dagger/
 /dagger/dagger.gen.go
 /dagger/internal/dagger/
+/bin/

@@ -7,6 +7,7 @@ LOAD_ARGS ?=
 LOAD_REPORT ?=
 PROMTOOL_IMAGE := prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
 TOOLS_DIR := $(abspath tools)
+CLI_MAKE_ARGS := $(if $(strip $(TOOL_BIN_DIR)),CLI_TOOL_BIN_DIR=$(abspath $(TOOL_BIN_DIR))/cli)
 TOOL_BIN_DIR ?=
 TOOL_GOMEMLIMIT ?= 2GiB
 TOOL_GOGC ?= 50
@@ -33,7 +34,7 @@ GOVULNCHECK := $(abspath $(TOOL_BIN_DIR))/govulncheck
 GOLANGCI_LINT := $(abspath $(TOOL_BIN_DIR))/golangci-lint
 endif
 
-.PHONY: workflow-lint spec-lint spec-bundle cli-spec-bundle cli-spec-check api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test load-test image image-check monitoring-check
+.PHONY: workflow-lint spec-lint spec-bundle cli-spec-bundle cli-spec-check cli-generate cli-check-generated cli-build cli-check cli-smoke api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test load-test image image-check monitoring-check
 workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
 
@@ -59,6 +60,24 @@ cli-spec-bundle: spec-bundle
 cli-spec-check: cli-spec-bundle
 	python3 -B -m unittest discover -s scripts -p test_cli_specs.py
 
+cli-generate: cli-spec-check
+	$(MAKE) -C cli generate $(CLI_MAKE_ARGS)
+
+cli-check-generated: cli-spec-check
+	$(MAKE) -C cli check-generated $(CLI_MAKE_ARGS)
+
+cli-build:
+	$(MAKE) -C cli build
+
+cli-check: cli-spec-check
+	$(MAKE) -C cli check $(CLI_MAKE_ARGS)
+	$(MAKE) cli-smoke
+
+cli-smoke: cli-build
+	@set -eu; build_dir=$$(mktemp -d); trap 'rm -rf "$$build_dir"' EXIT; \
+	GOWORK=off $(GO) build -mod=readonly -trimpath -o "$$build_dir/moco-server" ./cmd/moco-server; \
+	python3 -B scripts/cli_test.py --server "$$build_dir/moco-server" --cli bin/moco
+
 api-generate: spec-bundle
 	cd tools && GOWORK=off $(OAPI_CODEGEN) --config ../openapi/oapi-codegen.yaml ../openapi/bundled/public.yaml
 	cd tools && GOWORK=off $(OAPI_CODEGEN) --config ../openapi/internal-oapi-codegen.yaml ../openapi/bundled/internal.yaml
@@ -81,6 +100,7 @@ test:
 lint:
 	GOWORK=off $(GOLANGCI_LINT) run --config .golangci.yml ./...
 	cd tools && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
+	cd cli && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
 	@if [ -f dagger/dagger.gen.go ]; then cd dagger && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...; fi
 
 vulncheck:
@@ -123,7 +143,7 @@ monitoring-check:
 	docker start -a "$$fixture"; \
 	test "$$(docker inspect --format '{{.State.ExitCode}}' "$$fixture")" = 0
 
-check: workflow-lint spec-lint api-generate cli-spec-check sqlc-generate test lint vulncheck operational-test load-test
+check: workflow-lint spec-lint api-generate cli-spec-check sqlc-generate test lint vulncheck operational-test load-test cli-check
 	GOWORK=off $(GO) vet ./...
 	GOWORK=off $(GO) -C dagger/third_party/otel-go vet ./...
 	@if [ -f dagger/dagger.gen.go ]; then GOWORK=off $(GO) -C dagger vet ./...; fi

@@ -17,7 +17,7 @@ type Moco struct {
 func New(
 	// Repository source. VCS metadata and local build caches are excluded.
 	// +defaultPath="."
-	// +ignore=[".git", ".dagger", "dagger/internal/dagger", "dagger/dagger.gen.go", "tools/bin"]
+	// +ignore=[".git", ".dagger", "dagger/internal/dagger", "dagger/dagger.gen.go", "tools/bin", "bin"]
 	source *dagger.Directory,
 ) *Moco {
 	return &Moco{Source: source}
@@ -26,7 +26,8 @@ func New(
 // BuildTools compiles all Go-managed tool binaries required by CI.
 func (m *Moco) BuildTools() *dagger.Directory {
 	toolsSource := dag.Directory().
-		WithDirectory("tools", m.Source.Directory("tools"))
+		WithDirectory("tools", m.Source.Directory("tools")).
+		WithDirectory("cli/tools", m.Source.Directory("cli/tools"))
 
 	return dag.GoCi(dagger.GoCiOpts{Source: toolsSource}).
 		Base().
@@ -46,10 +47,16 @@ func (m *Moco) BuildTools() *dagger.Directory {
 		WithEnvVariable("GOMEMLIMIT", "4GiB").
 		WithEnvVariable("GOGC", "100").
 		WithExec([]string{"go", "install", "-p=1", "tool"}).
+		WithWorkdir("/src/cli/tools").
+		WithEnvVariable("GOBIN", "/out/cli").
+		WithEnvVariable("GOMEMLIMIT", "2GiB").
+		WithEnvVariable("GOGC", "50").
+		WithExec([]string{"go", "install", "-p=1", "tool"}).
 		WithExec([]string{
 			"sh", "-euc",
 			"for tool in actionlint vacuum oapi-codegen sqlc migrate-sqlite govulncheck golangci-lint; do test -x \"/out/$tool\"; done",
 		}).
+		WithExec([]string{"sh", "-euc", "test -x /out/cli/oapi-cli-gen && test -x /out/cli/govulncheck"}).
 		Directory("/out")
 }
 
@@ -122,6 +129,7 @@ func (m *Moco) Check(
 func generatedSnapshot(source *dagger.Directory) *dagger.Directory {
 	return dag.Directory().
 		WithDirectory("openapi/bundled", source.Directory("openapi/bundled")).
+		WithDirectory("cli", source.Directory("cli")).
 		WithFile("internal/adapters/http/moco.gen.go", source.File("internal/adapters/http/moco.gen.go")).
 		WithDirectory("internal/adapters/http/internalapi", source.Directory("internal/adapters/http/internalapi")).
 		WithDirectory("internal/adapters/db/sqlc", source.Directory("internal/adapters/db/sqlc"))

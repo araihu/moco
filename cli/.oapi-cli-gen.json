@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "module": "github.com/araihu/moco/cli",
+  "specSHA256": "eb973df25a2871fe95753e2b12cdbcbc944d7d90c85b5b573c9e0f4f6c124b37",
+  "oapiCodegen": "v2.8.1",
+  "files": {
+    "cmd/moco/main.go": "bd27347e2b2a1326ac2514f0fe8f16af353b21ff823b846399fdd8897e0ce744",
+    "internal/api/client.gen.go": "3965f2398018168ecf7adcbd55d6c1d5fa3b2caad0e768e0d90304c265e9d11f",
+    "internal/cli/commands.gen.go": "10b7000010e356c7d2f51bf91958a4c1af4020a979645fc52c74d9607c8dd600",
+    "internal/cliruntime/auth.gen.go": "e589043dd2051b4eec3c76dc0584856ccb9360c890ba8330b883993ff039dfa6",
+    "internal/cliruntime/input.gen.go": "4528e1275074e36e4242e51579574ca5ffdf45c0ada69658d66aec4c0b981c34",
+    "internal/cliruntime/output.gen.go": "c11d0bf4006e10b4219462d94eaa234206fba7756202b8af9c1142411f58d21c",
+    "internal/cliruntime/runtime.gen.go": "d78ef9f13dc0419890d1d4413921558c82ba21dcf3f702d1f7d04ae8ac5b5065"
+  }
+}
