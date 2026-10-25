@@ -19,6 +19,9 @@ env:
 
 jobs:
   check:
+    env:
+      # Override any runner-wide endpoint so bootstrap uses this engine/SDK too.
+      _EXPERIMENTAL_DAGGER_RUNNER_HOST: docker-image://registry.dagger.io/engine:v0.21.11@sha256:6b557cc8b5fdfee0e2e8c82d451ac922097a1255482143e1b96c0be3ff2a303c
     runs-on: >-
       ${{
         github.event_name == 'pull_request' &&
@@ -43,17 +46,24 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Install exact Dagger CLI on GitHub-hosted runner
-        if: runner.environment == 'github-hosted'
+      - name: Install exact Dagger CLI for this job
         uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
         with:
-          version: '0.21.8'
+          version: '0.21.11'
 
       - name: Require exact Dagger CLI
         shell: bash
         run: |
           set -euo pipefail
-          test "$(dagger version | awk 'NR == 1 { print $2 }')" = v0.21.8
+          test "$(dagger version | awk 'NR == 1 { print $2 }')" = v0.21.11
+
+      - name: Validate Go SDK bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          dagger develop
+          git diff --exit-code -- dagger.json dagger/go.mod dagger/go.sum
+          dagger functions
 
       - name: Build Go tools
         shell: bash

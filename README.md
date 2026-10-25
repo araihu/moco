@@ -280,6 +280,11 @@ accepts a literal tenant-domain policy.
 
 Operational drills require Python 3 and OpenSSL on the host. The separate image
 and monitoring gates require Docker Engine and Compose.
+The Linux load/fault suite uses `/proc` and per-child `resource.prlimit`; its
+bounded acceptance profile runs in `make check`. Use `make load-test
+LOAD_REPORT=/tmp/moco-load-fault.json` for a retained JSON report and see the
+[load/fault runbook](docs/operations/load-fault-tests.md) for extended workloads,
+latency/resource budgets and fault guarantees.
 
 Go tool versions are pinned under `tools/`, so global installations are unnecessary.
 `actionlint` and `golangci-lint` have their own nested Go modules to keep their
@@ -316,14 +321,21 @@ make check
 
 `make check` runs generation, tests, `golangci-lint`, `govulncheck` source
 analysis, vulnerability scans of every pinned tool binary, and executable
-restart/recovery/key-rotation drills. CI also exercises the OCI profile and
-monitoring rules in a separate job. CI invokes the
+restart/recovery/key-rotation drills and concurrent load/fault acceptance. CI
+also exercises the OCI profile and monitoring rules in a separate job. CI invokes the
 same gate through Dagger, explicitly builds every Go-managed tool first, and
 rejects stale generated files. The Dagger module reuses immutable shared modules
 from `araihu/dagger`; the CI tool build includes `golangci-lint` from its isolated
 module and uses the same version and source checksums as local builds.
 Dagger sets `GOTOOLCHAIN=auto` so each module can select its required Go version
 when the shared base image provides an older compiler.
+CLI and engine/SDK are pinned together to v0.21.11; every runner installs that
+CLI and CI validates `dagger functions` before building tools. The pinned engine
+endpoint overrides any older runner-wide engine so SDK bootstrap can load the
+current Go module before its own build functions run.
+The local SDK adapter preserves the reviewed dependency manifests after binding
+generation and compiles the module with a digest-pinned Go 1.27.3 image using
+`-mod=readonly`. See [load/fault acceptance and SDK compatibility](docs/operations/load-fault-tests.md).
 
 The Dagger module selects patched OpenTelemetry v1.45.0, Logs v0.21.0, and
 `golang.org/x/net` v0.60.0. Its SDK telemetry bridge needs a local compatibility

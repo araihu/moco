@@ -1,2 +1,3 @@
 [tools]
 go = "latest"
+dagger = "0.21.11"
