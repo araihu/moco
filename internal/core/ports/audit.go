@@ -2,8 +2,31 @@ package ports
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
+
+// TransactionRunner enlists all repositories using the callback context in one
+// transaction. Callback failure (including cancellation or panic) rolls it back.
+// Contexts are scoped to this synchronous callback and must not escape it.
+type TransactionRunner interface {
+	WithinTransaction(context.Context, func(context.Context) error) error
+}
+
+// CommitNotifier defers an external invalidation until the enclosing transaction
+// commits; outside a transaction it invokes the callback immediately.
+type CommitNotifier interface {
+	AfterCommit(context.Context, func(context.Context) error) error
+}
+
+// PostCommitError means persistence committed, but a subsequent notification
+// failed. It must never be interpreted as an uncommitted database mutation.
+type PostCommitError struct{ Err error }
+
+func (e *PostCommitError) Error() string {
+	return fmt.Sprintf("transaction committed but notification failed: %v", e.Err)
+}
+func (e *PostCommitError) Unwrap() error { return e.Err }
 
 // AuditEvent is a durable record of one API request. It intentionally stores
 // no request body, query string, bearer credential, or plaintext secret path.

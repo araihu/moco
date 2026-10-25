@@ -25,14 +25,16 @@ import (
 	"github.com/araihu/moco/internal/adapters/encryption"
 	httpapi "github.com/araihu/moco/internal/adapters/http"
 	internalapi "github.com/araihu/moco/internal/adapters/http/internalapi"
+	"github.com/araihu/moco/internal/core/ports"
 	"github.com/araihu/moco/internal/core/services"
 )
 
 const testBearerToken = "test-bearer-token-with-32-bytes-minimum"
 
 type fixture struct {
-	server *httptest.Server
-	token  string
+	server       *httptest.Server
+	token        string
+	databasePath string
 }
 
 type testResponse struct {
@@ -455,6 +457,7 @@ func TestAuthorizationAdministrationIsProtectedAndAtomic(t *testing.T) {
 		Tenants: tenantService, Vaults: vaultService, Secrets: secretService,
 		Readiness: store, ResourceVersion: store, Authenticator: authenticator, Authorizer: authorizer,
 		Authorization: authorizationService, PrincipalCheck: authenticator.HasPrincipal,
+		Audit: mustAuditService(t, store), AuditPathHMACKey: []byte("test-audit-path-key-with-at-least-32-bytes"),
 		ServiceVersion: "test", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -519,6 +522,15 @@ func TestAuthorizationAdministrationIsProtectedAndAtomic(t *testing.T) {
 	if len(unchanged.RoleBindings) != 1 || len(unchanged.Policies) != 2 {
 		t.Fatalf("invalid replacement changed persisted snapshot: %#v", unchanged)
 	}
+}
+
+func mustAuditService(t *testing.T, repository ports.AuditRepository) *services.AuditService {
+	t.Helper()
+	service, err := services.NewAuditService(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
 }
 
 func TestEncryptionRotationEndpointIsBoundedAndProtected(t *testing.T) {
@@ -656,9 +668,10 @@ func TestTenantCursorExpires(t *testing.T) {
 	}
 }
 
-func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
+func newFixture(t *testing.T, options services.TenantServiceOptions, auditRepositories ...func(*db.Store) ports.AuditRepository) fixture {
 	t.Helper()
-	store, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "moco.db"))
+	databasePath := filepath.Join(t.TempDir(), "moco.db")
+	store, err := db.Open(context.Background(), databasePath)
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
@@ -705,7 +718,11 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	if err != nil {
 		t.Fatalf("create test authorizer: %v", err)
 	}
-	auditService, err := services.NewAuditService(store)
+	var auditRepository ports.AuditRepository = store
+	if len(auditRepositories) != 0 {
+		auditRepository = auditRepositories[0](store)
+	}
+	auditService, err := services.NewAuditService(auditRepository)
 	if err != nil {
 		t.Fatalf("create audit service: %v", err)
 	}
@@ -731,7 +748,7 @@ func newFixture(t *testing.T, options services.TenantServiceOptions) fixture {
 	}
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return fixture{server: server, token: testBearerToken}
+	return fixture{server: server, token: testBearerToken, databasePath: databasePath}
 }
 
 func (f fixture) createTenant(t *testing.T, name string) httpapi.Tenant {

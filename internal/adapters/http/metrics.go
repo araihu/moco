@@ -39,7 +39,7 @@ func NewMetrics() *Metrics {
 }
 
 // AuditResult latches a persistence failure until restart and operator review.
-// The response may already be delivered; this is detection, not transactional auditing.
+// Mutations fail closed; a read/denied-attempt event can still fail after its response.
 func (m *Metrics) AuditResult(err error) {
 	if err != nil {
 		m.auditFailures.Add(1)

@@ -129,8 +129,13 @@ public API. Keep that permission on a dedicated deployment principal and
 restrict the direct deployment origin with network policy as well.
 
 The internal audit endpoint requires its own explicit `GET` policy for
-`/internal/v1/audit`. It records protected API attempts after the response is
-produced, including status and principal metadata, without request bodies,
+`/internal/v1/audit`. Successful API mutations and their audit event commit in
+one SQLite transaction, before success headers or a body are sent. An audit or
+commit failure rolls back the complete mutation and returns `503`, including
+tenant/vault cascades, idempotency, watch revisions, new vault keys, policy
+changes, retention and each rotation batch. Startup epoch/policy initialization
+also commits with a `STARTUP /internal/startup` event from `system:startup`.
+The ledger includes status and principal metadata, without request bodies,
 query strings, bearer credentials, or plaintext secret paths. The audit read
 itself is excluded so a tailing client cannot create a self-sustaining stream
 of its own polls. Logical secret paths and list prefixes are represented only
@@ -138,9 +143,13 @@ by keyed HMAC-SHA-256 digests derived with a domain-separated label from
 `MOCO_CURSOR_HMAC_KEY`. Rotating that key intentionally breaks correlation of
 path digests across key eras. The ledger is for security observability, not a
 reconciliation/change feed; controllers and operators use `/api/v1/watch` plus
-relist for convergence. A ledger write failure is logged and does not change
-the already-produced response; retention and export remain deployment
-responsibilities.
+relist for convergence. Read-only requests and rejected attempts keep independent
+post-response audit logging; a failure there cannot undo a delivered read. Audit
+failures are logged and monitored. Policy invalidations publish only after the
+audited commit; a notification failure keeps the committed success response and
+is logged, while SQLite polling allows reload convergence. See the
+[transactional audit runbook](docs/operations/transactional-audit.md) for guarantees,
+failure behavior and operational tests.
 
 The internal audit-retention endpoint requires its own explicit `POST` policy
 for `/internal/v1/audit/retention`. For deletion, supply a cutoff at least one

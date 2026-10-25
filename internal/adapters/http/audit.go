@@ -99,15 +99,15 @@ func auditMiddleware(audit *services.AuditService, pathHMACKey []byte, logger *s
 			next.ServeHTTP(w, r)
 			return
 		}
+		attempt := &auditAttempt{}
+		r = r.WithContext(context.WithValue(r.Context(), auditAttemptContextKey, attempt))
 		recorder := &auditResponseWriter{ResponseWriter: w}
 		next.ServeHTTP(recorder, r)
-		statusCode := recorder.statusCode()
-		event := ports.AuditEvent{
-			OccurredAt: time.Now().UTC(), RequestID: requestID(r.Context()),
-			PrincipalID: optionalAuditString(principalID(r.Context())), Method: r.Method,
-			Route: r.URL.Path, StatusCode: statusCode, Outcome: auditOutcome(statusCode),
-			SecretPathSHA256: auditSecretPathDigest(r, pathHMACKey),
+		if attempt.handled {
+			return
 		}
+		statusCode := recorder.statusCode()
+		event := requestAuditEvent(r, statusCode, pathHMACKey)
 		writeContext, cancel := context.WithTimeout(context.Background(), auditWriteTimeout)
 		defer cancel()
 		_, err := audit.Record(writeContext, event)
@@ -120,6 +120,13 @@ func auditMiddleware(audit *services.AuditService, pathHMACKey []byte, logger *s
 			logger.ErrorContext(r.Context(), "audit event failed", "requestId", event.RequestID, "error", err)
 		}
 	})
+}
+
+func requestAuditEvent(r *http.Request, status int, pathKey []byte) ports.AuditEvent {
+	return ports.AuditEvent{
+		OccurredAt: time.Now().UTC(), RequestID: requestID(r.Context()), PrincipalID: optionalAuditString(principalID(r.Context())),
+		Method: r.Method, Route: r.URL.Path, StatusCode: status, Outcome: auditOutcome(status), SecretPathSHA256: auditSecretPathDigest(r, pathKey),
+	}
 }
 
 type auditResponseWriter struct {

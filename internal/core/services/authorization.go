@@ -51,8 +51,14 @@ func (s *AuthorizationPolicyService) ReplaceAuthorization(ctx context.Context, s
 	if err := s.repository.ReplaceAuthorization(ctx, state); err != nil {
 		return fmt.Errorf("replace authorization snapshot: %w", err)
 	}
-	if err := s.bus.Publish(ctx); err != nil {
-		return fmt.Errorf("publish authorization change: %w", err)
+	publish := func(ctx context.Context) error {
+		if err := s.bus.Publish(ctx); err != nil {
+			return fmt.Errorf("publish authorization change: %w", err)
+		}
+		return nil
 	}
-	return nil
+	if notifier, ok := s.repository.(ports.CommitNotifier); ok {
+		return notifier.AfterCommit(ctx, publish)
+	}
+	return publish(ctx)
 }

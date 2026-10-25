@@ -195,13 +195,15 @@ overdue backups, low disks, API errors and API p95 latency. Scrape errors also
 detect server/host loss. Monitor the mirror mount, host clock, certificate
 expiry and host health in your infrastructure monitoring.
 
-Audit events are persisted **after the response**. This profile does not claim
-transactional audit durability: an audit failure may follow an acknowledged
-write. It logs the incident, increments metrics and latches readiness false
-until restart. Preserve logs, investigate storage, reconcile the audit gap and
-then restart; do not blindly restart away this signal. A database write and its
-audit event are not one transaction. Transactional audit requirements need a
-separate application change.
+Successful mutations and their audit event now commit in **one SQLite
+transaction before the response**. Audit/commit failure rolls back the complete
+request and returns `503`; no success ETag, Location or body is released. Startup
+epoch/policy initialization is audited too. The production server logs incidents,
+increments metrics and latches readiness false until restart. Investigate storage
+before restarting. Read-only and rejected-attempt audit remains post-response;
+failures there can leave a read/attempt gap, but cannot produce an unaudited
+business mutation. See [transactional-audit.md](transactional-audit.md) for the
+precise scope, client retry rules and fault-injection tests.
 
 ## Upgrade, interruption and recovery drills
 

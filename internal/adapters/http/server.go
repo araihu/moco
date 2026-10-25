@@ -129,6 +129,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	internalapi.HandlerFromMux(internalStrict, mux)
 
 	handler := strictResourceJSON(api)
+	handler = transactionalAudit(options.Audit, options.AuditPathHMACKey, options.Logger, options.AuditResult, handler)
 	handler = authorizationMiddleware(options.Authorizer, options.Logger, handler)
 	handler = bearerAuthentication(options.Authenticator, handler)
 	if options.Audit != nil {

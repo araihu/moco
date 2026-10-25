@@ -17,6 +17,7 @@ import shutil
 import signal
 import socket
 import ssl
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -157,6 +158,24 @@ class Drill:
                 return False  # The persisted policy reload is asynchronous.
         until(reader_ready)
         self.api(paths[1], token=self.reader, expected=403)
+        # Reject only the test mutation's audit insert, after its business SQL.
+        # This must roll back the value, ETag and policy revision before HTTP 503.
+        with sqlite3.connect(self.root / "data/moco.db") as database:
+            database.execute("CREATE TRIGGER reject_request_audit BEFORE INSERT ON audit_events WHEN NEW.request_id='operational-audit-fault' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END")
+        self.api(paths[0], token=self.admin, method="PUT", body={"value": base64.b64encode(b"must-never-commit").decode()},
+                 headers={"X-Request-ID": "operational-audit-fault"}, expected=503)
+        current, current_headers = self.api(paths[0], token=self.reader)
+        assert current["value"] == value and current_headers["ETag"] == etags[0]
+        policy_before, policy_headers = self.api("/internal/v1/authorization", admin=True, token=self.admin)
+        self.api("/internal/v1/authorization", admin=True, token=self.admin, method="PUT",
+                 headers={"X-Request-ID": "operational-audit-fault", "If-Match": policy_headers["ETag"]},
+                 body={"roleBindings": policy_before["roleBindings"], "policies": policy_before["policies"]}, expected=503)
+        policy_after, after_headers = self.api("/internal/v1/authorization", admin=True, token=self.admin)
+        assert policy_after == policy_before and after_headers["ETag"] == policy_headers["ETag"]
+        self.api("/readyz", expected=503)
+        with sqlite3.connect(self.root / "data/moco.db") as database:
+            assert database.execute("SELECT COUNT(*) FROM audit_events WHERE request_id='operational-audit-fault'").fetchone()[0] == 0
+            database.execute("DROP TRIGGER reject_request_audit")
         self.stop()
         self.start()
         assert self.api(paths[0], token=self.reader)[1]["ETag"] == etags[0]
@@ -194,6 +213,17 @@ class Drill:
         metrics, _ = self.api("/metrics", admin=True, token=(self.credentials / "metrics-token").read_text())
         assert "moco_backup_last_attempt_success 0" in metrics and "moco_backup_failures_total 1" in metrics
         self.stop()
+        # Startup writes (epoch/policy bootstrap) must also be audited atomically.
+        with sqlite3.connect(self.root / "data/moco.db") as database:
+            database.execute("CREATE TRIGGER reject_startup_audit BEFORE INSERT ON audit_events WHEN NEW.method='STARTUP' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END")
+        try:
+            self.start(epoch=3)
+            raise AssertionError("startup accepted an unaudited epoch change")
+        except AssertionError as error:
+            assert "server exited during startup" in str(error)
+        with sqlite3.connect(self.root / "data/moco.db") as database:
+            assert database.execute("SELECT epoch FROM encryption_key_state").fetchone()[0] == 2
+            database.execute("DROP TRIGGER reject_startup_audit")
         # An incorrect historical root key must abort startup before serving.
         original = (self.credentials / "keyring.json").read_text()
         wrong = json.loads(original)
@@ -225,7 +255,7 @@ class Drill:
         self.backup()
         self.stop()
         assert "operational-recovery-secret" not in (self.root / "server.log").read_text()
-        print(json.dumps({"operational": "passed", "installRestartCrashRecoveryRotation": True, "snapshotBoundary": manifest["createdAt"],
+        print(json.dumps({"operational": "passed", "transactionalAuditFaultRollback": True, "installRestartCrashRecoveryRotation": True, "snapshotBoundary": manifest["createdAt"],
                           "recoverySeconds": round(time.monotonic()-recovery_started, 3), "totalSeconds": round(time.monotonic()-started, 3)}), flush=True)
 
     def close(self):

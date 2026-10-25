@@ -13,7 +13,7 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: A request audit event could not be persisted
-          description: A response may already have been delivered. Preserve logs, investigate storage and reconcile the audit gap before restarting.
+          description: Mutation failures roll back before success is sent. Read or denied-attempt responses may already have been delivered. Investigate storage and any read audit gap before restarting.
       - alert: MocoBackupFailed
         expr: moco_backup_status_readable{job="moco"} == 0 or moco_backup_last_attempt_success{job="moco"} == 0
         for: 1m

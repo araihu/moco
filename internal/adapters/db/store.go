@@ -59,7 +59,9 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("ping SQLite database: %w", err)
 	}
-	return &Store{database: database, queries: sqlc.New(database)}, nil
+	store := &Store{database: database}
+	store.queries = sqlc.New(contextDatabase{store: store})
+	return store, nil
 }
 
 // OpenReadOnly opens an existing SQLite file without applying migrations or
@@ -80,7 +82,9 @@ func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("ping SQLite database read-only: %w", err)
 	}
-	return &Store{database: database, queries: sqlc.New(database)}, nil
+	store := &Store{database: database}
+	store.queries = sqlc.New(contextDatabase{store: store})
+	return store, nil
 }
 
 // Close releases the underlying database connection.
@@ -129,12 +133,12 @@ func (s *Store) EnsureEncryptionKeyState(ctx context.Context, activeRootKeyID st
 	if !validEncryptionKeyIdentifier(activeRootKeyID) || epoch < 1 {
 		return ports.EncryptionKeyState{}, ports.ErrEncryptionKeyStateConflict
 	}
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return ports.EncryptionKeyState{}, fmt.Errorf("begin encryption key state check: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	current, err := queries.GetEncryptionKeyState(ctx)
 	if err != nil {
 		return ports.EncryptionKeyState{}, fmt.Errorf("get encryption key state: %w", err)
@@ -278,12 +282,12 @@ func (s *Store) LoadAuthorization(ctx context.Context) (ports.AuthorizationState
 // signal is deliberately owned by the application service so callers can
 // guarantee commit-before-publish ordering.
 func (s *Store) ReplaceAuthorization(ctx context.Context, state ports.AuthorizationState) error {
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin authorization replacement: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	advanced, err := queries.AdvanceAuthorizationPolicyState(ctx, state.Revision)
 	if err != nil {
 		return fmt.Errorf("advance authorization policy state: %w", err)
@@ -340,12 +344,12 @@ func (s *Store) CreateTenant(ctx context.Context, command ports.CreateTenantComm
 			return ports.CreateTenantResult{}, fmt.Errorf("expire idempotency records: %w", err)
 		}
 	}
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return ports.CreateTenantResult{}, fmt.Errorf("begin tenant creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 
 	if command.IdempotencyKey != "" {
 		result, claimed, err := claimIdempotency(ctx, queries, command)
@@ -473,12 +477,12 @@ func (s *Store) UpdateTenant(ctx context.Context, id string, input domain.Tenant
 
 // DeleteTenant removes one tenant, optionally at one exact revision.
 func (s *Store) DeleteTenant(ctx context.Context, id string, expectedRevision *int64, cascade bool) error {
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tenant deletion: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	var rows int64
 	switch {
 	case cascade && expectedRevision == nil:
@@ -530,12 +534,12 @@ func (s *Store) CreateVault(ctx context.Context, command ports.CreateVaultComman
 			return ports.CreateVaultResult{}, fmt.Errorf("expire idempotency records: %w", err)
 		}
 	}
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return ports.CreateVaultResult{}, fmt.Errorf("begin vault creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	if command.IdempotencyKey != "" {
 		result, claimed, err := claimVaultIdempotency(ctx, queries, command)
 		if err != nil {
@@ -600,12 +604,12 @@ func (s *Store) MaxVaultSequence(ctx context.Context, tenantID string) (int64, e
 
 // ListVaults returns one ordered page within a tenant snapshot.
 func (s *Store) ListVaults(ctx context.Context, query ports.ListVaultsQuery) ([]domain.Vault, error) {
-	tx, err := s.database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.beginTransaction(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("begin vault list: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	bound, err := queries.VaultSnapshotUpperBound(ctx, query.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("verify vault tenant: %w", err)
@@ -674,12 +678,12 @@ func (s *Store) UpdateVault(ctx context.Context, tenantID, id string, input doma
 
 // DeleteVault removes one vault, refusing implicit deletion of child secrets.
 func (s *Store) DeleteVault(ctx context.Context, tenantID, id string, expectedRevision *int64, cascade bool) error {
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin vault deletion: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	var rows int64
 	switch {
 	case cascade && expectedRevision == nil:
@@ -743,12 +747,12 @@ func (s *Store) GetVaultKey(ctx context.Context, tenantID, vaultID string) (port
 
 // CreateVaultKey atomically installs a wrapped key or returns the concurrent winner.
 func (s *Store) CreateVaultKey(ctx context.Context, tenantID, vaultID string, candidate ports.WrappedVaultKey, expectedState *ports.EncryptionKeyState) (ports.WrappedVaultKey, error) {
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return ports.WrappedVaultKey{}, fmt.Errorf("begin vault key creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	if _, err := queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: tenantID, ID: vaultID}); errors.Is(err, sql.ErrNoRows) {
 		return ports.WrappedVaultKey{}, ports.ErrVaultNotFound
 	} else if err != nil {
@@ -820,12 +824,12 @@ func (s *Store) ListVaultKeys(ctx context.Context, query ports.ListVaultKeysQuer
 // leaves the key creation timestamp untouched so this maintenance operation
 // does not alter API resource history or watch checkpoints.
 func (s *Store) ReplaceVaultKey(ctx context.Context, command ports.ReplaceVaultKeyCommand) (bool, error) {
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin vault key replacement: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	var rows int64
 	if command.ExpectedKeyState == nil {
 		rows, err = queries.ReplaceVaultKeyIfCurrent(ctx, sqlc.ReplaceVaultKeyIfCurrentParams{
@@ -892,12 +896,12 @@ func verifyExpectedEncryptionKeyState(ctx context.Context, queries *sqlc.Queries
 
 // PutSecret atomically creates, replaces, or replays one encrypted value.
 func (s *Store) PutSecret(ctx context.Context, command ports.PutSecretCommand) (ports.PutSecretResult, error) {
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return ports.PutSecretResult{}, fmt.Errorf("begin secret write: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	if _, err := queries.GetVault(ctx, sqlc.GetVaultParams{TenantID: command.TenantID, ID: command.VaultID}); errors.Is(err, sql.ErrNoRows) {
 		return ports.PutSecretResult{}, ports.ErrVaultNotFound
 	} else if err != nil {
@@ -990,12 +994,12 @@ func (s *Store) MaxSecretSequence(ctx context.Context, tenantID, vaultID string)
 
 // ListSecretMetadata returns a metadata-only page within one vault snapshot.
 func (s *Store) ListSecretMetadata(ctx context.Context, query ports.ListSecretsQuery) ([]domain.SecretMetadata, error) {
-	tx, err := s.database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.beginTransaction(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("begin secret list: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	bound, err := queries.SecretSnapshotUpperBound(ctx, sqlc.SecretSnapshotUpperBoundParams{TenantID: query.TenantID, VaultID: query.VaultID})
 	if err != nil {
 		return nil, fmt.Errorf("verify secret vault: %w", err)
@@ -1027,12 +1031,12 @@ func (s *Store) ListSecretMetadata(ctx context.Context, query ports.ListSecretsQ
 
 // DeleteSecret removes one path, optionally at one exact version.
 func (s *Store) DeleteSecret(ctx context.Context, command ports.DeleteSecretCommand) error {
-	tx, err := s.database.BeginTx(ctx, nil)
+	tx, err := s.beginTransaction(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin secret deletion: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	queries := s.queries.WithTx(tx)
+	queries := s.queries.WithTx(tx.Tx)
 	var rows int64
 	if command.ExpectedVersion == nil && command.ExpectedKeyState == nil {
 		rows, err = queries.DeleteSecret(ctx, sqlc.DeleteSecretParams{TenantID: command.TenantID, VaultID: command.VaultID, Path: command.Path})
@@ -1479,6 +1483,7 @@ func sqliteDSNWithMode(path string, readOnly bool) (string, error) {
 		query.Set("mode", "ro")
 	} else {
 		query.Add("_pragma", "journal_mode(WAL)")
+		query.Add("_pragma", "synchronous(FULL)")
 	}
 	value.RawQuery = query.Encode()
 	return value.String(), nil

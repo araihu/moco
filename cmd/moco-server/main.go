@@ -21,8 +21,10 @@ import (
 	"github.com/araihu/moco/internal/adapters/db"
 	"github.com/araihu/moco/internal/adapters/encryption"
 	httpapi "github.com/araihu/moco/internal/adapters/http"
+	"github.com/araihu/moco/internal/core/ports"
 	"github.com/araihu/moco/internal/core/services"
 	"github.com/araihu/moco/internal/operations"
+	"github.com/google/uuid"
 )
 
 var version = "dev"
@@ -77,8 +79,25 @@ func run(logger *slog.Logger) error {
 			return fmt.Errorf("verify production vault keys: %w", err)
 		}
 	}
-	if _, err := store.EnsureEncryptionKeyState(startupContext, configuration.encryptionKeyID, configuration.encryptionKeyEpoch); err != nil {
-		return fmt.Errorf("initialize encryption key state: %w", err)
+	auditService, err := services.NewAuditService(store)
+	if err != nil {
+		return fmt.Errorf("initialize audit service: %w", err)
+	}
+	var security securityRuntime
+	defer func() { security.close() }()
+	if err := auditService.RecordMutation(startupContext, func(ctx context.Context) (ports.AuditEvent, error) {
+		if _, err := store.EnsureEncryptionKeyState(ctx, configuration.encryptionKeyID, configuration.encryptionKeyEpoch); err != nil {
+			return ports.AuditEvent{}, fmt.Errorf("initialize encryption key state: %w", err)
+		}
+		var err error
+		security, err = buildSecurityRuntime(ctx, configuration, store)
+		if err != nil {
+			return ports.AuditEvent{}, fmt.Errorf("initialize access control: %w", err)
+		}
+		principal := "system:startup"
+		return ports.AuditEvent{OccurredAt: time.Now().UTC(), RequestID: uuid.NewString(), PrincipalID: &principal, Method: "STARTUP", Route: "/internal/startup", StatusCode: 200, Outcome: "success"}, nil
+	}); err != nil {
+		return fmt.Errorf("commit audited startup: %w", err)
 	}
 	if configuration.profile == "production" {
 		readiness = productionReadiness{store: store, config: configuration, health: metrics.AuditHealthy}
@@ -106,10 +125,6 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize secret service: %w", err)
 	}
-	auditService, err := services.NewAuditService(store)
-	if err != nil {
-		return fmt.Errorf("initialize audit service: %w", err)
-	}
 	auditRetentionService, err := services.NewAuditRetentionService(store)
 	if err != nil {
 		return fmt.Errorf("initialize audit retention service: %w", err)
@@ -120,11 +135,6 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("initialize vault key rotation service: %w", err)
 	}
-	security, err := buildSecurityRuntime(startupContext, configuration, store)
-	if err != nil {
-		return fmt.Errorf("initialize access control: %w", err)
-	}
-	defer security.close()
 	handler, err := httpapi.NewHandler(httpapi.HandlerOptions{
 		Tenants:               tenantService,
 		Vaults:                vaultService,

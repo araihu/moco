@@ -18,6 +18,8 @@ const (
 	auditOutcomeFailure = "failure"
 )
 
+var ErrTransactionalAuditUnavailable = errors.New("transactional audit repository is required for mutations")
+
 // AuditEventPage is one bounded page of the append-only audit ledger.
 type AuditEventPage struct {
 	Items             []ports.AuditEvent
@@ -51,6 +53,24 @@ func (s *AuditService) Record(ctx context.Context, event ports.AuditEvent) (port
 		return ports.AuditEvent{}, fmt.Errorf("append audit event: %w", err)
 	}
 	return recorded, nil
+}
+
+// RecordMutation commits a complete business operation and its success audit
+// event together. Every repository call must use the supplied context. It is
+// impossible to fall back to an unaudited write on a nontransactional repository.
+func (s *AuditService) RecordMutation(ctx context.Context, mutation func(context.Context) (ports.AuditEvent, error)) error {
+	runner, ok := s.repository.(ports.TransactionRunner)
+	if !ok {
+		return ErrTransactionalAuditUnavailable
+	}
+	return runner.WithinTransaction(ctx, func(transactionContext context.Context) error {
+		event, err := mutation(transactionContext)
+		if err != nil {
+			return err
+		}
+		_, err = s.Record(transactionContext, event)
+		return err
+	})
 }
 
 // List returns events strictly after afterSequence, in sequence order.
