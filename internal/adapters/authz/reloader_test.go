@@ -41,7 +41,10 @@ func TestPolicyReloaderLoadsAndAppliesCommittedSnapshots(t *testing.T) {
 	waitForDecision(t, authorizer, "/api/v1/tenants", true)
 	cancel()
 	select {
-	case <-runErrors:
+	case err := <-runErrors:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("reloader stopped with an unexpected error: %v", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("reloader did not stop after context cancellation")
 	}
@@ -108,7 +111,10 @@ func TestPolicyReloaderPollsRevisionWithoutBusSignal(t *testing.T) {
 	waitForDecision(t, authorizer, "/api/v1/tenants", true)
 	cancel()
 	select {
-	case <-runErrors:
+	case err := <-runErrors:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("polling reloader stopped with an unexpected error: %v", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("polling reloader did not stop after context cancellation")
 	}

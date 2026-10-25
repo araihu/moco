@@ -5,9 +5,9 @@ TOOL_BIN_DIR ?=
 TOOL_GOMEMLIMIT ?= 2GiB
 TOOL_GOGC ?= 50
 TOOL_BUILD_ENV := GOWORK=off GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=$(TOOL_GOMEMLIMIT) GOGC=$(TOOL_GOGC)
-GOLANGCI_LINT_VERSION := 2.13.2
-GOLANGCI_LINT_INSTALLER_COMMIT := 27774aaf853a4fd21f1dd5e69439459dc1b26e68
-GOLANGCI_LINT := tools/bin/golangci-lint-v$(GOLANGCI_LINT_VERSION)/golangci-lint
+LINT_BUILD_GOMEMLIMIT ?= 4GiB
+LINT_BUILD_GOGC ?= 100
+LINT_BUILD_ENV := GOWORK=off GOFLAGS='-mod=readonly -p=1' GOMAXPROCS=1 GOMEMLIMIT=$(LINT_BUILD_GOMEMLIMIT) GOGC=$(LINT_BUILD_GOGC)
 
 ifeq ($(strip $(TOOL_BIN_DIR)),)
 VACUUM := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n vacuum)
@@ -16,6 +16,7 @@ OAPI_CODEGEN := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n oapi-codegen)
 SQLC := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n sqlc)
 MIGRATE_SQLITE := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n migrate-sqlite)
 GOVULNCHECK := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n govulncheck)
+GOLANGCI_LINT := $$($(LINT_BUILD_ENV) $(GO) -C $(TOOLS_DIR)/golangci-lint tool -n golangci-lint)
 else
 VACUUM := $(abspath $(TOOL_BIN_DIR))/vacuum
 ACTIONLINT := $(abspath $(TOOL_BIN_DIR))/actionlint
@@ -23,6 +24,7 @@ OAPI_CODEGEN := $(abspath $(TOOL_BIN_DIR))/oapi-codegen
 SQLC := $(abspath $(TOOL_BIN_DIR))/sqlc
 MIGRATE_SQLITE := $(abspath $(TOOL_BIN_DIR))/migrate-sqlite
 GOVULNCHECK := $(abspath $(TOOL_BIN_DIR))/govulncheck
+GOLANGCI_LINT := $(abspath $(TOOL_BIN_DIR))/golangci-lint
 endif
 
 .PHONY: workflow-lint spec-lint spec-bundle api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check
@@ -54,20 +56,17 @@ test:
 	GOWORK=off $(GO) test ./... -count=1
 	GOWORK=off $(GO) -C tools test ./... -count=1
 	@if [ -f dagger/dagger.gen.go ]; then GOWORK=off $(GO) -C dagger test ./... -count=1; fi
+	GOWORK=off $(GO) -C dagger/third_party/otel-go test ./... -count=1
 
-$(GOLANGCI_LINT):
-	@set -eu; installer="$$(mktemp)"; trap 'rm -f "$$installer"' EXIT; \
-	curl --fail --silent --show-error --location --output "$$installer" https://raw.githubusercontent.com/golangci/golangci-lint/$(GOLANGCI_LINT_INSTALLER_COMMIT)/install.sh; \
-	sh "$$installer" -b $(dir $@) v$(GOLANGCI_LINT_VERSION)
+lint:
+	GOWORK=off $(GOLANGCI_LINT) run --config .golangci.yml ./...
+	cd tools && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
+	@if [ -f dagger/dagger.gen.go ]; then cd dagger && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...; fi
 
-lint: $(GOLANGCI_LINT)
-	GOWORK=off $(abspath $(GOLANGCI_LINT)) run --config .golangci.yml ./...
-	cd tools && GOWORK=off $(abspath $(GOLANGCI_LINT)) run --config ../.golangci.yml ./...
-	@if [ -f dagger/dagger.gen.go ]; then cd dagger && GOWORK=off $(abspath $(GOLANGCI_LINT)) run --config ../.golangci.yml ./...; fi
-
-vulncheck: $(GOLANGCI_LINT)
+vulncheck:
 	GOWORK=off $(GOVULNCHECK) -test ./...
 	GOWORK=off $(GOVULNCHECK) -C tools -test ./...
+	GOWORK=off $(GOVULNCHECK) -C dagger/third_party/otel-go -test ./...
 	@set -eu; scanner="$(GOVULNCHECK)"; \
 	if [ -f dagger/dagger.gen.go ]; then GOWORK=off "$$scanner" -C dagger -test ./...; fi; \
 	for tool in vacuum oapi-codegen sqlc migrate-sqlite govulncheck; do \
@@ -76,11 +75,12 @@ vulncheck: $(GOLANGCI_LINT)
 	done; \
 	if [ -n "$(TOOL_BIN_DIR)" ]; then actionlint="$(abspath $(TOOL_BIN_DIR))/actionlint"; else actionlint="$$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR)/actionlint tool -n actionlint)"; fi; \
 	GOWORK=off "$$scanner" -mode=binary "$$actionlint"; \
-	GOWORK=off "$$scanner" -mode=binary "$(abspath $(GOLANGCI_LINT))"
+	GOWORK=off "$$scanner" -mode=binary "$(GOLANGCI_LINT)"
 
 run:
 	GOWORK=off $(GO) run ./cmd/moco-server
 
 check: workflow-lint spec-lint api-generate sqlc-generate test lint vulncheck
 	GOWORK=off $(GO) vet ./...
+	GOWORK=off $(GO) -C dagger/third_party/otel-go vet ./...
 	@if [ -f dagger/dagger.gen.go ]; then GOWORK=off $(GO) -C dagger vet ./...; fi

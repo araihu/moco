@@ -2,6 +2,7 @@ package ci_test
 
 import (
 	"encoding/json"
+	"go/version"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -64,22 +65,39 @@ func TestSharedDaggerDependenciesUseImmutablePins(t *testing.T) {
 	}
 }
 
-func TestGolangCILintRemainsPrecompiled(t *testing.T) {
+func TestGolangCILintUsesIsolatedModule(t *testing.T) {
 	toolsModule := readRepoFile(t, "tools/go.mod")
 	if strings.Contains(toolsModule, "github.com/golangci/golangci-lint") {
-		t.Fatal("golangci-lint must not be compiled through the tools Go module")
+		t.Fatal("golangci-lint must keep its dependency graph separate from Vacuum")
 	}
+	linterModule := readRepoFile(t, "tools/golangci-lint/go.mod")
+	if !strings.Contains(linterModule, "tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint") {
+		t.Fatal("golangci-lint must be pinned as a Go-managed tool")
+	}
+}
 
-	daggerModule := readRepoFile(t, "dagger/main.go")
-	for _, value := range []string{
-		"golangCILintVersion",
-		"golangCILintInstallerChecksum",
-		"VerifiedDownload().Fetch",
+func TestToolchainFloorsMatchApplication(t *testing.T) {
+	application := repoGoVersion(t, "go.mod")
+	for _, module := range []string{
+		"tools/go.mod", "tools/actionlint/go.mod", "tools/golangci-lint/go.mod",
+		"dagger/go.mod", "dagger/third_party/otel-go/go.mod",
 	} {
-		if !strings.Contains(daggerModule, value) {
-			t.Fatalf("Dagger module is missing precompiled golangci-lint contract %q", value)
+		if toolchain := repoGoVersion(t, module); version.Compare(toolchain, application) < 0 {
+			t.Errorf("%s permits %s, below application floor %s", module, toolchain, application)
 		}
 	}
+}
+
+func repoGoVersion(t *testing.T, name string) string {
+	t.Helper()
+	for line := range strings.SplitSeq(readRepoFile(t, name), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "go" && version.IsValid("go"+fields[1]) {
+			return "go" + fields[1]
+		}
+	}
+	t.Fatalf("%s is missing a valid Go version directive", name)
+	return ""
 }
 
 func TestDaggerModuleScanUsesRepositoryDependencyPolicy(t *testing.T) {

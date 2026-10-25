@@ -95,6 +95,13 @@ func (e *HKDFAESGCMEnvelope) Destroy() {
 // ActiveRootKeyID returns the key ID used for new vault keys and rewraps.
 func (e *HKDFAESGCMEnvelope) ActiveRootKeyID() string { return e.rootKeyID }
 
+// VerifyVaultKey authenticates a stored data key without returning its plaintext.
+func (e *HKDFAESGCMEnvelope) VerifyVaultKey(tenantID, vaultID string, key ports.WrappedVaultKey) error {
+	dataKey, err := e.unwrapVaultKey(key, tenantID, vaultID)
+	wipe(dataKey)
+	return err
+}
+
 // NewVaultKey generates and wraps one independent vault data key.
 func (e *HKDFAESGCMEnvelope) NewVaultKey(tenantID, vaultID string, createdAt time.Time) (ports.WrappedVaultKey, error) {
 	dataKey := make([]byte, encryptionKeyBytes)
@@ -116,6 +123,7 @@ func (e *HKDFAESGCMEnvelope) NewVaultKey(tenantID, vaultID string, createdAt tim
 	if err != nil {
 		return ports.WrappedVaultKey{}, fmt.Errorf("derive vault wrapping key: %w", err)
 	}
+	// #nosec G407 -- a fresh random 256-bit salt derives a key used for exactly one encryption.
 	wrapped := wrappingCipher.Seal(nil, singleUseNonce[:], dataKey, aad)
 	return ports.WrappedVaultKey{
 		RootKeyID:  e.rootKeyID,
@@ -148,6 +156,7 @@ func (e *HKDFAESGCMEnvelope) RewrapVaultKey(tenantID, vaultID string, key ports.
 	if err != nil {
 		return ports.WrappedVaultKey{}, fmt.Errorf("derive rotated vault wrapping key: %w", err)
 	}
+	// #nosec G407 -- a fresh random 256-bit salt derives a key used for exactly one encryption.
 	wrapped := wrappingCipher.Seal(nil, singleUseNonce[:], dataKey, aad)
 	return ports.WrappedVaultKey{RootKeyID: e.rootKeyID, Salt: salt, Ciphertext: wrapped, CreatedAt: key.CreatedAt}, nil
 }
@@ -174,6 +183,7 @@ func (e *HKDFAESGCMEnvelope) EncryptSecret(
 	if err != nil {
 		return ports.EncryptedSecretValue{}, fmt.Errorf("derive secret encryption key: %w", err)
 	}
+	// #nosec G407 -- a fresh random 256-bit salt derives a key used for exactly one encryption.
 	ciphertext := valueCipher.Seal(nil, singleUseNonce[:], plaintext, aad)
 	return ports.EncryptedSecretValue{Salt: salt, Ciphertext: ciphertext}, nil
 }

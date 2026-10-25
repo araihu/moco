@@ -7,12 +7,7 @@ import (
 	"dagger/moco/internal/dagger"
 )
 
-const (
-	golangCILintVersion           = "2.13.2"
-	golangCILintInstallerURL      = "https://raw.githubusercontent.com/golangci/golangci-lint/27774aaf853a4fd21f1dd5e69439459dc1b26e68/install.sh"
-	golangCILintInstallerChecksum = "1022ddb4d87ed252350ed03fc9677e250a4ae95cc6bcd4658c2a20a8a23d390f"
-	toolsBinPath                  = "/opt/moco-tools/bin"
-)
+const toolsBinPath = "/opt/moco-tools/bin"
 
 // Moco provides the repository CI contract.
 type Moco struct {
@@ -37,6 +32,7 @@ func (m *Moco) BuildTools() *dagger.Directory {
 		Base().
 		WithWorkdir("/src/tools").
 		WithEnvVariable("GOWORK", "off").
+		WithEnvVariable("GOTOOLCHAIN", "auto").
 		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithEnvVariable("GOBIN", "/out").
 		WithEnvVariable("GOMAXPROCS", "1").
@@ -46,9 +42,13 @@ func (m *Moco) BuildTools() *dagger.Directory {
 		WithExec([]string{"go", "install", "-p=1", "tool"}).
 		WithWorkdir("/src/tools/actionlint").
 		WithExec([]string{"go", "install", "-p=1", "tool"}).
+		WithWorkdir("/src/tools/golangci-lint").
+		WithEnvVariable("GOMEMLIMIT", "4GiB").
+		WithEnvVariable("GOGC", "100").
+		WithExec([]string{"go", "install", "-p=1", "tool"}).
 		WithExec([]string{
 			"sh", "-euc",
-			"for tool in actionlint vacuum oapi-codegen sqlc migrate-sqlite govulncheck; do test -x \"/out/$tool\"; done",
+			"for tool in actionlint vacuum oapi-codegen sqlc migrate-sqlite govulncheck golangci-lint; do test -x \"/out/$tool\"; done",
 		}).
 		Directory("/out")
 }
@@ -65,12 +65,13 @@ func (m *Moco) Check(
 		runNonce = "local"
 	}
 
-	ciTools := m.ciTools()
+	ciTools := m.BuildTools()
 
 	checked := dag.GoCi(dagger.GoCiOpts{Source: m.Source}).
 		Base().
 		WithWorkdir("/src").
 		WithEnvVariable("GOWORK", "off").
+		WithEnvVariable("GOTOOLCHAIN", "auto").
 		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithDirectory(toolsBinPath, ciTools).
 		WithEnvVariable("MOCO_RUN_NONCE", runNonce).
@@ -86,12 +87,14 @@ func (m *Moco) Check(
 
 	moduleSource := dag.CurrentModule().Source().
 		WithFile("go.mod", m.Source.File("dagger/go.mod")).
-		WithFile("go.sum", m.Source.File("dagger/go.sum"))
+		WithFile("go.sum", m.Source.File("dagger/go.sum")).
+		WithDirectory("third_party/otel-go", m.Source.Directory("dagger/third_party/otel-go"))
 
 	moduleChecked := dag.GoCi(dagger.GoCiOpts{Source: moduleSource}).
 		Base().
 		WithWorkdir("/src").
 		WithEnvVariable("GOWORK", "off").
+		WithEnvVariable("GOTOOLCHAIN", "auto").
 		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithDirectory(toolsBinPath, ciTools).
 		WithFile("/config/.golangci.yml", m.Source.File(".golangci.yml")).
@@ -114,25 +117,6 @@ func (m *Moco) Check(
 	}
 
 	return "ok", nil
-}
-
-func (m *Moco) ciTools() *dagger.Directory {
-	installer := dag.VerifiedDownload().Fetch(
-		golangCILintInstallerURL,
-		golangCILintInstallerChecksum,
-		dagger.VerifiedDownloadFetchOpts{Name: "golangci-lint-install.sh"},
-	)
-
-	return dag.GoCi(dagger.GoCiOpts{Source: dag.Directory()}).
-		Base().
-		WithDirectory(toolsBinPath, m.BuildTools()).
-		WithFile("/tmp/golangci-lint-install.sh", installer).
-		WithExec([]string{
-			"sh", "/tmp/golangci-lint-install.sh",
-			"-b", toolsBinPath,
-			"v" + golangCILintVersion,
-		}).
-		Directory(toolsBinPath)
 }
 
 func generatedSnapshot(source *dagger.Directory) *dagger.Directory {

@@ -19,7 +19,8 @@ secret lifecycles:
 - restricted internal `GET`/`PUT /internal/v1/authorization` snapshot administration;
 - restricted internal `GET /internal/v1/audit` request metadata ledger;
 - restricted internal `POST /internal/v1/audit/retention` bounded local ledger retention;
-- local read-only `moco-audit-export` JSONL snapshots for offline backup/export;
+- local read-only `moco-audit-export` JSONL audit snapshots;
+- complete live SQLite recovery archives with checksums, required key-era IDs, and verified offline restoration;
 - restricted internal `POST /internal/v1/encryption/rotation` bounded root-key rewrap batches;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
@@ -38,8 +39,8 @@ Treat this as a development slice, not a production secret store.
 
 ## Run locally
 
-Go 1.27.0 is required. Supply independent high-entropy credentials plus one
-base64-encoded 256-bit encryption key:
+Go 1.27.3 or newer is required; mise selects the latest stable Go. Supply
+independent high-entropy credentials plus one base64-encoded 256-bit encryption key:
 
 ```bash
 export MOCO_BEARER_TOKEN="$(openssl rand -hex 32)"
@@ -179,6 +180,31 @@ not a public resource API; restrict it to a dedicated operator principal and
 deployment origin. Key material is supplied through startup configuration, not
 through HTTP.
 
+For full disaster recovery, `moco-backup` captures all database state, including
+tenants, vaults, encrypted secrets, policies, audit, idempotency, and watch/key
+epochs. It uses SQLite `VACUUM INTO` against a read-only source, so committed WAL
+transactions are included without migrating or stopping the source. The output
+is one atomically published `0600` tar archive containing a database snapshot
+and checksum manifest; existing outputs are never overwritten.
+
+```bash
+go run ./cmd/moco-backup create --database ./moco.db --output ./moco-backup.tar
+go run ./cmd/moco-backup verify --backup ./moco-backup.tar
+go run ./cmd/moco-backup verify --backup ./moco-backup.tar --keyring /secure/recovery-keys.json
+go run ./cmd/moco-backup restore --backup ./moco-backup.tar \
+  --database ./recovered.db --keyring /secure/recovery-keys.json
+```
+
+Restoration requires a new offline destination and authenticates every vault
+key and secret before publishing the database. The private keyring file uses
+the same JSON format as `MOCO_ENCRYPTION_KEYS`. Root keys, bearer credentials,
+cursor HMAC keys, auth configuration files, and TLS private keys are deliberately
+kept in separate deployment custody. Retain historical root keys for as long as
+any retained backup needs them, even after live rotation is complete. Archives
+also contain readable metadata and must be protected as sensitive files. See
+[the recovery runbook](docs/operations/backup-restore.md) for rotation, deployment
+configuration, version compatibility, and client resynchronization.
+
 Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
 tenant-scoped requests through `domain`; use the literal tenant ID for an
 isolated tenant. A secret-operation policy can additionally set
@@ -210,11 +236,13 @@ nor SQL. Infrastructure under `internal/adapters` implements those ports, and
 
 - `openapi/`: exploded public/internal contracts, lint rules, and bundles.
 - `cmd/moco-audit-export/`: read-only offline JSONL audit exporter.
+- `cmd/moco-backup/`: full database backup, verification, and offline restore.
 - `tools/`: isolated Go module with pinned development binaries.
 - `db/migrations/`: SQLite migrations embedded into the server.
 - `db/queries/`: sqlc query sources.
 - `internal/core/`: domain types, ports, and application services.
 - `internal/adapters/db/`: SQLite/sqlc repository.
+- `internal/adapters/backup/`: streaming recovery archives and atomic publication.
 - `internal/adapters/encryption/`: HKDF-SHA-256/AES-256-GCM envelope encryption adapter.
 - `internal/adapters/http/`: generated strict contract and handwritten adapter, including audit capture.
 - `internal/adapters/authn/`: bearer token keyring keyed by SHA-256 digests.
@@ -238,20 +266,25 @@ accepts a literal tenant-domain policy.
 ## Development
 
 Tool versions are pinned under `tools/`, so global installations are unnecessary.
-`actionlint` has its own nested Go module to keep its YAML dependency isolated
-from Vacuum:
+`actionlint` and `golangci-lint` have their own nested Go modules to keep their
+dependency graphs isolated from Vacuum:
 
 - actionlint `v1.7.12`
 - Vacuum `v0.30.1`
 - oapi-codegen `v2.8.0`
 - sqlc `v1.31.1`
 - govulncheck `v1.7.0`
+- golangci-lint `v2.15.0`
 - Casbin `v2.135.0`
 - a SQLite-only migration runner backed by golang-migrate `v4.19.1`
 
-golangci-lint `v2.13.2` is the exception: `make lint` downloads its official
-precompiled release into the ignored `tools/bin/` directory. The upstream
-installer is pinned by commit, and it verifies the release archive checksum.
+Every tool is compiled from its pinned Go module using the selected Go
+toolchain. Module checksums authenticate the sources, and the Go build cache
+keeps repeat runs fast while rebuilding when the toolchain changes. This also
+updates the standard library embedded in `golangci-lint`, rather than retaining
+the older runtime in an upstream precompiled release. Its first build uses one
+worker with a 4 GiB memory target; override `LINT_BUILD_GOMEMLIMIT` and
+`LINT_BUILD_GOGC` when necessary. Other tools retain their 2 GiB memory target.
 
 ```bash
 make workflow-lint
@@ -269,8 +302,16 @@ make check
 analysis, and vulnerability scans of every pinned tool binary. CI invokes the
 same gate through Dagger, explicitly builds every Go-managed tool first, and
 rejects stale generated files. The Dagger module reuses immutable shared modules
-from `araihu/dagger`; `golangci-lint` remains a checksum-verified precompiled
-binary.
+from `araihu/dagger`; the CI tool build includes `golangci-lint` from its isolated
+module and uses the same version and source checksums as local builds.
+Dagger sets `GOTOOLCHAIN=auto` so each module can select its required Go version
+when the shared base image provides an older compiler.
+
+The Dagger module selects patched OpenTelemetry v1.45.0, Logs v0.21.0, and
+`golang.org/x/net` v0.60.0. Its SDK telemetry bridge needs a local compatibility
+adaptation for the unified Logs value API; source provenance, license, tests,
+and removal conditions are documented in
+[`dagger/third_party/otel-go/README.moco.md`](dagger/third_party/otel-go/README.moco.md).
 
 Public API source lives in `openapi/public.yaml`; probe-only internal operations
 live in `openapi/internal.yaml`. Both are exploded into paths and reusable
