@@ -2,8 +2,10 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"time"
 )
 
 func loadTLSConfiguration(certFile, keyFile string) (*tls.Config, error) {
@@ -16,6 +18,14 @@ func loadTLSConfiguration(certFile, keyFile string) (*tls.Config, error) {
 	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("load server TLS certificate: %w", err)
+	}
+	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
+	if err != nil {
+		return nil, fmt.Errorf("parse server TLS certificate: %w", err)
+	}
+	now := time.Now()
+	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+		return nil, errors.New("server TLS certificate is expired or not yet valid")
 	}
 	return &tls.Config{
 		MinVersion:   tls.VersionTLS12,

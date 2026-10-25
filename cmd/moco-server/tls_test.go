@@ -92,6 +92,22 @@ func TestTLSConfiguration(t *testing.T) {
 		_ = response.Body.Close()
 		t.Fatal("server accepted obsolete TLS")
 	}
+	for _, notAfter := range []time.Time{time.Now().Add(-time.Hour), time.Now().Add(2 * time.Hour)} {
+		template.NotBefore, template.NotAfter = notAfter.Add(-30*time.Minute), notAfter
+		invalidDER, err := x509.CreateCertificate(rand.Reader, template, template, publicKey, privateKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: invalidDER}), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadTLSConfiguration(certPath, keyPath); err == nil {
+			t.Fatal("certificate outside its validity interval accepted")
+		}
+	}
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(keyPath, []byte("invalid PEM"), 0o600); err != nil {
 		t.Fatal(err)
 	}

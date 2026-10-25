@@ -21,6 +21,7 @@ secret lifecycles:
 - restricted internal `POST /internal/v1/audit/retention` bounded local ledger retention;
 - local read-only `moco-audit-export` JSONL audit snapshots;
 - complete live SQLite recovery archives with checksums, required key-era IDs, and verified offline restoration;
+- a single-instance SQLite production profile with an OCI image, native TLS, private administration/metrics, verified automatic mirrored backups, retention and operational recovery drills;
 - restricted internal `POST /internal/v1/encryption/rotation` bounded root-key rewrap batches;
 - SQLite persistence with embedded startup migrations and sqlc-generated queries;
 - strong ETags for conditional reads and compare-and-swap mutations;
@@ -33,9 +34,12 @@ secret lifecycles:
 
 Secret metadata operations never select or return ciphertext or plaintext, and
 secret-bearing reads use `Cache-Control: no-store`. External KMS/HSM providers,
-cross-host policy transport when instances do not share the SQLite store, audit
-shipping, and production deployment hardening are not implemented yet.
-Treat this as a development slice, not a production secret store.
+and cross-host policy transport when instances do not share the SQLite store
+are not implemented. Audit shipping and independent deployment custody remain
+operator responsibilities.
+Use the [single-instance production runbook](docs/operations/production-sqlite.md)
+to deploy and validate this profile. Complete target-environment recovery,
+notification, capacity and security checks before storing production secrets.
 
 ## Run locally
 
@@ -265,7 +269,10 @@ accepts a literal tenant-domain policy.
 
 ## Development
 
-Tool versions are pinned under `tools/`, so global installations are unnecessary.
+Operational drills require Python 3 and OpenSSL on the host. The separate image
+and monitoring gates require Docker Engine and Compose.
+
+Go tool versions are pinned under `tools/`, so global installations are unnecessary.
 `actionlint` and `golangci-lint` have their own nested Go modules to keep their
 dependency graphs isolated from Vacuum:
 
@@ -299,7 +306,9 @@ make check
 ```
 
 `make check` runs generation, tests, `golangci-lint`, `govulncheck` source
-analysis, and vulnerability scans of every pinned tool binary. CI invokes the
+analysis, vulnerability scans of every pinned tool binary, and executable
+restart/recovery/key-rotation drills. CI also exercises the OCI profile and
+monitoring rules in a separate job. CI invokes the
 same gate through Dagger, explicitly builds every Go-managed tool first, and
 rejects stale generated files. The Dagger module reuses immutable shared modules
 from `araihu/dagger`; the CI tool build includes `golangci-lint` from its isolated

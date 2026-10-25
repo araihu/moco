@@ -53,6 +53,7 @@ type HandlerOptions struct {
 	PrincipalCheck        func(string) bool
 	ServiceVersion        string
 	Logger                *slog.Logger
+	AuditResult           func(error)
 }
 
 // NewHandler composes the generated strict server, authentication, validation,
@@ -131,7 +132,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	handler = authorizationMiddleware(options.Authorizer, options.Logger, handler)
 	handler = bearerAuthentication(options.Authenticator, handler)
 	if options.Audit != nil {
-		handler = auditMiddleware(options.Audit, options.AuditPathHMACKey, options.Logger, handler)
+		handler = auditMiddleware(options.Audit, options.AuditPathHMACKey, options.Logger, handler, options.AuditResult)
 	}
 	handler = requestIDs(handler)
 	return handler, nil

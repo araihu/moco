@@ -1,0 +1,57 @@
+groups:
+  - name: moco
+    rules:
+      - alert: MocoUnavailable
+        expr: up{job="moco"} == 0 or moco_ready{job="moco"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Mocó is unavailable or not ready
+          description: Check the server logs, SQLite disk and encryption epoch. An audit persistence incident requires operator review before restart.
+      - alert: MocoAuditPersistenceFailure
+        expr: moco_audit_failures_total{job="moco"} > 0
+        labels: {severity: critical}
+        annotations:
+          summary: A request audit event could not be persisted
+          description: A response may already have been delivered. Preserve logs, investigate storage and reconcile the audit gap before restarting.
+      - alert: MocoBackupFailed
+        expr: moco_backup_status_readable{job="moco"} == 0 or moco_backup_last_attempt_success{job="moco"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Backup status is missing or the last verified mirror job failed
+          description: Inspect the backup container logs, destination mount and key custody. Existing backups are retained on failure.
+      - alert: MocoBackupOverdue
+        expr: time() - moco_backup_snapshot_timestamp_seconds{job="moco"} > 1800
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: The last verified off-host snapshot is older than 30 minutes
+          description: Recovery freshness uses the snapshot start, not copy completion. Run and verify a backup before reopening writes if the agreed RPO is breached.
+      - alert: MocoDiskLow
+        expr: moco_data_disk_available_bytes{job="moco"} / moco_data_disk_size_bytes{job="moco"} < 0.15 or moco_data_disk_available_bytes{job="moco"} < 1073741824
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: SQLite storage is running low
+          description: Allow for WAL growth and backup staging. Expand storage or reclaim unrelated files without deleting SQLite sidecars.
+      - alert: MocoHighErrorRate
+        expr: sum(rate(moco_http_requests_total{job="moco",route="api",status=~"5.."}[5m])) / clamp_min(sum(rate(moco_http_requests_total{job="moco",route="api"}[5m])), 0.001) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: More than 5 percent of API requests fail
+      - alert: MocoBackupDiskLow
+        expr: moco_backup_disk_available_bytes{job="moco"} / moco_backup_disk_size_bytes{job="moco"} < 0.15 or moco_backup_disk_available_bytes{job="moco"} < 1073741824
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: Local backup storage is running low
+          description: Allow space for archives, a complete snapshot, cryptographic verification and retained backups. Failed jobs do not prune old archives.
+      - alert: MocoHighLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(moco_http_request_duration_seconds_bucket{job="moco",route="api"}[5m]))) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: API p95 latency exceeds one second
+          description: Long-poll watch requests use a separate route label and do not affect this threshold.

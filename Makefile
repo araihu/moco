@@ -1,5 +1,9 @@
 GO := go
 DB_PATH ?= ./moco.db
+IMAGE ?= moco:$(shell git rev-parse --short HEAD)
+IMAGE_VERSION ?= $(shell git describe --always --dirty)
+DOCKER_BUILD_FLAGS ?=
+PROMTOOL_IMAGE := prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
 TOOLS_DIR := $(abspath tools)
 TOOL_BIN_DIR ?=
 TOOL_GOMEMLIMIT ?= 2GiB
@@ -27,7 +31,7 @@ GOVULNCHECK := $(abspath $(TOOL_BIN_DIR))/govulncheck
 GOLANGCI_LINT := $(abspath $(TOOL_BIN_DIR))/golangci-lint
 endif
 
-.PHONY: workflow-lint spec-lint spec-bundle api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check
+.PHONY: workflow-lint spec-lint spec-bundle api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test image image-check monitoring-check
 workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
 
@@ -80,7 +84,25 @@ vulncheck:
 run:
 	GOWORK=off $(GO) run ./cmd/moco-server
 
-check: workflow-lint spec-lint api-generate sqlc-generate test lint vulncheck
+operational-test:
+	@set -eu; build_dir=$$(mktemp -d); trap 'rm -rf "$$build_dir"' EXIT; \
+	GOWORK=off $(GO) build -trimpath -o "$$build_dir/" ./cmd/...; \
+	python3 scripts/production_test.py --bin-dir "$$build_dir"
+
+image:
+	docker build $(DOCKER_BUILD_FLAGS) --build-arg VERSION="$(IMAGE_VERSION)" --build-arg REVISION="$$(git rev-parse HEAD)" -t "$(IMAGE)" .
+
+image-check: image
+	python3 scripts/production_test.py --image "$(IMAGE)"
+
+monitoring-check:
+	@set -eu; fixture=$$(docker create --entrypoint /bin/promtool "$(PROMTOOL_IMAGE)" test rules /fixture/alerts.test.yaml); \
+	trap 'docker rm -f "$$fixture" >/dev/null' EXIT; \
+	docker cp deploy/production/. "$$fixture:/fixture"; \
+	docker start -a "$$fixture"; \
+	test "$$(docker inspect --format '{{.State.ExitCode}}' "$$fixture")" = 0
+
+check: workflow-lint spec-lint api-generate sqlc-generate test lint vulncheck operational-test
 	GOWORK=off $(GO) vet ./...
 	GOWORK=off $(GO) -C dagger/third_party/otel-go vet ./...
 	@if [ -f dagger/dagger.gen.go ]; then GOWORK=off $(GO) -C dagger vet ./...; fi

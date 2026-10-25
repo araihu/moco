@@ -1,0 +1,25 @@
+rule_files:
+  - alerts.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="moco",instance="localhost:9443"}'
+        values: '1 0 0'
+      - series: 'moco_backup_snapshot_timestamp_seconds{job="moco",instance="localhost:9443"}'
+        values: '0+0x33'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MocoUnavailable
+        exp_alerts:
+          - exp_labels: {job: moco, instance: "localhost:9443", severity: critical}
+            exp_annotations:
+              summary: Mocó is unavailable or not ready
+              description: Check the server logs, SQLite disk and encryption epoch. An audit persistence incident requires operator review before restart.
+      - eval_time: 32m
+        alertname: MocoBackupOverdue
+        exp_alerts:
+          - exp_labels: {job: moco, instance: "localhost:9443", severity: critical}
+            exp_annotations:
+              summary: The last verified off-host snapshot is older than 30 minutes
+              description: Recovery freshness uses the snapshot start, not copy completion. Run and verify a backup before reopening writes if the agreed RPO is breached.

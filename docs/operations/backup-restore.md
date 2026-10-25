@@ -1,5 +1,9 @@
 # Full backup and recovery
 
+The [single-instance production profile](production-sqlite.md) adds scheduling,
+cryptographically verified mirrored copies, retention, health/alerts and executable
+operational drills to the backup primitives documented here.
+
 `moco-backup` provides a full database snapshot, structural verification, and
 verified restoration to a new offline path. Build it from the same Mocó release
 used by the server:

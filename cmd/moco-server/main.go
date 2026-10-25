@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"syscall"
@@ -21,11 +22,13 @@ import (
 	"github.com/araihu/moco/internal/adapters/encryption"
 	httpapi "github.com/araihu/moco/internal/adapters/http"
 	"github.com/araihu/moco/internal/core/services"
+	"github.com/araihu/moco/internal/operations"
 )
 
 var version = "dev"
 
 func main() {
+	syscall.Umask(0o077)
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	if err := run(logger); err != nil {
 		logger.Error("server stopped", "error", err)
@@ -37,6 +40,13 @@ func run(logger *slog.Logger) error {
 	configuration, err := loadConfiguration()
 	if err != nil {
 		return err
+	}
+	if configuration.profile == "production" {
+		lock, err := operations.Lock(filepath.Join(filepath.Dir(configuration.databasePath), ".moco-server.lock"))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = lock.Close() }()
 	}
 	envelope, err := encryption.NewHKDFAESGCMEnvelope(encryption.HKDFAESGCMOptions{
 		RootKeyID: configuration.encryptionKeyID,
@@ -60,8 +70,21 @@ func run(logger *slog.Logger) error {
 			logger.Error("close database", "error", err)
 		}
 	}()
+	metrics := httpapi.NewMetrics()
+	var readiness httpapi.ReadinessChecker = store
+	if configuration.profile == "production" {
+		if err := store.VerifyVaultKeys(startupContext, envelope); err != nil {
+			return fmt.Errorf("verify production vault keys: %w", err)
+		}
+	}
 	if _, err := store.EnsureEncryptionKeyState(startupContext, configuration.encryptionKeyID, configuration.encryptionKeyEpoch); err != nil {
 		return fmt.Errorf("initialize encryption key state: %w", err)
+	}
+	if configuration.profile == "production" {
+		readiness = productionReadiness{store: store, config: configuration, health: metrics.AuditHealthy}
+		if err := readiness.Ping(startupContext); err != nil {
+			return err
+		}
 	}
 
 	tenantService, err := services.NewTenantService(store, services.TenantServiceOptions{
@@ -106,7 +129,7 @@ func run(logger *slog.Logger) error {
 		Tenants:               tenantService,
 		Vaults:                vaultService,
 		Secrets:               secretService,
-		Readiness:             store,
+		Readiness:             readiness,
 		ResourceVersion:       store,
 		TenantResourceVersion: store,
 		Authenticator:         security.authenticator,
@@ -119,23 +142,51 @@ func run(logger *slog.Logger) error {
 		PrincipalCheck:        security.authenticator.HasPrincipal,
 		ServiceVersion:        version,
 		Logger:                logger,
+		AuditResult:           metrics.AuditResult,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize HTTP handler: %w", err)
 	}
 
+	handler = metrics.Wrap(handler, logger)
+	publicHandler := handler
+	if configuration.adminAddress != "" {
+		publicHandler = httpapi.PublicListener(handler)
+	}
 	server := &http.Server{
 		Addr:              configuration.address,
-		Handler:           handler,
+		Handler:           publicHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		TLSConfig:         configuration.tlsConfig,
+		MaxHeaderBytes:    32 << 10,
 	}
+	servers := []*http.Server{server}
+	if configuration.adminAddress != "" {
+		admin := &http.Server{
+			Addr: configuration.adminAddress,
+			Handler: httpapi.MetricsAuthentication(configuration.metricsToken, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				metrics.ServePrometheus(w, version)
+				operations.ServeDeploymentMetrics(w, r, configuration.databasePath, configuration.backupStatusPath, readiness)
+			}), handler),
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
+			MaxHeaderBytes: 32 << 10,
+		}
+		if configuration.tlsConfig != nil {
+			admin.TLSConfig = configuration.tlsConfig.Clone()
+		}
+		servers = append(servers, admin)
+	}
+	defer func() {
+		for _, listener := range servers {
+			_ = listener.Close()
+		}
+	}()
 	shutdownContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	serverErrors := make(chan error, 1)
+	serverErrors := make(chan error, len(servers))
 	policyErrors := make(chan error, 1)
 	if security.reloader != nil {
 		go func() {
@@ -144,14 +195,16 @@ func run(logger *slog.Logger) error {
 			}
 		}()
 	}
-	go func() {
-		logger.Info("Mocó server listening", "address", configuration.address, "version", version)
-		if server.TLSConfig != nil {
-			serverErrors <- server.ListenAndServeTLS("", "")
-			return
-		}
-		serverErrors <- server.ListenAndServe()
-	}()
+	for _, listener := range servers {
+		go func() {
+			logger.Info("Mocó server listening", "address", listener.Addr, "version", version, "profile", configuration.profile)
+			if listener.TLSConfig != nil {
+				serverErrors <- listener.ListenAndServeTLS("", "")
+				return
+			}
+			serverErrors <- listener.ListenAndServe()
+		}()
+	}
 
 	select {
 	case err := <-serverErrors:
@@ -160,9 +213,9 @@ func run(logger *slog.Logger) error {
 		}
 		return fmt.Errorf("serve HTTP: %w", err)
 	case err := <-policyErrors:
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()
-		shutdownErr := server.Shutdown(ctx)
+		shutdownErr := shutdownServers(ctx, servers)
 		if shutdownErr != nil {
 			return errors.Join(
 				fmt.Errorf("authorization policy reloader stopped: %w", err),
@@ -171,13 +224,21 @@ func run(logger *slog.Logger) error {
 		}
 		return fmt.Errorf("authorization policy reloader stopped: %w", err)
 	case <-shutdownContext.Done():
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
+		if err := shutdownServers(ctx, servers); err != nil {
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
 		return nil
 	}
+}
+
+func shutdownServers(ctx context.Context, servers []*http.Server) error {
+	var result error
+	for _, server := range servers {
+		result = errors.Join(result, server.Shutdown(ctx))
+	}
+	return result
 }
 
 func deriveAuditPathHMACKey(cursorHMACKey string) []byte {
@@ -188,6 +249,10 @@ func deriveAuditPathHMACKey(cursorHMACKey string) []byte {
 }
 
 type configuration struct {
+	profile            string
+	adminAddress       string
+	metricsToken       string
+	backupStatusPath   string
 	tlsConfig          *tls.Config
 	address            string
 	databasePath       string
@@ -206,13 +271,27 @@ func loadConfiguration() (configuration, error) {
 		return configuration{}, err
 	}
 	config := configuration{
-		tlsConfig:       transport,
-		address:         environmentOrDefault("MOCO_ADDR", ":8080"),
-		databasePath:    environmentOrDefault("MOCO_DB_PATH", "./moco.db"),
-		bearerToken:     os.Getenv("MOCO_BEARER_TOKEN"),
-		cursorHMACKey:   os.Getenv("MOCO_CURSOR_HMAC_KEY"),
-		authConfigPath:  os.Getenv("MOCO_AUTH_CONFIG"),
-		encryptionKeyID: environmentOrDefault("MOCO_ENCRYPTION_KEY_ID", "local-v1"),
+		profile:          environmentOrDefault("MOCO_PROFILE", "development"),
+		adminAddress:     os.Getenv("MOCO_ADMIN_ADDR"),
+		backupStatusPath: os.Getenv("MOCO_BACKUP_STATUS_FILE"),
+		tlsConfig:        transport,
+		address:          environmentOrDefault("MOCO_ADDR", ":8080"),
+		databasePath:     environmentOrDefault("MOCO_DB_PATH", "./moco.db"),
+		bearerToken:      os.Getenv("MOCO_BEARER_TOKEN"),
+		cursorHMACKey:    os.Getenv("MOCO_CURSOR_HMAC_KEY"),
+		authConfigPath:   os.Getenv("MOCO_AUTH_CONFIG"),
+		encryptionKeyID:  environmentOrDefault("MOCO_ENCRYPTION_KEY_ID", "local-v1"),
+	}
+	config.cursorHMACKey, err = credentialEnvironment("MOCO_CURSOR_HMAC_KEY", 4096)
+	if err != nil {
+		return configuration{}, err
+	}
+	config.metricsToken, err = credentialEnvironment("MOCO_METRICS_TOKEN", 4096)
+	if err != nil {
+		return configuration{}, err
+	}
+	if err := validateProduction(config); err != nil {
+		return configuration{}, err
 	}
 	epoch, err := strconv.ParseInt(environmentOrDefault("MOCO_ENCRYPTION_KEY_EPOCH", "1"), 10, 64)
 	if err != nil || epoch < 1 {
@@ -232,7 +311,10 @@ func loadConfiguration() (configuration, error) {
 		return configuration{}, errors.New("MOCO_ENCRYPTION_KEY_ID must contain 1 to 128 visible ASCII characters")
 	}
 	encodedKey := os.Getenv("MOCO_ENCRYPTION_KEY")
-	encodedKeys := os.Getenv("MOCO_ENCRYPTION_KEYS")
+	encodedKeys, err := credentialEnvironment("MOCO_ENCRYPTION_KEYS", 64<<10)
+	if err != nil {
+		return configuration{}, err
+	}
 	if encodedKey != "" && encodedKeys != "" {
 		return configuration{}, errors.New("MOCO_ENCRYPTION_KEY and MOCO_ENCRYPTION_KEYS are mutually exclusive")
 	}

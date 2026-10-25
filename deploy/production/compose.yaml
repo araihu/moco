@@ -1,0 +1,93 @@
+name: moco
+
+x-runtime: &runtime
+  image: ${MOCO_IMAGE:?Set MOCO_IMAGE to an immutable release tag or digest}
+  user: "65532:65532"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+  restart: unless-stopped
+  stop_grace_period: 40s
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777
+  logging:
+    driver: local
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  server:
+    <<: *runtime
+    cpus: 2.0
+    mem_limit: 1g
+    environment:
+      MOCO_PROFILE: production
+      MOCO_ADDR: ":8443"
+      MOCO_ADMIN_ADDR: ":9443"
+      MOCO_DB_PATH: /data/moco.db
+      MOCO_AUTH_CONFIG: /run/moco/access.json
+      MOCO_CURSOR_HMAC_KEY_FILE: /run/moco/cursor-key
+      MOCO_ENCRYPTION_KEYS_FILE: /run/moco/keyring.json
+      MOCO_ENCRYPTION_KEY_EPOCH: ${MOCO_ENCRYPTION_KEY_EPOCH:-1}
+      MOCO_METRICS_TOKEN_FILE: /run/moco/metrics-token
+      MOCO_BACKUP_STATUS_FILE: /backups/status.json
+      MOCO_TLS_CERT_FILE: /run/moco/tls.crt
+      MOCO_TLS_KEY_FILE: /run/moco/tls.key
+      GOMEMLIMIT: 768MiB
+      GOMAXPROCS: "2"
+    ports:
+      - "${MOCO_PUBLIC_BIND:-0.0.0.0}:${MOCO_PUBLIC_PORT:-8443}:8443"
+      - "127.0.0.1:${MOCO_ADMIN_PORT:-9443}:9443"
+    volumes:
+      - type: bind
+        source: ${MOCO_DATA_DIR:?Set MOCO_DATA_DIR to a private local filesystem directory}
+        target: /data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MOCO_BACKUP_DIR:?Set MOCO_BACKUP_DIR}
+        target: /backups
+        read_only: true
+        bind: {create_host_path: false}
+      - {type: bind, source: "${MOCO_CREDENTIALS_DIR:?Set MOCO_CREDENTIALS_DIR}/access.json", target: /run/moco/access.json, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_CREDENTIALS_DIR}/cursor-key", target: /run/moco/cursor-key, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_CREDENTIALS_DIR}/keyring.json", target: /run/moco/keyring.json, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_CREDENTIALS_DIR}/metrics-token", target: /run/moco/metrics-token, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_CREDENTIALS_DIR}/tls.crt", target: /run/moco/tls.crt, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_CREDENTIALS_DIR}/tls.key", target: /run/moco/tls.key, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_CREDENTIALS_DIR}/ca.pem", target: /run/moco/ca.pem, read_only: true, bind: {create_host_path: false}}
+    healthcheck:
+      test: [CMD, /moco-ops, probe]
+      interval: 15s
+      timeout: 6s
+      start_period: 30s
+      retries: 3
+
+  backup:
+    <<: *runtime
+    entrypoint: [/moco-ops]
+    command: [backup-loop, --database, /data/moco.db, --keep, "${MOCO_BACKUP_KEEP:-96}"]
+    cpus: 1.0
+    mem_limit: 512m
+    # Verification extracts an entire database: size this private scratch space
+    # for the largest snapshot, independently of the read-only root filesystem.
+    environment:
+      TMPDIR: /backups
+      MOCO_MIRROR_ID: ${MOCO_MIRROR_ID:?Set MOCO_MIRROR_ID from init-mirror on the off-host destination}
+      GOMEMLIMIT: 384MiB
+      GOMAXPROCS: "1"
+    depends_on:
+      server: {condition: service_healthy}
+    network_mode: none
+    volumes:
+      - {type: bind, source: "${MOCO_DATA_DIR}", target: /data, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_BACKUP_DIR}", target: /backups, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_MIRROR_DIR:?Set MOCO_MIRROR_DIR to a separately mounted off-host backup directory}", target: /mirror, bind: {create_host_path: false}}
+      - {type: bind, source: "${MOCO_CREDENTIALS_DIR}/keyring.json", target: /run/moco/keyring.json, read_only: true, bind: {create_host_path: false}}
+    healthcheck:
+      test: [CMD, /moco-ops, backup-health]
+      interval: 30s
+      timeout: 5s
+      start_period: 10m
+      retries: 1

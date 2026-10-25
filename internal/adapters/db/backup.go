@@ -121,13 +121,17 @@ type BackupCipher interface {
 // VerifySnapshotEncryption authenticates every wrapped data key and ciphertext,
 // one row at a time. Plaintext is wiped and never written to disk or errors.
 func (s *Store) VerifySnapshotEncryption(ctx context.Context, cipher BackupCipher) error {
-	if err := s.verifySnapshotVaultKeys(ctx, cipher); err != nil {
+	if err := s.VerifyVaultKeys(ctx, cipher); err != nil {
 		return err
 	}
 	return s.verifySnapshotSecrets(ctx, cipher)
 }
 
-func (s *Store) verifySnapshotVaultKeys(ctx context.Context, cipher BackupCipher) error {
+// VerifyVaultKeys authenticates all persisted vault keys at startup or recovery.
+// It never returns key bytes and also checks vaults with no remaining secrets.
+func (s *Store) VerifyVaultKeys(ctx context.Context, cipher interface {
+	VerifyVaultKey(string, string, ports.WrappedVaultKey) error
+}) error {
 	rows, err := s.database.QueryContext(ctx, "SELECT tenant_id, vault_id, root_key_id, salt, wrapped_key FROM vault_keys")
 	if err != nil {
 		return err

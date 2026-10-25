@@ -93,7 +93,7 @@ func auditEventResponse(event ports.AuditEvent) internalapi.AuditEvent {
 	return response
 }
 
-func auditMiddleware(audit *services.AuditService, pathHMACKey []byte, logger *slog.Logger, next http.Handler) http.Handler {
+func auditMiddleware(audit *services.AuditService, pathHMACKey []byte, logger *slog.Logger, next http.Handler, observers ...func(error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isProtectedAPIPath(r.URL.Path) || r.URL.Path == auditPath {
 			next.ServeHTTP(w, r)
@@ -110,7 +110,13 @@ func auditMiddleware(audit *services.AuditService, pathHMACKey []byte, logger *s
 		}
 		writeContext, cancel := context.WithTimeout(context.Background(), auditWriteTimeout)
 		defer cancel()
-		if _, err := audit.Record(writeContext, event); err != nil {
+		_, err := audit.Record(writeContext, event)
+		for _, observe := range observers {
+			if observe != nil {
+				observe(err)
+			}
+		}
+		if err != nil {
 			logger.ErrorContext(r.Context(), "audit event failed", "requestId", event.RequestID, "error", err)
 		}
 	})
