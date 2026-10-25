@@ -1,0 +1,90 @@
+# Required: publish a reviewed image built from this source, then set its digest.
+image:
+  repository: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# The SQLite profile supports exactly one writer. No HPA or surge updates.
+replicaCount: 1
+fullnameOverride: ""
+
+# Existing Secret with seven file keys; never put secret values in Helm values.
+credentials:
+  existingSecret: ""
+  # Bump after external Secret replacement to restart the pod and private copies.
+  revision: "1"
+encryption:
+  epoch: 1
+
+persistence:
+  data:
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOncePod
+    size: 10Gi
+  backups:
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOncePod
+    size: 100Gi
+
+# The mirror PVC and its private moco/.moco-destination marker are provisioned
+# independently. The chart never creates them or copies keys into the mirror.
+backups:
+  mirrorClaim: ""
+  mirrorID: ""
+  keep: 96
+  intervalSeconds: 900
+  timeoutSeconds: 600
+  maxAgeSeconds: 1800
+
+service:
+  port: 8443
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  hostname: ""
+  annotations: {}
+  tlsSecret: ""
+
+networkPolicy:
+  enabled: true
+  # Empty means all sources may reach the authenticated public port only.
+  publicPeers: []
+
+# Optional Prometheus Operator integration. Requires installed CRDs, a separate
+# token/CA-only Secret and explicit namespace+pod selectors for Prometheus.
+monitoring:
+  enabled: false
+  existingSecret: ""
+  namespaceSelector: {}
+  podSelector: {}
+  labels: {}
+  interval: 30s
+  serverName: localhost
+
+resources:
+  server:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "2", memory: 1Gi}
+  backup:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  init:
+    requests: {cpu: 100m, memory: 64Mi}
+    limits: {cpu: "1", memory: 256Mi}
+runtime:
+  serverMemoryLimit: 768MiB
+  backupMemoryLimit: 384MiB
+  serverMaxProcs: 2
+  backupMaxProcs: 1
+  tmpSizeLimit: 512Mi
+  credentialsSizeLimit: 16Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

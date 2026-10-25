@@ -1,0 +1,50 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "moco.fullname" . }}-metrics
+  labels:
+    {{- include "moco.labels" . | nindent 4 }}
+    moco.araihu.io/metrics: "true"
+spec:
+  type: ClusterIP
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "moco.selectorLabels" . | nindent 4 }}
+  ports:
+    - {name: admin, port: 9443, targetPort: admin, protocol: TCP}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "moco.fullname" . }}
+  labels:
+    {{- include "moco.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  jobLabel: app.kubernetes.io/name
+  selector:
+    matchLabels:
+      {{- include "moco.selectorLabels" . | nindent 6 }}
+      moco.araihu.io/metrics: "true"
+  endpoints:
+    - port: admin
+      path: /metrics
+      scheme: https
+      interval: {{ .Values.monitoring.interval }}
+      followRedirects: false
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ .Values.monitoring.existingSecret }}
+          key: metrics-token
+      tlsConfig:
+        serverName: {{ .Values.monitoring.serverName | quote }}
+        minVersion: TLS12
+        ca:
+          secret:
+            name: {{ .Values.monitoring.existingSecret }}
+            key: ca.pem
+{{- end }}

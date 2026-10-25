@@ -33,11 +33,26 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: moco-ops <init|init-mirror|backup-once|backup-loop|backup-health|probe> [flags]")
+		return errors.New("usage: moco-ops <init|init-mirror|prepare-runtime|backup-once|backup-loop|backup-health|probe> [flags]")
 	}
 	flags := flag.NewFlagSet("moco-ops "+args[0], flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	switch args[0] {
+	case "prepare-runtime":
+		options := operations.RuntimeOptions{}
+		flags.StringVar(&options.Source, "source", "/projected", "projected credential directory")
+		flags.StringVar(&options.Credentials, "credentials", "/runtime/credentials", "private credential copies")
+		flags.StringVar(&options.Data, "data", "/storage/data/moco", "dedicated private SQLite directory")
+		flags.StringVar(&options.Backups, "backups", "/storage/backups/moco", "dedicated private archive directory")
+		flags.StringVar(&options.Mirror, "mirror", "/storage/mirror/moco", "previously provisioned mirror directory")
+		flags.StringVar(&options.MirrorID, "mirror-id", "", "previously provisioned destination UUID")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 {
+			return errors.New("prepare-runtime accepts no positional arguments")
+		}
+		return operations.PrepareRuntime(options)
 	case "init":
 		directory := flags.String("directory", "", "new private credential directory")
 		if err := flags.Parse(args[1:]); err != nil {
@@ -71,11 +86,23 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		flags.IntVar(&options.Keep, "keep", 96, "archives retained at each destination (minimum two)")
 		interval := flags.Duration("interval", 15*time.Minute, "delay between backup starts; one job at a time")
 		timeout := flags.Duration("timeout", 10*time.Minute, "deadline per backup job")
+		waitReady := flags.Bool("wait-ready", false, "wait for the local TLS server before the first backup")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
 		if flags.NArg() != 0 || *timeout <= 0 || *interval <= *timeout || options.Keep < 2 {
 			return errors.New("require positive timeout, interval greater than timeout, keep >= 2, and no positional arguments")
+		}
+		if *waitReady {
+			for probe(ctx, "https://localhost:8443/readyz", "/run/moco/ca.pem") != nil {
+				timer := time.NewTimer(time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return ctx.Err()
+				case <-timer.C:
+				}
+			}
 		}
 		logger := slog.New(slog.NewJSONHandler(stderr, nil))
 		runJob := func() (operations.BackupStatus, error) {

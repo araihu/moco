@@ -71,6 +71,19 @@ class Drill:
         for name in ("data", "backups", "mirror", "scratch"):
             (root / name).mkdir(mode=0o700)
         self.mirror_id = command([binaries / "moco-ops", "init-mirror", "--directory", root / "mirror"]).stdout.decode().strip()
+        # Exercise the Kubernetes init path with the actual Secret projection
+        # layout; the server still reads private regular copies, never links.
+        projected = root / "projected"
+        version = projected / "..version"
+        version.mkdir(parents=True, mode=0o700)
+        (projected / "..data").symlink_to("..version", target_is_directory=True)
+        for name in ("access.json", "cursor-key", "keyring.json", "metrics-token", "tls.crt", "tls.key", "ca.pem"):
+            shutil.copyfile(self.credentials / name, version / name)
+            (projected / name).symlink_to("..data/" + name)
+        prepared = root / "private-credentials"
+        command([binaries / "moco-ops", "prepare-runtime", "--source", projected, "--credentials", prepared,
+                 "--data", root / "data", "--backups", root / "backups", "--mirror", root / "mirror", "--mirror-id", self.mirror_id])
+        self.credentials = prepared
         self.tls = ssl.create_default_context(cafile=str(self.credentials / "ca.pem"))
         self.public_port, self.admin_port = free_port(), free_port()
         self.base, self.admin_base = f"https://localhost:{self.public_port}", f"https://localhost:{self.admin_port}"

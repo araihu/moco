@@ -356,6 +356,12 @@ name commands such as `moco tenants create` and `moco secrets get`, while
 preserving the principal API contracts. See the
 [OpenAPI pipeline](openapi/README.md#cli-metadata-overlays).
 
+## Kubernetes deployment
+
+For Kubernetes deployment, use the [Helm chart](charts/moco/README.md), including
+JSON Schema validation, single-writer SQLite storage, private TLS credentials,
+verified mirrored backup sidecar and optional Prometheus Operator integration.
+
 ## Command-line client
 
 The public API CLI is the independent Go module in [`cli/`](cli/README.md),

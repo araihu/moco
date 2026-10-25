@@ -1,0 +1,30 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moco.fullname" . }}
+  labels:
+    {{- include "moco.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moco.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress: []
+  ingress:
+    - ports:
+        - {port: 8443, protocol: TCP}
+      {{- with .Values.networkPolicy.publicPeers }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- if .Values.monitoring.enabled }}
+    - ports:
+        - {port: 9443, protocol: TCP}
+      from:
+        - namespaceSelector:
+            {{- toYaml .Values.monitoring.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.monitoring.podSelector | nindent 12 }}
+    {{- end }}
+{{- end }}

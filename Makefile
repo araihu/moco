@@ -1,4 +1,5 @@
 GO := go
+HELM ?= helm
 DB_PATH ?= ./moco.db
 IMAGE ?= moco:$(shell git rev-parse --short HEAD)
 IMAGE_VERSION ?= $(shell git describe --always --dirty)
@@ -35,8 +36,13 @@ GOLANGCI_LINT := $(abspath $(TOOL_BIN_DIR))/golangci-lint
 endif
 
 .PHONY: workflow-lint spec-lint spec-bundle cli-spec-bundle cli-spec-check cli-generate cli-check-generated cli-build cli-check cli-smoke api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test load-test image image-check monitoring-check
+.PHONY: chart-check
+
 workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
+
+chart-check:
+	HELM="$(HELM)" GOWORK=off $(GO) -C tools test -tags=helmtest ./helmchart -count=1
 
 spec-lint:
 	GOWORK=off $(VACUUM) lint --ruleset openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d openapi/public.yaml

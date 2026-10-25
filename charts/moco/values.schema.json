@@ -1,0 +1,781 @@
+{
+  "type": "object",
+  "description": "Production Moco single-writer SQLite chart values.",
+  "additionalProperties": false,
+  "properties": {
+    "image": {
+      "type": "object",
+      "description": "A reviewed Moco image built with prepare-runtime support. Publication is operator-managed.",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Published image repository without a tag or digest.",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]*$"
+        },
+        "digest": {
+          "type": "string",
+          "description": "Required immutable OCI sha256 digest.",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "description": "Kubernetes image pull policy.",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      },
+      "required": [
+        "repository",
+        "digest",
+        "pullPolicy"
+      ]
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "description": "Existing registry credential Secrets.",
+      "items": {
+        "type": "object",
+        "description": "Registry Secret.",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Secret name.",
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "replicaCount": {
+      "type": "integer",
+      "const": 1,
+      "description": "Exactly one SQLite writer; scaling is unsupported."
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "description": "Optional stable resource name (max 52 characters leaves room for suffixes).",
+      "maxLength": 52,
+      "pattern": "^$|^[a-z]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "credentials": {
+      "type": "object",
+      "description": "Existing credential projection; no inline credentials or chart-created Secret.",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": {
+          "type": "string",
+          "description": "Secret containing the seven documented file keys.",
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "description": "Change this value when replacing credentials/certificates to recreate private copies.",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "existingSecret",
+        "revision"
+      ]
+    },
+    "encryption": {
+      "type": "object",
+      "description": "Encryption epoch fence.",
+      "additionalProperties": false,
+      "properties": {
+        "epoch": {
+          "type": "integer",
+          "description": "Monotonically increase when changing the active root-key era.",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "epoch"
+      ]
+    },
+    "persistence": {
+      "type": "object",
+      "description": "Data and local backup volumes must be distinct and filesystem-backed.",
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/storage"
+        },
+        "backups": {
+          "$ref": "#/definitions/storage"
+        }
+      },
+      "required": [
+        "data",
+        "backups"
+      ]
+    },
+    "backups": {
+      "type": "object",
+      "description": "Verified local and off-host filesystem backups run in a sidecar.",
+      "additionalProperties": false,
+      "properties": {
+        "mirrorClaim": {
+          "type": "string",
+          "description": "Pre-provisioned off-host filesystem PVC; never created by this chart.",
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+          "minLength": 1
+        },
+        "mirrorID": {
+          "type": "string",
+          "description": "UUID already stored in mirror moco/.moco-destination; never bootstrapped automatically.",
+          "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
+          "not": {
+            "const": "00000000-0000-0000-0000-000000000000"
+          }
+        },
+        "keep": {
+          "type": "integer",
+          "description": "Managed archives retained per destination; pruning follows successful verification.",
+          "minimum": 2
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "description": "Delay between backup starts; must exceed timeoutSeconds.",
+          "minimum": 30
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "description": "Per-job deadline; must be less than intervalSeconds.",
+          "minimum": 1
+        },
+        "maxAgeSeconds": {
+          "type": "integer",
+          "description": "Maximum verified snapshot age for readiness; must exceed interval + timeout.",
+          "minimum": 120
+        }
+      },
+      "required": [
+        "mirrorClaim",
+        "mirrorID",
+        "keep",
+        "intervalSeconds",
+        "timeoutSeconds",
+        "maxAgeSeconds"
+      ]
+    },
+    "service": {
+      "type": "object",
+      "description": "Public HTTPS ClusterIP service; administrative port is separate.",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "description": "Public HTTPS Service port; container remains 8443.",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Service annotations."
+        }
+      },
+      "required": [
+        "port",
+        "annotations"
+      ]
+    },
+    "ingress": {
+      "type": "object",
+      "description": "Optional public Ingress. Configure controller-specific verified HTTPS to the backend.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create a public Ingress."
+        },
+        "className": {
+          "type": "string",
+          "description": "IngressClass name; required when enabled."
+        },
+        "hostname": {
+          "type": "string",
+          "description": "Public certificate hostname; required when enabled."
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Controller annotations; must configure HTTPS upstream and CA verification."
+        },
+        "tlsSecret": {
+          "type": "string",
+          "description": "Existing frontend TLS Secret; required when enabled."
+        }
+      },
+      "required": [
+        "enabled",
+        "className",
+        "hostname",
+        "annotations",
+        "tlsSecret"
+      ]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "description": "Default ingress isolation and deny-all pod egress; requires an enforcing CNI.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Install NetworkPolicy. Required when monitoring enables the administrative listener."
+        },
+        "publicPeers": {
+          "type": "array",
+          "description": "Peers allowed to reach public port 8443. Empty allows every source.",
+          "items": {
+            "$ref": "#/definitions/peer"
+          }
+        }
+      },
+      "required": [
+        "enabled",
+        "publicPeers"
+      ]
+    },
+    "monitoring": {
+      "type": "object",
+      "description": "Optional Prometheus Operator ServiceMonitor and protected private Service.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable metrics on the pod network (9443) and create ServiceMonitor."
+        },
+        "existingSecret": {
+          "type": "string",
+          "description": "Separate metrics-token and ca.pem Secret, without root keys."
+        },
+        "namespaceSelector": {
+          "$ref": "#/definitions/selector"
+        },
+        "podSelector": {
+          "$ref": "#/definitions/selector"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "ServiceMonitor labels used by your Prometheus selector."
+        },
+        "interval": {
+          "type": "string",
+          "description": "Prometheus scrape interval.",
+          "pattern": "^[1-9][0-9]*(s|m)$"
+        },
+        "serverName": {
+          "type": "string",
+          "description": "TLS name verified by Prometheus.",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "enabled",
+        "existingSecret",
+        "namespaceSelector",
+        "podSelector",
+        "labels",
+        "interval",
+        "serverName"
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "description": "Tune limits and Go memory budgets together.",
+      "additionalProperties": false,
+      "properties": {
+        "server": {
+          "$ref": "#/definitions/resources"
+        },
+        "backup": {
+          "$ref": "#/definitions/resources"
+        },
+        "init": {
+          "$ref": "#/definitions/resources"
+        }
+      },
+      "required": [
+        "server",
+        "backup",
+        "init"
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "description": "Bounded process and memory-backed scratch settings.",
+      "additionalProperties": false,
+      "properties": {
+        "serverMemoryLimit": {
+          "type": "string",
+          "description": "Server GOMEMLIMIT below its container memory limit.",
+          "pattern": "^[1-9][0-9]*(MiB|GiB)$"
+        },
+        "backupMemoryLimit": {
+          "type": "string",
+          "description": "Backup GOMEMLIMIT below its container memory limit.",
+          "pattern": "^[1-9][0-9]*(MiB|GiB)$"
+        },
+        "serverMaxProcs": {
+          "type": "integer",
+          "description": "Server GOMAXPROCS.",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "backupMaxProcs": {
+          "type": "integer",
+          "description": "Backup GOMAXPROCS.",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "tmpSizeLimit": {
+          "type": "string",
+          "description": "Memory-backed /tmp capacity.",
+          "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+        },
+        "credentialsSizeLimit": {
+          "type": "string",
+          "description": "Memory-backed private credential capacity.",
+          "pattern": "^[1-9][0-9]*Mi$"
+        }
+      },
+      "required": [
+        "serverMemoryLimit",
+        "backupMemoryLimit",
+        "serverMaxProcs",
+        "backupMaxProcs",
+        "tmpSizeLimit",
+        "credentialsSizeLimit"
+      ]
+    },
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Node labels. Choose nodes supporting the local volume topology."
+    },
+    "tolerations": {
+      "type": "array",
+      "description": "Standard Kubernetes pod tolerations.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "operator": {
+            "enum": [
+              "Equal",
+              "Exists"
+            ]
+          },
+          "value": {
+            "type": "string"
+          },
+          "effect": {
+            "enum": [
+              "NoSchedule",
+              "PreferNoSchedule",
+              "NoExecute",
+              ""
+            ]
+          },
+          "tolerationSeconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "affinity": {
+      "type": "object",
+      "description": "Standard Kubernetes affinity; the storage class/PV must enforce data locality."
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Additional pod annotations; credential revision is chart-managed.",
+      "propertyNames": {
+        "not": {
+          "const": "moco.araihu.io/credentials-revision"
+        }
+      }
+    }
+  },
+  "required": [
+    "image",
+    "imagePullSecrets",
+    "replicaCount",
+    "fullnameOverride",
+    "credentials",
+    "encryption",
+    "persistence",
+    "backups",
+    "service",
+    "ingress",
+    "networkPolicy",
+    "monitoring",
+    "resources",
+    "runtime",
+    "nodeSelector",
+    "tolerations",
+    "affinity",
+    "podAnnotations"
+  ],
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "matchLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "matchExpressions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "operator"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Label key",
+                "minLength": 1
+              },
+              "operator": {
+                "enum": [
+                  "In",
+                  "NotIn",
+                  "Exists",
+                  "DoesNotExist"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "Kubernetes label selector. Monitoring requires a nonempty matchLabels or matchExpressions when enabled."
+    },
+    "storage": {
+      "type": "object",
+      "description": "Persistent local filesystem claim. Empty existingClaim creates a retained StatefulSet claim.",
+      "additionalProperties": false,
+      "properties": {
+        "existingClaim": {
+          "type": "string",
+          "description": "Use a separately managed existing PVC; empty creates a claim.",
+          "maxLength": 253,
+          "pattern": "^$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+        },
+        "storageClass": {
+          "type": "string",
+          "description": "Local/block filesystem StorageClass. Empty uses the cluster default; - disables dynamic default selection.",
+          "pattern": "^$|^-$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+        },
+        "accessMode": {
+          "type": "string",
+          "description": "Use ReadWriteOncePod with CSI. ReadWriteOnce is an explicit compatibility fallback.",
+          "enum": [
+            "ReadWriteOncePod",
+            "ReadWriteOnce"
+          ]
+        },
+        "size": {
+          "type": "string",
+          "description": "Requested capacity for a new claim; StatefulSet template changes require an expansion procedure.",
+          "pattern": "^[1-9][0-9]*(Mi|Gi|Ti)$"
+        }
+      },
+      "required": [
+        "existingClaim",
+        "storageClass",
+        "accessMode",
+        "size"
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "description": "Bounded container resources.",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "type": "object",
+          "description": "Scheduling requests.",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "description": "Positive Kubernetes resource quantity",
+              "pattern": "^([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*|\\.[0-9]*[1-9][0-9]*)(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+            },
+            "memory": {
+              "type": "string",
+              "description": "Positive Kubernetes resource quantity",
+              "pattern": "^([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*|\\.[0-9]*[1-9][0-9]*)(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+            }
+          },
+          "required": [
+            "cpu",
+            "memory"
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "description": "Runtime limits.",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "description": "Positive Kubernetes resource quantity",
+              "pattern": "^([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*|\\.[0-9]*[1-9][0-9]*)(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+            },
+            "memory": {
+              "type": "string",
+              "description": "Positive Kubernetes resource quantity",
+              "pattern": "^([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*|\\.[0-9]*[1-9][0-9]*)(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+            }
+          },
+          "required": [
+            "cpu",
+            "memory"
+          ]
+        }
+      },
+      "required": [
+        "requests",
+        "limits"
+      ]
+    },
+    "peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "namespaceSelector": {
+          "$ref": "#/definitions/selector"
+        },
+        "podSelector": {
+          "$ref": "#/definitions/selector"
+        },
+        "ipBlock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cidr"
+          ],
+          "properties": {
+            "cidr": {
+              "type": "string",
+              "description": "CIDR",
+              "pattern": "^.+/[0-9]{1,3}$"
+            },
+            "except": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "description": "Excluded CIDR",
+                "pattern": "^.+/[0-9]{1,3}$"
+              }
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "ipBlock"
+          ],
+          "maxProperties": 1
+        },
+        {
+          "not": {
+            "required": [
+              "ipBlock"
+            ]
+          },
+          "anyOf": [
+            {
+              "required": [
+                "namespaceSelector"
+              ]
+            },
+            {
+              "required": [
+                "podSelector"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ingress": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "ingress": {
+            "properties": {
+              "className": {
+                "minLength": 1
+              },
+              "hostname": {
+                "minLength": 1,
+                "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+              },
+              "tlsSecret": {
+                "minLength": 1,
+                "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "monitoring": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "monitoring": {
+            "properties": {
+              "existingSecret": {
+                "minLength": 1,
+                "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+              },
+              "namespaceSelector": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/selector"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "matchLabels"
+                        ],
+                        "properties": {
+                          "matchLabels": {
+                            "minProperties": 1
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "matchExpressions"
+                        ],
+                        "properties": {
+                          "matchExpressions": {
+                            "minItems": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              "podSelector": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/selector"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "matchLabels"
+                        ],
+                        "properties": {
+                          "matchLabels": {
+                            "minProperties": 1
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "matchExpressions"
+                        ],
+                        "properties": {
+                          "matchExpressions": {
+                            "minItems": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "networkPolicy": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

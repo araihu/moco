@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "moco.fullname" . }}
+  labels:
+    {{- include "moco.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "moco.selectorLabels" . | nindent 4 }}
+  ports:
+    - {name: https, port: {{ .Values.service.port }}, targetPort: https, protocol: TCP}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "moco.fullname" . }}-headless
+  labels:
+    {{- include "moco.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "moco.selectorLabels" . | nindent 4 }}
+  ports:
+    - {name: https, port: 8443, targetPort: https, protocol: TCP}

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,15 @@ import (
 
 	"github.com/araihu/moco/internal/operations"
 )
+
+func TestBackupWaitReadyCancelsBeforeOpeningDatabase(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := run(ctx, []string{"backup-loop", "--wait-ready"}, io.Discard, io.Discard); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation while awaiting initial readiness, got %v", err)
+	}
+}
 
 func TestProbeValidatesTLSAndReadiness(t *testing.T) {
 	t.Parallel()

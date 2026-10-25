@@ -1,0 +1,14 @@
+Moco runs one SQLite writer. PVCs are retained on uninstall.
+
+Public HTTPS: {{ include "moco.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+Credentials: existing Secret {{ .Values.credentials.existingSecret }} (copied privately at pod startup).
+Mirror: existing PVC {{ .Values.backups.mirrorClaim }}; marker UUID {{ .Values.backups.mirrorID }}.
+
+Verify startup AND a successful mirrored backup before serving traffic:
+  kubectl -n {{ .Release.Namespace }} rollout status statefulset/{{ include "moco.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs {{ include "moco.fullname" . }}-0 -c backup
+
+TLS certificates must cover localhost for exec probes and the public hostname.
+After replacing external Secrets, bump credentials.revision and upgrade.
+Keep all historical root keys independently from Helm, the cluster and backups.
+Read charts/moco/README.md for storage, ingress, recovery and upgrade procedures.

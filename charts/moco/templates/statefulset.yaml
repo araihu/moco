@@ -1,0 +1,212 @@
+{{- include "moco.validate" . -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "moco.fullname" . }}
+  labels:
+    {{- include "moco.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "moco.fullname" . }}-headless
+  updateStrategy:
+    type: RollingUpdate
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      {{- include "moco.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "moco.selectorLabels" . | nindent 8 }}
+      annotations:
+        moco.araihu.io/credentials-revision: {{ .Values.credentials.revision | quote }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "moco.fullname" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: prepare-runtime
+          image: {{ include "moco.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [/moco-ops]
+          args:
+            - prepare-runtime
+            - --mirror-id
+            - {{ .Values.backups.mirrorID | quote }}
+          securityContext:
+            {{- include "moco.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources.init | nindent 12 }}
+          volumeMounts:
+            - {name: projected-credentials, mountPath: /projected, readOnly: true}
+            - {name: credentials, mountPath: /runtime}
+            - {name: data, mountPath: /storage/data}
+            - {name: backups, mountPath: /storage/backups}
+            - {name: mirror, mountPath: /storage/mirror}
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: server
+          image: {{ include "moco.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [/moco-server]
+          securityContext:
+            {{- include "moco.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources.server | nindent 12 }}
+          ports:
+            - {name: https, containerPort: 8443, protocol: TCP}
+            {{- if .Values.monitoring.enabled }}
+            - {name: admin, containerPort: 9443, protocol: TCP}
+            {{- end }}
+          env:
+            - {name: MOCO_PROFILE, value: production}
+            - {name: MOCO_ADDR, value: ":8443"}
+            - name: MOCO_ADMIN_ADDR
+              value: {{ ternary ":9443" "127.0.0.1:9443" .Values.monitoring.enabled | quote }}
+            - {name: MOCO_DB_PATH, value: /data/moco/moco.db}
+            - {name: MOCO_AUTH_CONFIG, value: /run/moco/access.json}
+            - {name: MOCO_CURSOR_HMAC_KEY_FILE, value: /run/moco/cursor-key}
+            - {name: MOCO_ENCRYPTION_KEYS_FILE, value: /run/moco/keyring.json}
+            - {name: MOCO_METRICS_TOKEN_FILE, value: /run/moco/metrics-token}
+            - {name: MOCO_TLS_CERT_FILE, value: /run/moco/tls.crt}
+            - {name: MOCO_TLS_KEY_FILE, value: /run/moco/tls.key}
+            - {name: MOCO_BACKUP_STATUS_FILE, value: /backups/moco/status.json}
+            - {name: MOCO_ENCRYPTION_KEY_EPOCH, value: {{ .Values.encryption.epoch | quote }}}
+            - {name: GOMEMLIMIT, value: {{ .Values.runtime.serverMemoryLimit | quote }}}
+            - {name: GOMAXPROCS, value: {{ .Values.runtime.serverMaxProcs | quote }}}
+          startupProbe:
+            exec:
+              command: [/moco-ops, probe]
+            periodSeconds: 5
+            timeoutSeconds: 6
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [/moco-ops, probe]
+            periodSeconds: 10
+            timeoutSeconds: 6
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: [/moco-ops, probe, --url, "https://localhost:8443/livez"]
+            periodSeconds: 15
+            timeoutSeconds: 6
+            failureThreshold: 3
+          volumeMounts:
+            - {name: credentials, mountPath: /run/moco, subPath: credentials, readOnly: true}
+            - {name: data, mountPath: /data}
+            - {name: backups, mountPath: /backups, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+        - name: backup
+          image: {{ include "moco.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [/moco-ops]
+          args:
+            - backup-loop
+            - --wait-ready
+            - --database
+            - /data/moco/moco.db
+            - --directory
+            - /backups/moco
+            - --mirror-directory
+            - /mirror/moco
+            - --mirror-id
+            - {{ .Values.backups.mirrorID | quote }}
+            - --keep
+            - {{ .Values.backups.keep | quote }}
+            - --interval
+            - {{ printf "%ds" (int .Values.backups.intervalSeconds) | quote }}
+            - --timeout
+            - {{ printf "%ds" (int .Values.backups.timeoutSeconds) | quote }}
+          env:
+            - {name: TMPDIR, value: /backups/moco}
+            - {name: GOMEMLIMIT, value: {{ .Values.runtime.backupMemoryLimit | quote }}}
+            - {name: GOMAXPROCS, value: {{ .Values.runtime.backupMaxProcs | quote }}}
+          securityContext:
+            {{- include "moco.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources.backup | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: [/moco-ops, backup-health, --status, /backups/moco/status.json, --max-age, {{ printf "%ds" (int .Values.backups.maxAgeSeconds) | quote }}]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 1
+          volumeMounts:
+            - {name: credentials, mountPath: /run/moco/keyring.json, subPath: credentials/keyring.json, readOnly: true}
+            - {name: credentials, mountPath: /run/moco/ca.pem, subPath: credentials/ca.pem, readOnly: true}
+            - {name: data, mountPath: /data, readOnly: true}
+            - {name: backups, mountPath: /backups}
+            - {name: mirror, mountPath: /mirror}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: projected-credentials
+          secret:
+            secretName: {{ .Values.credentials.existingSecret }}
+            defaultMode: 0440
+            items:
+              {{- range list "access.json" "cursor-key" "keyring.json" "metrics-token" "tls.crt" "tls.key" "ca.pem" }}
+              - {key: {{ . | quote }}, path: {{ . | quote }}}
+              {{- end }}
+        - name: credentials
+          emptyDir: {medium: Memory, sizeLimit: {{ .Values.runtime.credentialsSizeLimit }}}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: {{ .Values.runtime.tmpSizeLimit }}}
+        - name: mirror
+          persistentVolumeClaim:
+            claimName: {{ .Values.backups.mirrorClaim }}
+        {{- range $name, $storage := .Values.persistence }}
+        {{- if $storage.existingClaim }}
+        - name: {{ $name }}
+          persistentVolumeClaim:
+            claimName: {{ $storage.existingClaim }}
+        {{- end }}
+        {{- end }}
+  {{- if or (not .Values.persistence.data.existingClaim) (not .Values.persistence.backups.existingClaim) }}
+  volumeClaimTemplates:
+    {{- range $name, $storage := .Values.persistence }}
+    {{- if not $storage.existingClaim }}
+    - metadata:
+        name: {{ $name }}
+      spec:
+        accessModes: [{{ $storage.accessMode }}]
+        {{- if eq $storage.storageClass "-" }}
+        storageClassName: ""
+        {{- else if $storage.storageClass }}
+        storageClassName: {{ $storage.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $storage.size }}
+    {{- end }}
+    {{- end }}
+  {{- end }}

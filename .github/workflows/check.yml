@@ -18,6 +18,31 @@ env:
   DAGGER_NO_NAG: '1'
 
 jobs:
+  helm-chart:
+    runs-on: ubuntu-24.04
+    container:
+      image: golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        helm: ['v3.22.1', 'v4.3.1']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: ${{ matrix.helm }}
+      - name: Validate chart schemas, rendering, safety guards and packaging
+        run: make chart-check
+      - name: Validate rendered Kubernetes API objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm template ci charts/moco -f charts/moco/ci/test-values.yaml --kube-version 1.32.0 \
+            --set ingress.enabled=true,ingress.className=private,ingress.hostname=moco.example.com,ingress.tlsSecret=moco-tls > "$RUNNER_TEMP/moco.yaml"
+          GOWORK=off go run github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0 \
+            -strict -summary -kubernetes-version 1.32.0 "$RUNNER_TEMP/moco.yaml"
   check:
     env:
       # Override any runner-wide endpoint so bootstrap uses this engine/SDK too.
