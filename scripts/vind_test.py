@@ -93,6 +93,14 @@ def main():
                                          "--request-timeout=15s"], capture_output=True, timeout=30)
                 (diagnostics/"pods.txt").write_bytes(result.stdout)
                 print(result.stdout.decode(), flush=True)
+                # Moco operation containers log metadata/errors, never secret responses.
+                with (diagnostics/"moco-operations.log").open("wb") as output:
+                    for pod, container in [("moco-0", "prepare-runtime"), ("moco-0", "backup"),
+                                           ("prepare-mirror", "ops"), ("restore", "prepare"), ("restore", "restore")]:
+                        result = subprocess.run([kubectl, "--kubeconfig", str(kubeconfig), "-n", name,
+                            "logs", pod, "-c", container, "--tail=30", "--request-timeout=10s"],
+                            capture_output=True, timeout=20)
+                        output.write((pod+"/"+container+"\n").encode()+result.stdout)
         if options.keep:
             print("Private vind workspace retained at "+str(directory), flush=True)
         else:

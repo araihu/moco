@@ -261,7 +261,10 @@ class Acceptance:
             response = error
         with response:
             payload = response.read()
-            return response.status, payload if raw or not payload else json.loads(payload), response.headers
+            content_type = response.headers.get_content_type()
+            if payload and not raw and (content_type == "application/json" or content_type.endswith("+json")):
+                payload = json.loads(payload)
+            return response.status, payload, response.headers
 
     def status(self):
         return json.loads(self.python("workbench", self.ns,
@@ -318,7 +321,7 @@ class Acceptance:
         self.eso_manifest = manifest.encode()
         self.kubectl("apply", "-f", "-", data=self.eso_manifest)
         wait(self.secret_matches, "ESO did not decode the Moco secret correctly")
-        assert self.ready("externalsecret", "demo-app", self.app)
+        wait(lambda: self.ready("externalsecret", "demo-app", self.app), "ESO did not report a successful reconciliation")
         before = self.get("secret", "demo-app", self.app)["metadata"]["uid"]
         self.kubectl("apply", "-f", "-", data=self.eso_manifest)
         assert self.get("secret", "demo-app", self.app)["metadata"]["uid"] == before
