@@ -93,6 +93,20 @@ def main():
                                          "--request-timeout=15s"], capture_output=True, timeout=30)
                 (diagnostics/"pods.txt").write_bytes(result.stdout)
                 print(result.stdout.decode(), flush=True)
+                result = subprocess.run([kubectl, "--kubeconfig", str(kubeconfig), "get", "secretstores,externalsecrets",
+                                         "-A", "-o", "json", "--request-timeout=15s"], capture_output=True, timeout=30)
+                if result.returncode == 0:
+                    items = json.loads(result.stdout)["items"]
+                    statuses = [{"kind": o["kind"], "name": o["metadata"]["name"], "namespace": o["metadata"]["namespace"],
+                                 "status": o.get("status", {})} for o in items]
+                    (diagnostics/"eso-status.json").write_text(json.dumps(statuses, indent=2))
+                    print(json.dumps(statuses), flush=True)
+                result = subprocess.run([kubectl, "--kubeconfig", str(kubeconfig), "get", "events", "-n", name+"-app",
+                                         "-o", "json", "--request-timeout=15s"], capture_output=True, timeout=30)
+                if result.returncode == 0:
+                    events = [{"reason": o.get("reason"), "message": o.get("message")} for o in json.loads(result.stdout)["items"]]
+                    (diagnostics/"eso-events.json").write_text(json.dumps(events, indent=2))
+                    print(json.dumps(events), flush=True)
                 # Moco operation containers log metadata/errors, never secret responses.
                 with (diagnostics/"moco-operations.log").open("wb") as output:
                     for pod, container in [("moco-0", "prepare-runtime"), ("moco-0", "backup"),
