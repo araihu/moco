@@ -95,8 +95,12 @@ def main():
         # Stream the OCI archive into ctr: vm-container's mount namespaces can make
         # files copied with docker cp into /tmp invisible to an exec process.
         with archive.open("rb") as source:
-            subprocess.run(["docker", "exec", "-i", node, "ctr", "--namespace=k8s.io", "images", "import", "--digests", "-"],
+            subprocess.run(["docker", "exec", "-i", node, "ctr", "--namespace=k8s.io", "images", "import", "--local", "--base-name", "docker.io/library/moco-controller",
+                            "--digests", "--label", "io.cri-containerd.image=managed", "-"],
                            stdin=source, check=True, stdout=log, stderr=subprocess.STDOUT, timeout=120)
+        names = subprocess.check_output(["docker", "exec", node, "ctr", "--namespace=k8s.io", "images", "list", "--quiet"], text=True)
+        if controller_image not in names.splitlines():
+            raise RuntimeError("controller OCI digest reference was not registered in the node runtime")
         subprocess.run([sys.executable, str(ROOT/"scripts/kubernetes_test.py"), "--kubeconfig", str(kubeconfig),
                         "--cluster-name", name, "--kubectl", kubectl, "--helm", options.helm,
                         "--controller-image", controller_image, "--ops", str(Path(options.ops).resolve()), "--report", str(options.report.resolve())],
