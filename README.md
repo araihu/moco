@@ -358,6 +358,12 @@ preserving the principal API contracts. See the
 
 ## Kubernetes deployment
 
+Published SemVer GitHub Releases produce multi-platform images in
+`ghcr.io/araihu/moco` and OCI charts in `oci://ghcr.io/araihu/charts/moco` after
+the complete validation workflow. Released charts pin the exact image digest;
+the Release also receives the chart, manifest and checksums. See the
+[release workflow/runbook](docs/operations/releases.md).
+
 For Kubernetes deployment, use the [Helm chart](charts/moco/README.md), including
 JSON Schema validation, single-writer SQLite storage, private TLS credentials,
 verified mirrored backup sidecar and optional Prometheus Operator integration.

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS build
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -8,6 +8,9 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 ARG VERSION=dev
 ARG REVISION=unknown
+ARG TARGETOS
+ARG TARGETARCH
+ENV GOOS=${TARGETOS} GOARCH=${TARGETARCH}
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/moco-server ./cmd/moco-server && \
     go build -trimpath -ldflags="-s -w" -o /out/moco-backup ./cmd/moco-backup && \

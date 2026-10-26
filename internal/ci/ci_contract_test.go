@@ -46,6 +46,31 @@ func TestWorkflowUsesPinnedDaggerAndIsolatedRunners(t *testing.T) {
 	}
 }
 
+func TestReleasePublicationRequiresValidatedSource(t *testing.T) {
+	workflow := readRepoFile(t, ".github/workflows/release.yml")
+	if !strings.Contains(workflow, "types: [published]") || strings.Contains(workflow, "workflow_dispatch:") {
+		t.Fatal("publication must originate from a published GitHub release")
+	}
+	if !strings.Contains(workflow, "needs: [prepare, validate]") || !strings.Contains(workflow, "uses: ./.github/workflows/check.yml") || !strings.Contains(readRepoFile(t, ".github/workflows/check.yml"), "workflow_call:") {
+		t.Fatal("publication must reuse the complete check workflow after source validation")
+	}
+	publish := strings.Index(workflow, "\n  publish:")
+	if publish < 0 || strings.Contains(workflow[:publish], "contents: write") || strings.Contains(workflow[:publish], "packages: write") {
+		t.Fatal("write permissions must be confined to publication")
+	}
+	if !strings.Contains(workflow[publish:], "ref: ${{ needs.prepare.outputs.commit }}") || !strings.Contains(workflow, "platforms: linux/amd64,linux/arm64") {
+		t.Fatal("release images must use the validated commit and both Linux architectures")
+	}
+	for _, match := range regexp.MustCompile(`(?m)^\s+(?:-\s+)?uses:\s+(\S+)`).FindAllStringSubmatch(workflow, -1) {
+		if strings.HasPrefix(match[1], "./") {
+			continue
+		}
+		if !regexp.MustCompile(`@[0-9a-f]{40}$`).MatchString(match[1]) {
+			t.Fatalf("release action is not commit-pinned: %s", match[1])
+		}
+	}
+}
+
 func TestSDKPreservesDependencyPolicyBeforeRuntimeCompilation(t *testing.T) {
 	var config struct {
 		SDK struct {

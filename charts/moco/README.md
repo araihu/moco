@@ -12,8 +12,9 @@ ServiceMonitor with a separate private Service.
 - An enforcing NetworkPolicy CNI and Linux nodes supporting UID/GID 65532,
   RuntimeDefault seccomp and read-only root filesystems.
 - A **new image built from this revision** with `/moco-ops prepare-runtime` and
-  `backup-loop --wait-ready`. Build/publish it yourself and supply its immutable
-  digest. This repository does not assume a prepublished registry image.
+  `backup-loop --wait-ready`. Use a SemVer release image/chart or publish your
+  own reviewed build. Release charts carry the immutable image digest; source
+  chart defaults require an explicit image pin.
 - Data and local backups on distinct filesystem PVCs. SQLite and all its WAL,
   SHM and journal files must remain on one local filesystem. Never use NFS/CIFS
   for the data claim. A StorageClass/PV must enforce the correct node topology;
@@ -35,6 +36,13 @@ data. The process's local file lock is an additional check, not distributed
 fencing. See the Kubernetes [StatefulSet/storage documentation](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).
 
 ## 1. Build and publish the image
+
+Published SemVer releases provide `ghcr.io/araihu/moco` and
+`oci://ghcr.io/araihu/charts/moco`. Their chart defaults pin the matching image
+digest. See the [release runbook](https://github.com/araihu/moco/blob/main/docs/operations/releases.md)
+for version selection, package visibility, checksums and OCI installation.
+For those packages omit `image` from operator values. The source-chart procedure
+below remains available for local/custom image builds.
 
 From the repository root:
 
@@ -114,7 +122,9 @@ authorization API, rather than by replacing the bootstrap policy file alone.
 
 ## 4. Install and verify
 
-Create a private values file containing names/settings, not credential bytes:
+Create a private values file containing names/settings, not credential bytes.
+The following includes the image block required for a source checkout; omit
+that block when installing a released OCI chart with its supplied image pin:
 
 ```yaml
 fullnameOverride: moco

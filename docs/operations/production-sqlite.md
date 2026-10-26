@@ -17,9 +17,11 @@ make monitoring-check
 The Dockerfile pins the Go 1.27.3 builder by manifest digest. Its final OCI image
 uses `scratch`, static executables, a CA bundle and UID/GID `65532`; it contains
 no shell or package manager. The version and source revision are OCI labels,
-and the server reports the embedded version. `make image` builds locally; image
-publication and deployment are separate operator actions. Publish the reviewed
-image to your registry, record its digest, and use that digest in `MOCO_IMAGE`.
+and the server reports the embedded version. `make image` builds locally.
+SemVer GitHub Releases automatically publish multi-platform images and pinned
+Helm charts to GHCR after validation; see [releases.md](releases.md). Deployment
+remains an operator action. You can also publish a reviewed local build to your
+own registry. Record its digest and use that digest in `MOCO_IMAGE`.
 Release builders should rebuild this pin when updating Go, run the required
 checks, and retain the matching binaries/image with backups.
 

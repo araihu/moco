@@ -42,7 +42,7 @@ workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
 
 chart-check:
-	HELM="$(HELM)" GOWORK=off $(GO) -C tools test -tags=helmtest ./helmchart -count=1
+	HELM="$(HELM)" GOWORK=off $(GO) -C tools test -tags=helmtest ./helmchart ./cmd/moco-release -count=1
 
 spec-lint:
 	GOWORK=off $(VACUUM) lint --ruleset openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d openapi/public.yaml
