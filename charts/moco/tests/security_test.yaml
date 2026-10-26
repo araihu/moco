@@ -1,0 +1,112 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/v1.2.1/schema/helm-testsuite.json
+suite: production security and credentials
+templates:
+  - templates/statefulset.yaml
+  - templates/serviceaccount.yaml
+values:
+  - ../ci/test-values.yaml
+release:
+  name: test
+tests:
+  - it: keeps one SQLite writer and retained claims during updates and deletion
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.updateStrategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.persistentVolumeClaimRetentionPolicy
+          value: {whenDeleted: Retain, whenScaled: Retain}
+  - it: runs all processes without root or service account tokens
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
+          path: spec.template.spec.enableServiceLinks
+          value: false
+      - equal:
+          path: spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile: {type: RuntimeDefault}
+  - it: drops capabilities and makes every container root filesystem read only
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext
+          value: &security
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value: *security
+      - equal:
+          path: spec.template.spec.containers[1].securityContext
+          value: *security
+  - it: pins init server and backup containers to the same immutable image
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.example.invalid/moco@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.invalid/moco@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: registry.example.invalid/moco@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - it: projects only the seven external credential files and prepares private copies
+    template: templates/statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: projected-credentials
+            secret:
+              secretName: moco-credentials
+              defaultMode: 0440
+              items:
+                - {key: access.json, path: access.json}
+                - {key: cursor-key, path: cursor-key}
+                - {key: keyring.json, path: keyring.json}
+                - {key: metrics-token, path: metrics-token}
+                - {key: tls.crt, path: tls.crt}
+                - {key: tls.key, path: tls.key}
+                - {key: ca.pem, path: ca.pem}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: credentials, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+      - equal:
+          path: spec.template.spec.initContainers[0].args
+          value: [prepare-runtime, --mirror-id, '11111111-1111-4111-8111-111111111111']
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: credentials, mountPath: /run/moco, subPath: credentials, readOnly: true}
+  - it: restarts the pod when the operator changes the credential revision
+    template: templates/statefulset.yaml
+    set:
+      credentials.revision: rotated-2
+      encryption.epoch: 2
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["moco.araihu.io/credentials-revision"]
+          value: rotated-2
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: MOCO_ENCRYPTION_KEY_EPOCH, value: '2'}
+  - it: disables token mounting on the service account itself
+    template: templates/serviceaccount.yaml
+    asserts:
+      - equal:
+          path: automountServiceAccountToken
+          value: false

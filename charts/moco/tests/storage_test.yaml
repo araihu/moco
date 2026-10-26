@@ -1,0 +1,119 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/v1.2.1/schema/helm-testsuite.json
+suite: durable storage and verified backups
+templates:
+  - templates/statefulset.yaml
+values:
+  - ../ci/test-values.yaml
+release:
+  name: test
+tests:
+  - it: creates separate single writer claims and mounts the independently managed mirror
+    asserts:
+      - contains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata: {name: data}
+            spec:
+              accessModes: [ReadWriteOncePod]
+              resources: {requests: {storage: 10Gi}}
+      - contains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata: {name: backups}
+            spec:
+              accessModes: [ReadWriteOncePod]
+              resources: {requests: {storage: 100Gi}}
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 2
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: mirror, persistentVolumeClaim: {claimName: moco-offhost-mirror}}
+  - it: reuses both existing claims without creating claim templates
+    set:
+      persistence.data.existingClaim: existing-data
+      persistence.backups.existingClaim: existing-backups
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: data, persistentVolumeClaim: {claimName: existing-data}}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: backups, persistentVolumeClaim: {claimName: existing-backups}}
+  - it: creates only the missing claim when reusing data storage
+    set:
+      persistence.data.existingClaim: existing-data
+      persistence.backups.storageClass: '-'
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 1
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: backups
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+          value: ''
+  - it: applies the selected storage class and explicit access mode
+    set:
+      persistence.data.storageClass: local-ssd
+      persistence.data.accessMode: ReadWriteOnce
+      persistence.data.size: 20Gi
+    asserts:
+      - contains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata: {name: data}
+            spec:
+              accessModes: [ReadWriteOnce]
+              storageClassName: local-ssd
+              resources: {requests: {storage: 20Gi}}
+  - it: starts backups after readiness and passes retention mirror and deadlines explicitly
+    set:
+      backups.keep: 8
+      backups.intervalSeconds: 300
+      backups.timeoutSeconds: 120
+      backups.maxAgeSeconds: 600
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].args
+          value:
+            - backup-loop
+            - --wait-ready
+            - --database
+            - /data/moco/moco.db
+            - --directory
+            - /backups/moco
+            - --mirror-directory
+            - /mirror/moco
+            - --mirror-id
+            - '11111111-1111-4111-8111-111111111111'
+            - --keep
+            - '8'
+            - --interval
+            - 300s
+            - --timeout
+            - 120s
+      - equal:
+          path: spec.template.spec.containers[1].readinessProbe.exec.command
+          value: [/moco-ops, backup-health, --status, /backups/moco/status.json, --max-age, 600s]
+  - it: gives backups read only SQLite access and only the keyring and CA credentials
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].volumeMounts
+          value:
+            - {name: credentials, mountPath: /run/moco/keyring.json, subPath: credentials/keyring.json, readOnly: true}
+            - {name: credentials, mountPath: /run/moco/ca.pem, subPath: credentials/ca.pem, readOnly: true}
+            - {name: data, mountPath: /data, readOnly: true}
+            - {name: backups, mountPath: /backups}
+            - {name: mirror, mountPath: /mirror}
+            - {name: tmp, mountPath: /tmp}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: backups, mountPath: /backups, readOnly: true}
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: mirror}
+          any: true

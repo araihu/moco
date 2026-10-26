@@ -1,0 +1,112 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/v1.2.1/schema/helm-testsuite.json
+suite: public HTTPS and network isolation
+templates:
+  - templates/statefulset.yaml
+  - templates/service.yaml
+  - templates/networkpolicy.yaml
+  - templates/ingress.yaml
+values:
+  - ../ci/test-values.yaml
+release:
+  name: test
+tests:
+  - it: exposes only the public HTTPS port through both services
+    template: templates/service.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: spec.ports
+          value: [{name: https, port: 8443, targetPort: https, protocol: TCP}]
+        documentSelector:
+          path: metadata.name
+          value: moco-test
+      - equal:
+          path: spec.ports
+          value: [{name: https, port: 8443, targetPort: https, protocol: TCP}]
+        documentSelector:
+          path: metadata.name
+          value: moco-test-headless
+      - equal:
+          path: spec.clusterIP
+          value: None
+        documentSelector:
+          path: metadata.name
+          value: moco-test-headless
+  - it: applies the configured public service port without changing the headless port
+    template: templates/service.yaml
+    set:
+      service.port: 443
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 443
+        documentSelector:
+          path: metadata.name
+          value: moco-test
+      - equal:
+          path: spec.ports[0].port
+          value: 8443
+        documentSelector:
+          path: metadata.name
+          value: moco-test-headless
+  - it: keeps the administrative listener on loopback by default
+    template: templates/statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: MOCO_ADMIN_ADDR, value: '127.0.0.1:9443'}
+      - equal:
+          path: spec.template.spec.containers[0].ports
+          value: [{name: https, containerPort: 8443, protocol: TCP}]
+  - it: denies egress and permits only public ingress by default
+    template: templates/networkpolicy.yaml
+    asserts:
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress, Egress]
+      - equal:
+          path: spec.egress
+          value: []
+      - equal:
+          path: spec.ingress
+          value: [{ports: [{port: 8443, protocol: TCP}]}]
+  - it: restricts the public listener to the configured peers
+    template: templates/networkpolicy.yaml
+    set:
+      networkPolicy.publicPeers:
+        - namespaceSelector: {matchLabels: {access: moco}}
+          podSelector: {matchLabels: {app: client}}
+    asserts:
+      - equal:
+          path: spec.ingress[0].from
+          value:
+            - namespaceSelector: {matchLabels: {access: moco}}
+              podSelector: {matchLabels: {app: client}}
+  - it: leaves ingress disabled unless requested
+    template: templates/ingress.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: routes ingress TLS traffic only to the public HTTPS service
+    template: templates/ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.className: private
+      ingress.hostname: moco.example.com
+      ingress.tlsSecret: frontend-tls
+      ingress.annotations:
+        nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    asserts:
+      - equal:
+          path: spec.ingressClassName
+          value: private
+      - equal:
+          path: spec.tls
+          value: [{hosts: [moco.example.com], secretName: frontend-tls}]
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service
+          value: {name: moco-test, port: {name: https}}
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/backend-protocol"]
+          value: HTTPS

@@ -36,6 +36,14 @@ jobs:
           version: ${{ matrix.helm }}
       - name: Validate chart schemas, rendering, safety guards and packaging
         run: make chart-check
+      - name: Upload Helm unit test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: helm-unittest-${{ matrix.helm }}
+          path: bin/chart-tests.xml
+          if-no-files-found: warn
+          retention-days: 7
       - name: Validate rendered Kubernetes API objects
         shell: bash
         run: |

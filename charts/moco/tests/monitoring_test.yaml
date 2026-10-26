@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/v1.2.1/schema/helm-testsuite.json
+suite: protected Prometheus integration
+templates:
+  - templates/monitoring.yaml
+  - templates/networkpolicy.yaml
+  - templates/statefulset.yaml
+values:
+  - ../ci/test-values.yaml
+  - values/monitoring.yaml
+capabilities:
+  apiVersions: [monitoring.coreos.com/v1/ServiceMonitor]
+tests:
+  - it: omits metrics resources when monitoring is disabled
+    template: templates/monitoring.yaml
+    set:
+      monitoring.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: scrapes over verified TLS with credentials from the separate metrics Secret
+    template: templates/monitoring.yaml
+    documentSelector:
+      path: kind
+      value: ServiceMonitor
+    asserts:
+      - equal:
+          path: spec.endpoints
+          value:
+            - port: admin
+              path: /metrics
+              scheme: https
+              interval: 30s
+              followRedirects: false
+              authorization:
+                type: Bearer
+                credentials: {name: metrics-only, key: metrics-token}
+              tlsConfig:
+                serverName: localhost
+                minVersion: TLS12
+                ca:
+                  secret: {name: metrics-only, key: ca.pem}
+  - it: keeps failed instances observable through an internal metrics service
+    template: templates/monitoring.yaml
+    documentSelector:
+      path: kind
+      value: Service
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.publishNotReadyAddresses
+          value: true
+      - equal:
+          path: spec.ports
+          value: [{name: admin, port: 9443, targetPort: admin, protocol: TCP}]
+  - it: restricts administrative traffic to the selected namespace and pod together
+    template: templates/networkpolicy.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+      - equal:
+          path: spec.ingress[1]
+          value:
+            ports: [{port: 9443, protocol: TCP}]
+            from:
+              - namespaceSelector: {matchLabels: {monitoring: enabled}}
+                podSelector: {matchLabels: {app: prometheus}}
+      - equal:
+          path: spec.egress
+          value: []
+  - it: opens the administrative listener only for the protected monitoring profile
+    template: templates/statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: MOCO_ADMIN_ADDR, value: ':9443'}
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content: {name: admin, containerPort: 9443, protocol: TCP}

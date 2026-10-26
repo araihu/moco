@@ -3,7 +3,9 @@
 package helmchart
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"io"
 	"os"
@@ -170,8 +172,36 @@ func TestLintAndPackage(t *testing.T) {
 	if data, err := helm(t, "lint", "--strict", "charts/moco", "-f", "charts/moco/ci/test-values.yaml"); err != nil {
 		t.Fatalf("lint: %v\n%s", err, data)
 	}
-	if data, err := helm(t, "package", "charts/moco", "--destination", t.TempDir()); err != nil {
+	destination := t.TempDir()
+	if data, err := helm(t, "package", "charts/moco", "--destination", destination); err != nil {
 		t.Fatalf("package: %v\n%s", err, data)
+	}
+	archives, err := filepath.Glob(filepath.Join(destination, "moco-*.tgz"))
+	if err != nil || len(archives) != 1 {
+		t.Fatalf("expected one packaged chart: %v %v", archives, err)
+	}
+	file, err := os.Open(archives[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	compressed, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = compressed.Close() }()
+	reader := tar.NewReader(compressed)
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(header.Name, "moco/tests/") || strings.HasPrefix(header.Name, "moco/ci/") {
+			t.Fatalf("development test files leaked into the release chart: %s", header.Name)
+		}
 	}
 }
 

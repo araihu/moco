@@ -299,16 +299,37 @@ availability, node clocks and certificate expiry independently.
 ## Chart development and validation
 
 ```sh
+make chart-unittest                    # helm-unittest YAML suites only
 make chart-check                       # Helm required; no cluster needed
 make chart-check HELM=/path/to/helm
 make check                             # application/CLI/operational checks
 helm package charts/moco --destination /tmp
 ```
 
-Chart tests exercise lint, packaging, secure default resources, existing claims,
-Ingress/monitoring rendering and rejection of unsafe/missing/unknown values.
-The separate CI job uses a pinned Go container, pinned Helm setup action and
-both Helm versions above. It also validates rendered built-in Kubernetes
+The five YAML suites in [`tests/`](tests/) use
+[`helm-unittest`](https://github.com/helm-unittest/helm-unittest/tree/v1.2.1)
+1.2.1. Their 40 cases cover container security, external credential handling,
+SQLite writer isolation, retained/existing claims, verified backup configuration,
+public HTTPS/Ingress, protected Prometheus scraping, and rejection of unsafe,
+missing or unknown values. Use explicit assertions and named document selectors
+when multiple resources come from one template; avoid order-dependent snapshots.
+
+`make chart-unittest` downloads the upstream plugin archive on first use, verifies
+its pinned SHA-256, caches it under `tools/bin/helm-unittest/`, and runs
+`helm unittest --strict` with an isolated temporary plugin directory. It supports
+Linux/macOS amd64/arm64, requires Helm, Bash, curl, tar and sha256sum (or macOS
+shasum), and does not install global plugins. Cached archives are verified on
+every run. JUnit output defaults to `bin/chart-tests.xml`; override it with
+`CHART_TEST_REPORT=/path/to/report.xml`. Test suites and fixtures are excluded
+from packaged charts through `.helmignore`.
+
+`make chart-check` requires the YAML suites to pass, then runs the existing Go
+integration tests against the selected real Helm executable: lint, packaging,
+rendering, JSON Schema and template safety guards. This checks actual Helm 3/4
+rendering as well as the plugin's embedded renderer. The separate CI job uses a
+pinned Go container, pinned Helm setup action and both Helm versions above,
+uploads JUnit reports even on failure, and gates release publication. It also
+validates rendered built-in Kubernetes
 resources with kubeconform 0.8.0 against Kubernetes 1.32 schemas. Application
 operational tests exercise the real projected-Secret preparation path, TLS,
 backups, rotation and recovery. These are not evidence of installation on your

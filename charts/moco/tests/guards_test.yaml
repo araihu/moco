@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/v1.2.1/schema/helm-testsuite.json
+suite: reject unsafe production configuration
+templates:
+  - templates/statefulset.yaml
+values:
+  - ../ci/test-values.yaml
+release:
+  name: test
+tests:
+  - it: rejects multiple SQLite writers
+    set:
+      replicaCount: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: replicaCount
+  - it: rejects unknown values instead of silently ignoring typos
+    set:
+      backupz: {keep: 8}
+    asserts:
+      - failedTemplate:
+          errorPattern: backupz
+  - it: rejects mutable image references
+    set:
+      image.digest: latest
+    asserts:
+      - failedTemplate:
+          errorPattern: image.digest
+  - it: requires the external credential Secret
+    set:
+      credentials.existingSecret: ''
+    asserts:
+      - failedTemplate:
+          errorPattern: credentials.existingSecret
+  - it: requires the independent mirror identity
+    set:
+      backups.mirrorID: ''
+    asserts:
+      - failedTemplate:
+          errorPattern: backups.mirrorID
+  - it: rejects a backup timeout that reaches the next interval
+    set:
+      backups.timeoutSeconds: 900
+    asserts:
+      - failedTemplate:
+          errorMessage: backups.timeoutSeconds must be less than intervalSeconds
+  - it: rejects readiness thresholds that can expire during a valid backup cycle
+    set:
+      backups.maxAgeSeconds: 1500
+    asserts:
+      - failedTemplate:
+          errorMessage: backups.maxAgeSeconds must exceed intervalSeconds + timeoutSeconds
+  - it: prevents the local data claim from also being the backup mirror
+    set:
+      persistence.data.existingClaim: moco-offhost-mirror
+    asserts:
+      - failedTemplate:
+          errorMessage: data, local backup and mirror claims must be distinct
+  - it: detects collisions with automatically generated claim names
+    set:
+      backups.mirrorClaim: backups-moco-test-0
+    asserts:
+      - failedTemplate:
+          errorMessage: data, local backup and mirror claims must be distinct
+  - it: requires an ingress class hostname and TLS Secret when enabling ingress
+    set:
+      ingress.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: ingress
+  - it: refuses monitoring without the ServiceMonitor CRD
+    values:
+      - values/monitoring.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: monitoring requires the Prometheus Operator ServiceMonitor CRD
+  - it: refuses monitoring without NetworkPolicy protection
+    values:
+      - values/monitoring.yaml
+    set:
+      networkPolicy.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: 'networkPolicy|NetworkPolicy'
+  - it: rejects sharing root credentials with the Prometheus reader
+    values:
+      - values/monitoring.yaml
+    set:
+      monitoring.existingSecret: moco-credentials
+    asserts:
+      - failedTemplate:
+          errorMessage: monitoring must use a separate token/CA-only Secret
+  - it: requires a nonempty namespace selector for monitoring
+    set:
+      monitoring.enabled: true
+      monitoring.existingSecret: metrics-only
+      monitoring.podSelector.matchLabels.app: prometheus
+    capabilities:
+      apiVersions: [monitoring.coreos.com/v1/ServiceMonitor]
+    asserts:
+      - failedTemplate:
+          errorPattern: 'namespaceSelector|explicit nonempty namespace'
+  - it: requires a nonempty pod selector for monitoring
+    set:
+      monitoring.enabled: true
+      monitoring.existingSecret: metrics-only
+      monitoring.namespaceSelector.matchLabels.monitoring: enabled
+    capabilities:
+      apiVersions: [monitoring.coreos.com/v1/ServiceMonitor]
+    asserts:
+      - failedTemplate:
+          errorPattern: 'podSelector|explicit nonempty namespace'

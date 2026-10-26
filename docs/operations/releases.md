@@ -47,7 +47,8 @@ deployment inputs.
    be reachable from `origin/main`.
 2. The release reuses the complete `check.yml` workflow against that commit:
    Dagger/application checks, production image/alert tests, CLI tests and the
-   Helm 3/4 matrix with Kubernetes schema validation. Failed or cancelled
+   Helm 3/4 matrix with helm-unittest suites, real Helm integration tests and
+   Kubernetes schema validation. Failed or cancelled
    prerequisites prevent publication.
 3. Only the publishing job receives `contents: write` and `packages: write`.
    It checks out the validated commit, authenticates with the automatic

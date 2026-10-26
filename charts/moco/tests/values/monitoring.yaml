@@ -1,0 +1,7 @@
+monitoring:
+  enabled: true
+  existingSecret: metrics-only
+  namespaceSelector:
+    matchLabels: {monitoring: enabled}
+  podSelector:
+    matchLabels: {app: prometheus}

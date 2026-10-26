@@ -367,6 +367,8 @@ the Release also receives the chart, manifest and checksums. See the
 For Kubernetes deployment, use the [Helm chart](charts/moco/README.md), including
 JSON Schema validation, single-writer SQLite storage, private TLS credentials,
 verified mirrored backup sidecar and optional Prometheus Operator integration.
+Run `make chart-check` for the helm-unittest YAML suites and Helm integration
+checks; CI runs them with Helm 3 and 4 before releasing.
 
 ## Command-line client
 
