@@ -92,10 +92,11 @@ def main():
                            env=environment, stdout=target, stderr=log, check=True, timeout=120)
         kubeconfig.chmod(0o600)
         node = "vcluster.cp."+name
-        subprocess.run(["docker", "cp", str(archive), node+":/tmp/controller.oci.tar"],
-                       check=True, stdout=log, stderr=subprocess.STDOUT, timeout=60)
-        subprocess.run(["docker", "exec", node, "ctr", "--namespace=k8s.io", "images", "import", "--digests", "/tmp/controller.oci.tar"],
-                       check=True, stdout=log, stderr=subprocess.STDOUT, timeout=120)
+        # Stream the OCI archive into ctr: vm-container's mount namespaces can make
+        # files copied with docker cp into /tmp invisible to an exec process.
+        with archive.open("rb") as source:
+            subprocess.run(["docker", "exec", "-i", node, "ctr", "--namespace=k8s.io", "images", "import", "--digests", "-"],
+                           stdin=source, check=True, stdout=log, stderr=subprocess.STDOUT, timeout=120)
         subprocess.run([sys.executable, str(ROOT/"scripts/kubernetes_test.py"), "--kubeconfig", str(kubeconfig),
                         "--cluster-name", name, "--kubectl", kubectl, "--helm", options.helm,
                         "--controller-image", controller_image, "--ops", str(Path(options.ops).resolve()), "--report", str(options.report.resolve())],
