@@ -21,6 +21,7 @@ jobs:
         run: |
           mkdir -p bin
           docker run --rm -v "$PWD:/src" -w /src -e CGO_ENABLED=0 -e GOWORK=off \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/src \
             golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 \
             go build -mod=readonly -trimpath -o bin/moco-ops ./cmd/moco-ops
       - name: Run real Kubernetes acceptance with vind and ESO
