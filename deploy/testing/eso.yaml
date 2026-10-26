@@ -1,0 +1,45 @@
+# Render @@...@@ identifiers after provisioning the tenant and its dedicated vault.
+# The referenced Secret contains only the reader token and public issuing CA.
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: moco
+  namespace: @@APP_NAMESPACE@@
+spec:
+  provider:
+    webhook:
+      url: 'https://moco.@@MOCO_NAMESPACE@@.svc:8443/api/v1/tenants/@@TENANT_ID@@/vaults/@@VAULT_ID@@/secret?path={{ .remoteRef.key | urlquery }}'
+      method: GET
+      timeout: 5s
+      headers:
+        Authorization: 'Bearer {{ .reader.token }}'
+      caProvider:
+        type: Secret
+        name: moco-reader
+        key: ca.pem
+      secrets:
+        - name: reader
+          secretRef:
+            name: moco-reader
+      result:
+        jsonPath: $.value
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: demo-app
+  namespace: @@APP_NAMESPACE@@
+spec:
+  refreshInterval: 2s
+  secretStoreRef:
+    name: moco
+    kind: SecretStore
+  target:
+    name: demo-app
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: password
+      remoteRef:
+        key: apps/demo/password+space &value
+        decodingStrategy: Base64

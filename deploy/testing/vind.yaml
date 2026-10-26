@@ -1,0 +1,13 @@
+# Disposable vind cluster; Calico is installed before application workloads.
+networking:
+  podCIDR: 192.168.0.0/16
+deploy:
+  cni:
+    flannel:
+      enabled: false
+experimental:
+  docker:
+    registryProxy:
+      enabled: false
+    loadBalancer:
+      enabled: false

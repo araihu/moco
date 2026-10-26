@@ -369,6 +369,9 @@ JSON Schema validation, single-writer SQLite storage, private TLS credentials,
 verified mirrored backup sidecar and optional Prometheus Operator integration.
 Run `make chart-check` for the helm-unittest YAML suites and Helm integration
 checks; CI runs them with Helm 3 and 4 before releasing.
+Run `make vind-test` for real Kubernetes acceptance with vind, Calico and ESO,
+including secret delivery, rotations and mirrored recovery. See the
+[cluster acceptance runbook](docs/operations/kubernetes-eso-tests.md).
 
 ## Command-line client
 

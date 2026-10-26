@@ -1,0 +1,37 @@
+name: vind-eso
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.3.1
+      - name: Build bootstrap operations from the checked out source
+        run: |
+          mkdir -p bin
+          docker run --rm -v "$PWD:/src" -w /src -e CGO_ENABLED=0 -e GOWORK=off \
+            golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 \
+            go build -mod=readonly -trimpath -o bin/moco-ops ./cmd/moco-ops
+      - name: Run real Kubernetes acceptance with vind and ESO
+        run: python3 -B scripts/vind_test.py
+      - name: Upload sanitized acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vind-eso-acceptance
+          path: |
+            bin/kubernetes-report.json
+            bin/vind-diagnostics/
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,34 @@
+{
+  "vcluster": "0.37.4",
+  "vclusterSHA256": {
+    "linux-amd64": "1f9d9d6ca35d984f1a68de1c91096a3f9be31a5fe6f40d7ed9f210eea787ae27",
+    "linux-arm64": "51c3fe71948947570d2557b2cc59cbacf87ed8801f370fe57679ce5dafe717fb",
+    "darwin-amd64": "9010a7cea55f9951351360936790c98a6070b4f81119cbbeb8bd3c4c69311c54",
+    "darwin-arm64": "13d07a60e625dd9aab0888a41c6170cf70bb41355a46784c4ccff6a0f37e5909"
+  },
+  "kubectl": "1.36.4",
+  "kubectlSHA256": {
+    "linux-amd64": "8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a",
+    "linux-arm64": "0ecf44450ee6063bf19dd166a103ee6df4a9034455c2abce626e6eea657d73fb",
+    "darwin-amd64": "71a3aa7c2ee2c974d9fbb462cba0c5c04a4df2e8d85eee94714fd819ea3c4e63",
+    "darwin-arm64": "c9e4f713d6fee0043a3d835cca13077cda2bc0973840eb9779360df0b5bdfc69"
+  },
+  "mocoImage": "ghcr.io/araihu/moco@sha256:588c2d0b1e93f04b2522a44eb46a7c21f9ae2feaed419d092a90c7646ca5a667",
+  "mocoVersion": "0.0.2",
+  "pythonImage": "python@sha256:601e99e090cb08c2784a42395487709500bc39930307fe72f3f11a8f3c430762",
+  "esoChart": {
+    "version": "2.14.0",
+    "url": "https://github.com/external-secrets/external-secrets/releases/download/helm-chart-2.14.0/external-secrets-2.14.0.tgz",
+    "sha256": "0a6d9e91b1ff50adfdbf24b50b582babfa7c5b7df42b21974ca4b3fb88ee5e34"
+  },
+  "calico": {
+    "version": "3.33.0",
+    "url": "https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/calico.yaml",
+    "sha256": "2de8f47595fb9c41b3f47d7b767a1f8e72ecf84057af834738ff12689a234da5"
+  },
+  "serviceMonitorCRD": {
+    "version": "0.94.2",
+    "url": "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.94.2/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml",
+    "sha256": "cb968e1de715d14168b6131a07b047a8bf6e35630108276d994c10ff8fd896a8"
+  }
+}

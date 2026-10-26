@@ -37,7 +37,7 @@ GOLANGCI_LINT := $(abspath $(TOOL_BIN_DIR))/golangci-lint
 endif
 
 .PHONY: workflow-lint spec-lint spec-bundle cli-spec-bundle cli-spec-check cli-generate cli-check-generated cli-build cli-check cli-smoke api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test load-test image image-check monitoring-check
-.PHONY: chart-check chart-unittest
+.PHONY: chart-check chart-unittest vind-test
 
 workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
@@ -48,6 +48,11 @@ chart-unittest:
 
 chart-check: chart-unittest
 	HELM="$(HELM)" GOWORK=off $(GO) -C tools test -tags=helmtest ./helmchart ./cmd/moco-release -count=1
+
+vind-test:
+	@mkdir -p bin
+	GOWORK=off $(GO) build -mod=readonly -trimpath -o bin/moco-ops ./cmd/moco-ops
+	python3 -B scripts/vind_test.py --helm "$(HELM)"
 
 spec-lint:
 	GOWORK=off $(VACUUM) lint --ruleset openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d openapi/public.yaml
