@@ -261,7 +261,7 @@ class Acceptance:
             response = error
         with response:
             payload = response.read()
-            return response.status, payload if raw or not payload else json.loads(payload), dict(response.headers)
+            return response.status, payload if raw or not payload else json.loads(payload), response.headers
 
     def status(self):
         return json.loads(self.python("workbench", self.ns,
@@ -337,11 +337,13 @@ class Acceptance:
         self.password = secrets.token_bytes(48)
         etag = self.api(self.secret_route)[2]["ETag"]
         assert self.api(self.secret_route, method="PUT", body={"value": base64.b64encode(self.password).decode()},
-                        headers={"If-Match": etag})[0] == 200
+                        headers={"If-Match": etag, "X-Request-ID": "moco-acceptance-secret-update"})[0] == 200
         assert self.api(self.secret_route, method="PUT", body={"value": "eA=="}, headers={"If-Match": etag})[0] == 412
         self.force_sync()
         wait(self.secret_matches, "ESO did not refresh the changed value")
         wait(self.consumer_matches, "consumer did not receive the mounted Secret update")
+        status, audit, _ = self.api("/internal/v1/audit?limit=100", internal=True)
+        assert status == 200 and any(e["requestId"] == "moco-acceptance-secret-update" for e in audit["items"])
 
     def auth_failure(self):
         self.reader_secret("invalid-"+secrets.token_hex(16))
@@ -412,6 +414,8 @@ except (urllib.error.URLError,TimeoutError,socket.timeout):
         check(self.app, 8443, self.secret_route, self.reader)
         check(self.denied, 8443, self.secret_route, self.reader, blocked=True)
         metrics = (self.credentials/"metrics-token").read_text()
+        assert self.api("/metrics", token=None, internal=True, raw=True)[0] == 401
+        assert self.api("/internal/v1/authorization", token=metrics, internal=True)[0] == 401
         admin_probe = probe
         for namespace, blocked in [(self.obs, False), (self.app, True), (self.denied, True)]:
             self.python("probe", namespace, admin_probe, {"url": f"https://moco-metrics.{self.ns}.svc:9443/metrics",
