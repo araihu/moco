@@ -276,3 +276,149 @@ func TestReleaseAssetsAreIdempotentAndNeverClobbered(t *testing.T) {
 		t.Fatal("existing asset overwritten")
 	}
 }
+
+func TestPublicationUploadsToDraftBeforePublishing(t *testing.T) {
+	for _, tc := range []struct {
+		tag        string
+		failUpload bool
+	}{{"v1.2.3", false}, {"v1.2.3-rc.1", false}, {"v1.2.3", true}} {
+		t.Run(tc.tag, func(t *testing.T) {
+			tag := tc.tag
+			pre := strings.Contains(tag, "-rc")
+			p, err := releasePlan(tag, testCommit, "araihu/moco", pre)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := t.TempDir()
+			planPath := filepath.Join(out, "plan.json")
+			if err := writeJSON(planPath, p); err != nil {
+				t.Fatal(err)
+			}
+			created, published, uploads := false, false, 0
+			execute := func(_ context.Context, name string, args ...string) ([]byte, error) {
+				switch name {
+				case "git":
+					if args[0] == "rev-parse" {
+						return []byte(p.Commit), nil
+					}
+					return nil, nil
+				case "docker":
+					return json.Marshal(imageFixture(p))
+				case "helm":
+					if args[0] != "pull" || !created {
+						t.Fatal("chart must be pulled after release preparation", args)
+					}
+					chartFixture(t, filepath.Join(out, "moco-"+p.Version+".tgz"), p, testDigest, true)
+					return nil, nil
+				case "gh":
+					if args[0] == "api" {
+						return []byte("gh: Not Found (HTTP 404)"), errors.New("not found")
+					}
+					switch args[1] {
+					case "create":
+						joined := " " + strings.Join(args, " ") + " "
+						if !strings.Contains(joined, " --draft ") || strings.Contains(joined, " --prerelease ") != pre {
+							t.Fatal("release must start as a matching draft", args)
+						}
+						created = true
+					case "view":
+						return []byte(`{"assets":[]}`), nil
+					case "upload":
+						if !created || published {
+							t.Fatal("assets must be uploaded while draft")
+						}
+						uploads++
+						if tc.failUpload {
+							return nil, errors.New("upload interrupted")
+						}
+					case "edit":
+						if uploads != 3 || !strings.Contains(strings.Join(args, " "), "--draft=false --latest="+map[bool]string{true: "false", false: "true"}[pre]) {
+							t.Fatal("publish only after all uploads, with matching latest policy", args)
+						}
+						published = true
+					}
+					return nil, nil
+				}
+				return nil, errors.New("unexpected tool")
+			}
+			err = run(t.Context(), []string{"publish-chart", "--plan", planPath, "--image-digest", testDigest, "--out", out}, execute)
+			if tc.failUpload {
+				if err == nil || published || !created {
+					t.Fatal("failed uploads must leave the release as a draft", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !published {
+				t.Fatal("completed release was not published")
+			}
+		})
+	}
+}
+
+func TestTagPushDerivesPrereleaseStatusFromSemVer(t *testing.T) {
+	for _, tc := range []struct {
+		tag     string
+		flags   []string
+		failure bool
+	}{
+		{"v1.2.3", nil, false},
+		{"v1.2.3-rc.1", nil, false},
+		{"v1.2.3+build-with-hyphens", nil, false},
+		{"v1.2.3-rc.1", []string{"--prerelease=false"}, true},
+	} {
+		execute := func(_ context.Context, name string, args ...string) ([]byte, error) {
+			if name != "git" {
+				t.Fatal("unexpected tool", name)
+			}
+			if args[0] == "rev-parse" {
+				return []byte(testCommit), nil
+			}
+			return nil, nil
+		}
+		args := []string{"plan", "--tag", tc.tag, "--commit", testCommit, "--repository", "araihu/moco", "--plan", filepath.Join(t.TempDir(), "plan.json")}
+		if err := run(t.Context(), append(args, tc.flags...), execute); (err != nil) != tc.failure {
+			t.Fatalf("tag %s: %v", tc.tag, err)
+		}
+	}
+}
+
+func TestReleasePreparationFailsClosedAndSupportsRetries(t *testing.T) {
+	p := fixturePlan(t)
+	for _, tc := range []struct {
+		response string
+		failure  bool
+		draft    bool
+	}{
+		{`{"tag_name":"v1.2.3","draft":true}`, false, true},
+		{`{"tag_name":"v1.2.3","assets":[{"name":"moco-1.2.3.tgz"},{"name":"release.json"},{"name":"SHA256SUMS"}]}`, false, false},
+		{`{"tag_name":"v1.2.3","immutable":true,"assets":[]}`, true, false},
+		{`{"tag_name":"v1.2.3","draft":true,"prerelease":true}`, true, false},
+		{`{"tag_name":"v9.9.9","draft":true}`, true, false},
+		{`invalid JSON`, true, false},
+	} {
+		execute := func(_ context.Context, name string, args ...string) ([]byte, error) {
+			if name != "gh" || args[0] != "api" {
+				t.Fatal("existing release must not be recreated")
+			}
+			return []byte(tc.response), nil
+		}
+		draft, err := prepareRelease(t.Context(), execute, p)
+		if (err != nil) != tc.failure || draft != tc.draft {
+			t.Fatalf("release %s: draft=%v err=%v", tc.response, draft, err)
+		}
+	}
+	for _, message := range []string{"gh: Forbidden (HTTP 403)", "TLS handshake timeout"} {
+		execute := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if args[0] != "api" {
+				t.Fatal("authentication and network failures must not create releases")
+			}
+			return []byte(message), errors.New("request failed")
+		}
+		if _, err := prepareRelease(t.Context(), execute, p); err == nil {
+			t.Fatal("GitHub failure treated as missing release")
+		}
+	}
+}

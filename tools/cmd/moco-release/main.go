@@ -362,6 +362,50 @@ func checksum(path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// Assets must be attached to a draft: immutable releases lock them at publication.
+// A completed release is accepted on retry only when every asset already exists;
+// attachAssets then checks their bytes before treating publication as complete.
+func prepareRelease(ctx context.Context, run runner, p plan) (bool, error) {
+	data, err := run(ctx, "gh", "api", "repos/"+p.Repository+"/releases/tags/"+p.Tag)
+	if err != nil {
+		if !bytes.Contains(data, []byte("(HTTP 404)")) {
+			return false, fmt.Errorf("read GitHub release: %s: %w", data, err)
+		}
+		args := []string{"release", "create", p.Tag, "--repo", p.Repository, "--verify-tag", "--draft", "--title", "Moco " + p.Version, "--generate-notes", "--target", p.Commit}
+		if semver.Prerelease("v"+p.Version) != "" {
+			args = append(args, "--prerelease")
+		}
+		if output, err := run(ctx, "gh", args...); err != nil {
+			return false, fmt.Errorf("create draft release: %s: %w", output, err)
+		}
+		return true, nil
+	}
+	var release struct {
+		Tag        string                  `json:"tag_name"`
+		Draft      bool                    `json:"draft"`
+		Prerelease bool                    `json:"prerelease"`
+		Assets     []struct{ Name string } `json:"assets"`
+	}
+	if err := json.Unmarshal(data, &release); err != nil {
+		return false, err
+	}
+	if release.Tag != p.Tag || release.Prerelease != (semver.Prerelease("v"+p.Version) != "") {
+		return false, errors.New("existing GitHub release identity or prerelease status differs")
+	}
+	if !release.Draft {
+		names := map[string]bool{}
+		for _, asset := range release.Assets {
+			names[asset.Name] = true
+		}
+		for _, name := range []string{"moco-" + p.Version + ".tgz", "release.json", "SHA256SUMS"} {
+			if !names[name] {
+				return false, errors.New("published release is missing assets; immutable releases require uploading all assets to a draft before publication")
+			}
+		}
+	}
+	return release.Draft, nil
+}
+
 func attachAssets(ctx context.Context, run runner, p plan, out, chartPath, imageDigest, chartDigest string) error {
 	chartSum, err := checksum(chartPath)
 	if err != nil {
@@ -426,9 +470,9 @@ func run(ctx context.Context, args []string, execute runner) error {
 	}
 	flags := flag.NewFlagSet("moco-release", flag.ContinueOnError)
 	tag := flags.String("tag", "", "GitHub release tag")
-	commit := flags.String("commit", "", "release event commit")
+	commit := flags.String("commit", "", "release tag commit")
 	repository := flags.String("repository", "", "GitHub owner/repository")
-	prerelease := flags.Bool("prerelease", false, "GitHub release prerelease status")
+	prerelease := flags.Bool("prerelease", false, "GitHub release prerelease status (default: derive from tag)")
 	planPath := flags.String("plan", "release-plan.json", "validated plan JSON")
 	output := flags.String("output", "", "GITHUB_OUTPUT file")
 	imageDigest := flags.String("image-digest", "", "published multi-platform image digest")
@@ -441,6 +485,13 @@ func run(ctx context.Context, args []string, execute runner) error {
 		return errors.New("release helper accepts no positional arguments")
 	}
 	if args[0] == "plan" {
+		// Tag pushes have no GitHub release flag yet. Derive it from SemVer,
+		// preserving explicit flag validation for callers supplying a release.
+		explicitPrerelease := false
+		flags.Visit(func(f *flag.Flag) { explicitPrerelease = explicitPrerelease || f.Name == "prerelease" })
+		if !explicitPrerelease {
+			*prerelease = semver.Prerelease("v"+strings.TrimPrefix(*tag, "v")) != ""
+		}
 		p, err := releasePlan(*tag, *commit, *repository, *prerelease)
 		if err != nil {
 			return err
@@ -468,6 +519,10 @@ func run(ctx context.Context, args []string, execute runner) error {
 		}
 		return outputs(*output, map[string]string{"exists": fmt.Sprint(exists), "digest": image.Digest})
 	case "publish-chart":
+		draft, err := prepareRelease(ctx, execute, p)
+		if err != nil {
+			return err
+		}
 		image, exists, err := imageStatus(ctx, execute, p)
 		if err != nil || !exists || image.Digest != *imageDigest {
 			return errors.New("published image is absent or differs from the validated digest")
@@ -476,7 +531,16 @@ func run(ctx context.Context, args []string, execute runner) error {
 		if err != nil {
 			return err
 		}
-		return attachAssets(ctx, execute, p, *out, path, *imageDigest, chart.Digest)
+		if err := attachAssets(ctx, execute, p, *out, path, *imageDigest, chart.Digest); err != nil {
+			return err
+		}
+		if draft {
+			latest := semver.Prerelease("v"+p.Version) == ""
+			if output, err := execute(ctx, "gh", "release", "edit", p.Tag, "--repo", p.Repository, "--draft=false", "--latest="+fmt.Sprint(latest)); err != nil {
+				return fmt.Errorf("publish completed draft release: %s: %w", output, err)
+			}
+		}
+		return nil
 	default:
 		return errors.New("unknown release operation")
 	}

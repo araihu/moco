@@ -1,10 +1,11 @@
 # SemVer image and Helm releases
 
-Publishing a GitHub Release triggers `.github/workflows/release.yml`. It
-publishes the Moco image and Helm chart to GHCR, then attaches the chart,
-`release.json` and `SHA256SUMS` to that GitHub Release. A tag push alone does not
-publish artifacts. Stable releases and prereleases both use GitHub's
-[`release.published` event](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release).
+Pushing a version tag triggers `.github/workflows/release.yml`. It validates
+the source, publishes the Moco image and Helm chart to GHCR, creates a draft
+GitHub Release and attaches the chart, `release.json` and `SHA256SUMS` before
+publishing it. This order supports GitHub's
+[immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases): assets lock at publication. Do not publish
+the release manually while CI is running. Invalid version tags fail validation.
 
 ## Versions and destinations
 
@@ -39,9 +40,10 @@ deployment inputs.
 
 ## Validation and publication order
 
-1. A read-only preparation job validates tag syntax, prerelease status and
-   repository identity. The GitHub event SHA, checked-out commit and dereferenced
-   Git tag must match, the source checkout must be clean, and the commit must
+1. A read-only preparation job validates tag syntax and repository identity,
+   and derives prerelease status from the SemVer suffix. The GitHub event SHA,
+   checked-out commit and dereferenced Git tag must match, the source checkout
+   must be clean, and the commit must
    be reachable from `origin/main`.
 2. The release reuses the complete `check.yml` workflow against that commit:
    Dagger/application checks, production image/alert tests, CLI tests and the
@@ -54,11 +56,14 @@ deployment inputs.
    cross-compiling static binaries without QEMU. The image includes source,
    revision and version metadata, BuildKit provenance and SBOM attestations.
    External actions and Go/BuildKit images are pinned by commit/digest.
-5. The release helper pins the actual image digest into a temporary chart
-   copy, sets versions/revision, runs lint and rendering with production-input
-   fixtures, packages and verifies it, then pushes the OCI chart.
-6. The workflow attaches the exact chart archive, a JSON manifest recording
-   source/version/image/chart digests and archive checksum, and checksum file.
+5. The release helper creates or resumes a draft release and pins the actual
+   image digest into a temporary chart copy, sets versions/revision, runs lint
+   and rendering with production-input fixtures, packages and verifies it,
+   then pushes the OCI chart.
+6. The helper attaches the exact chart
+   archive, a JSON manifest recording source/version/image/chart digests and
+   archive checksum, and checksum file. It publishes the draft only after all
+   uploads succeed. SemVer prereleases are marked accordingly and never latest.
 
 The workflow does not change cluster resources. Source/release tags should
 remain immutable. Registry owners can still move tags manually; use immutable
@@ -84,20 +89,19 @@ after choosing an unused version and updating local `main`:
 git pull --ff-only origin main
 git tag -a v1.2.3 -m 'Moco 1.2.3'
 git push origin v1.2.3
-gh release create v1.2.3 --verify-tag --title 'Moco 1.2.3' --generate-notes
 ```
 
-For a prerelease, use a prerelease tag and GitHub's matching flag:
+For a prerelease, push a prerelease tag; CI derives GitHub's matching flag:
 
 ```sh
 git tag -a v1.3.0-rc.1 -m 'Moco 1.3.0-rc.1'
 git push origin v1.3.0-rc.1
-gh release create v1.3.0-rc.1 --verify-tag --prerelease --generate-notes
 ```
 
-Publishing a draft through the UI also starts the workflow. The Release exists
-while CI runs; artifacts become available after validation/publication finish.
-The versions above are illustrative, not a list of artifacts already published.
+A manually created draft can be resumed if its tag and prerelease flag match.
+Publishing through the UI does not trigger this workflow. The completed Release
+appears after validation, OCI publication and asset uploads finish. The versions
+above are illustrative, not a list of artifacts already published.
 
 ## Consume a published release
 
@@ -138,8 +142,11 @@ Re-run failed jobs after correcting an operational problem:
   supported Linux architectures are present.
 - Existing charts are pulled and reused only when version, source revision,
   schema and image digest match. Their original archive bytes are retained.
-- Existing GitHub assets are downloaded and checksum-compared. Identical assets
+- Existing draft assets are downloaded and checksum-compared. Identical assets
   are skipped, missing assets uploaded and conflicting assets never clobbered.
+- Completed releases can be verified on retry if all expected assets exist.
+  A published release missing assets fails before chart publication: assets
+  cannot be added to an immutable release. Do not delete or retag it to retry.
 - Authentication, authorization and transport errors fail the job, rather than
   becoming an absent version. Do not delete packages/assets to work around a
   source/digest conflict; publish a new SemVer version for changed source.
@@ -161,3 +168,14 @@ ancestry, registry absence versus failure, image/chart identity conflicts,
 publication resumption and asset idempotency. Chart checks additionally package
 stable, prerelease and build-metadata versions with real Helm, leaving source
 charts unchanged. Tests do not require publication credentials.
+
+## Initial release v0.0.1
+
+The initial release used the previous `release.published` workflow. Its complete
+validation passed and both public OCI packages were published, but GitHub's
+immutability policy prevented attaching files afterward. The tag and packages
+remain unchanged. Use the OCI chart for this version; verified digests and the
+chart archive checksum are recorded in the
+[v0.0.1 release notes](https://github.com/araihu/moco/releases/tag/v0.0.1). The
+original workflow run reports an asset-upload failure. New versions use the
+draft-first flow above.

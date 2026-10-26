@@ -48,8 +48,8 @@ func TestWorkflowUsesPinnedDaggerAndIsolatedRunners(t *testing.T) {
 
 func TestReleasePublicationRequiresValidatedSource(t *testing.T) {
 	workflow := readRepoFile(t, ".github/workflows/release.yml")
-	if !strings.Contains(workflow, "types: [published]") || strings.Contains(workflow, "workflow_dispatch:") {
-		t.Fatal("publication must originate from a published GitHub release")
+	if !strings.Contains(workflow, "tags: ['v*', '[0-9]*']") || strings.Contains(workflow, "types: [published]") || strings.Contains(workflow, "workflow_dispatch:") {
+		t.Fatal("publication must originate from a version tag before the release becomes immutable")
 	}
 	if !strings.Contains(workflow, "needs: [prepare, validate]") || !strings.Contains(workflow, "uses: ./.github/workflows/check.yml") || !strings.Contains(readRepoFile(t, ".github/workflows/check.yml"), "workflow_call:") {
 		t.Fatal("publication must reuse the complete check workflow after source validation")
