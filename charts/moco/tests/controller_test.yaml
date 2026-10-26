@@ -1,0 +1,50 @@
+suite: private controller administrative access
+templates:
+  - templates/statefulset.yaml
+  - templates/networkpolicy.yaml
+  - templates/admin-service.yaml
+values:
+  - ../ci/test-values.yaml
+set:
+  controllerAccess.enabled: true
+  controllerAccess.namespaceSelector:
+    matchLabels: {kubernetes.io/metadata.name: moco}
+  controllerAccess.podSelector.matchLabels.app: moco-controller
+tests:
+  - it: exposes a separate internal administrative service without monitoring
+    template: templates/admin-service.yaml
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.ports
+          value: [{name: admin, port: 9443, targetPort: admin, protocol: TCP}]
+  - it: allows only pods and namespaces matching both selectors
+    template: templates/networkpolicy.yaml
+    asserts:
+      - equal:
+          path: spec.ingress[1].from
+          value:
+            - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: moco}}
+              podSelector: {matchLabels: {app: moco-controller}}
+  - it: opens the administrative listener for controller access
+    template: templates/statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: MOCO_ADMIN_ADDR, value: ':9443'}
+  - it: requires a nonempty pod selector
+    template: templates/statefulset.yaml
+    set:
+      controllerAccess.podSelector.matchLabels: null
+    asserts:
+      - failedTemplate:
+          errorPattern: controller
+  - it: refuses administrative access without NetworkPolicy
+    template: templates/statefulset.yaml
+    set:
+      networkPolicy.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: 'networkPolicy|NetworkPolicy'

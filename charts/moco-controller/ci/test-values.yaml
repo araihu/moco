@@ -1,0 +1,5 @@
+image:
+  repository: ghcr.io/araihu/moco-controller
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+publicURL: https://moco.moco.svc:8443
+adminURL: https://moco-admin.moco.svc:9443

@@ -1,0 +1,14 @@
+{{- if .Values.controllerAccess.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "moco.fullname" . }}-admin
+  labels:
+    {{- include "moco.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "moco.selectorLabels" . | nindent 4 }}
+  ports:
+    - {name: admin, port: 9443, targetPort: admin, protocol: TCP}
+{{- end }}

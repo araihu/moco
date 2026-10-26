@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "moco-controller.name" . }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      {{- include "moco-controller.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "moco-controller.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "moco-controller.name" . }}
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: controller
+          image: {{ printf "%s@%s" .Values.image.repository .Values.image.digest | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --namespace={{ .Release.Namespace }}
+            - --credentials-secret={{ .Values.credentialsSecret }}
+            - --public-url={{ .Values.publicURL }}
+            - --admin-url={{ .Values.adminURL }}
+            - --subject={{ .Values.subject }}
+            - --reconcile-interval={{ .Values.reconcileInterval }}
+          ports:
+            - {name: health, containerPort: 8081}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

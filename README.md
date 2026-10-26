@@ -400,3 +400,5 @@ The secret API uses S3-like logical paths in query parameters. Item
 operations use `/secret?path=prod/db/password`; metadata listing uses
 `/secrets?prefix=prod/db/`. Paths forbid empty, `.`, and `..` segments, and
 metadata operations never return values.
+
+O [controller Kubernetes](docs/operations/kubernetes-controller.md) gerencia tenants, vaults e autorização declarativamente com três CRDs; o ESO entrega os valores dos segredos às aplicações. O código fica no módulo `controller/` e o chart em `charts/moco-controller/`.

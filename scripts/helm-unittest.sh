@@ -41,4 +41,4 @@ tar -xzf "$archive" -C "$stage_dir/plugins/unittest"
 export HELM_PLUGINS="$stage_dir/plugins"
 cd "$repo_dir"
 echo "helm-unittest v$version ($platform)"
-"${HELM:-helm}" unittest --strict "$@" charts/moco
+"${HELM:-helm}" unittest --strict "$@" "${CHART_DIR:-charts/moco}"

@@ -404,3 +404,7 @@ contract. The following table includes all configurable leaf values.
 | `tolerations` | `[]` | Standard Kubernetes pod tolerations. |
 | `affinity` | `{}` | Standard Kubernetes affinity; the storage class/PV must enforce data locality. |
 | `podAnnotations` | `{}` | Additional pod annotations; credential revision is chart-managed. |
+
+## Declarative management controller
+
+`controllerAccess.enabled` opens a dedicated private ClusterIP administrative Service and requires explicit nonempty namespace and pod selectors plus NetworkPolicy. It is independent of `monitoring.enabled`. Include the controller in public API peers and issue a certificate covering both configured DNS names. See the [controller runbook](../../docs/operations/kubernetes-controller.md) for credentials and `MocoTenant`, `MocoVault`, `MocoAuthorization` examples.

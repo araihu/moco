@@ -1,0 +1,49 @@
+suite: namespace and credential isolation
+templates:
+  - templates/deployment.yaml
+  - templates/rbac.yaml
+values:
+  - ../ci/test-values.yaml
+tests:
+  - it: runs an immutable nonroot controller with a readonly root filesystem
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 65532
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '@sha256:[a-f0-9]{64}$'
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --namespace=NAMESPACE
+  - it: grants only get on the named credential Secret
+    template: templates/rbac.yaml
+    documentSelector:
+      path: kind
+      value: Role
+    asserts:
+      - equal:
+          path: rules[2]
+          value:
+            apiGroups: ['']
+            resources: [secrets]
+            resourceNames: [moco-controller-credentials]
+            verbs: [get]
+      - equal:
+          path: rules[0].verbs
+          value: [get, list, watch]
+  - it: creates no cluster role or credential secret
+    template: templates/rbac.yaml
+    asserts:
+      - hasDocuments:
+          count: 3

@@ -34,6 +34,12 @@ capabilities:
 {{- range $i, $claim := $claims -}}
 {{- if $claim -}}{{- range $j, $other := $claims -}}{{- if and (ne $i $j) (eq $claim $other) }}{{ fail "data, local backup and mirror claims must be distinct" }}{{ end -}}{{- end -}}{{- end -}}
 {{- end -}}
+{{- if .Values.controllerAccess.enabled -}}
+{{- if not .Values.networkPolicy.enabled }}{{ fail "controller access requires NetworkPolicy protection" }}{{ end -}}
+{{- range list .Values.controllerAccess.namespaceSelector .Values.controllerAccess.podSelector -}}
+{{- if and (empty .matchLabels) (empty .matchExpressions) }}{{ fail "controller access requires explicit nonempty namespace and pod selectors" }}{{ end -}}
+{{- end -}}
+{{- end -}}
 {{- if .Values.monitoring.enabled -}}
 {{- if not .Values.networkPolicy.enabled }}{{ fail "monitoring requires NetworkPolicy protection for the administrative listener" }}{{ end -}}
 {{- range list .Values.monitoring.namespaceSelector .Values.monitoring.podSelector -}}

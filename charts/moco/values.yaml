@@ -88,3 +88,9 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 podAnnotations: {}
+
+# Private management API access, independent of Prometheus integration.
+controllerAccess:
+  enabled: false
+  namespaceSelector: {}
+  podSelector: {}

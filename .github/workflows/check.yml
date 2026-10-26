@@ -41,7 +41,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: helm-unittest-${{ matrix.helm }}
-          path: bin/chart-tests.xml
+          path: |
+            bin/chart-tests.xml
+            bin/controller-chart-tests.xml
           if-no-files-found: warn
           retention-days: 7
       - name: Validate rendered Kubernetes API objects

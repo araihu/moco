@@ -37,7 +37,7 @@ GOLANGCI_LINT := $(abspath $(TOOL_BIN_DIR))/golangci-lint
 endif
 
 .PHONY: workflow-lint spec-lint spec-bundle cli-spec-bundle cli-spec-check cli-generate cli-check-generated cli-build cli-check cli-smoke api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test load-test image image-check monitoring-check
-.PHONY: chart-check chart-unittest vind-test
+.PHONY: chart-check chart-unittest vind-test controller-check controller-generate controller-image
 
 workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
@@ -45,6 +45,16 @@ workflow-lint:
 chart-unittest:
 	@mkdir -p "$(dir $(CHART_TEST_REPORT))"
 	HELM="$(HELM)" bash scripts/helm-unittest.sh --output-type JUnit --output-file "$(CHART_TEST_REPORT)"
+	HELM="$(HELM)" CHART_DIR=charts/moco-controller bash scripts/helm-unittest.sh --output-type JUnit --output-file bin/controller-chart-tests.xml
+
+controller-generate:
+	$(MAKE) -C controller generate
+
+controller-check:
+	$(MAKE) -C controller check
+
+controller-image:
+	docker build -t "moco-controller:$(shell git rev-parse --short HEAD)" controller
 
 chart-check: chart-unittest
 	HELM="$(HELM)" GOWORK=off $(GO) -C tools test -tags=helmtest ./helmchart ./cmd/moco-release -count=1
@@ -115,12 +125,14 @@ test:
 
 lint:
 	GOWORK=off $(GOLANGCI_LINT) run --config .golangci.yml ./...
+	cd controller && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
 	cd tools && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
 	cd cli && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
 	@if [ -f dagger/dagger.gen.go ]; then cd dagger && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...; fi
 
 vulncheck:
 	GOWORK=off $(GOVULNCHECK) -test ./...
+	GOWORK=off $(GOVULNCHECK) -C controller -test ./...
 	GOWORK=off $(GOVULNCHECK) -C tools -test ./...
 	GOWORK=off $(GOVULNCHECK) -C dagger/third_party/otel-go -test ./...
 	@set -eu; scanner="$(GOVULNCHECK)"; \
@@ -159,7 +171,7 @@ monitoring-check:
 	docker start -a "$$fixture"; \
 	test "$$(docker inspect --format '{{.State.ExitCode}}' "$$fixture")" = 0
 
-check: workflow-lint spec-lint api-generate cli-spec-check sqlc-generate test lint vulncheck operational-test load-test cli-check
+check: controller-check workflow-lint spec-lint api-generate cli-spec-check sqlc-generate test lint vulncheck operational-test load-test cli-check
 	GOWORK=off $(GO) vet ./...
 	GOWORK=off $(GO) -C dagger/third_party/otel-go vet ./...
 	@if [ -f dagger/dagger.gen.go ]; then GOWORK=off $(GO) -C dagger vet ./...; fi

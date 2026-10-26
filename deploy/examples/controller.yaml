@@ -1,0 +1,40 @@
+# Apply in the controller namespace. externalId is an explicit adoption key.
+apiVersion: moco.araihu.io/v1alpha1
+kind: MocoTenant
+metadata:
+  name: homelab
+spec:
+  externalId: kubernetes://homelab/platform/tenant-homelab
+  name: homelab
+  description: Homelab workloads
+  labels: {owner: platform}
+---
+apiVersion: moco.araihu.io/v1alpha1
+kind: MocoVault
+metadata:
+  name: applications
+spec:
+  tenantRef: homelab
+  externalId: kubernetes://homelab/platform/vault-applications
+  name: applications
+---
+apiVersion: moco.araihu.io/v1alpha1
+kind: MocoAuthorization
+metadata:
+  name: moco
+spec:
+  # Replace with the current GET /internal/v1/authorization revision before adoption.
+  adoptRevision: 0
+  roleBindings:
+    - principal: eso-reader
+      role: homelab-reader
+      tenantRef: homelab
+  policies:
+    # Preserve your break-glass admin explicitly; replace the subject if different.
+    - {subject: bootstrap-admin, domain: '*', path: /api/v1/*, method: '*'}
+    - {subject: bootstrap-admin, domain: '*', path: /internal/v1/*, method: '*'}
+    - subject: homelab-reader
+      tenantRef: homelab
+      path: /api/v1/tenants/{tenantId}/vaults/{vaultId}/secret
+      method: GET
+      secretPathPrefix: apps/

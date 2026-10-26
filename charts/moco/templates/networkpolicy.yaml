@@ -18,6 +18,15 @@ spec:
       from:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- if .Values.controllerAccess.enabled }}
+    - ports:
+        - {port: 9443, protocol: TCP}
+      from:
+        - namespaceSelector:
+            {{- toYaml .Values.controllerAccess.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.controllerAccess.podSelector | nindent 12 }}
+    {{- end }}
     {{- if .Values.monitoring.enabled }}
     - ports:
         - {port: 9443, protocol: TCP}

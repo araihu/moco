@@ -84,14 +84,14 @@ spec:
             {{- toYaml .Values.resources.server | nindent 12 }}
           ports:
             - {name: https, containerPort: 8443, protocol: TCP}
-            {{- if .Values.monitoring.enabled }}
+            {{- if or .Values.monitoring.enabled .Values.controllerAccess.enabled }}
             - {name: admin, containerPort: 9443, protocol: TCP}
             {{- end }}
           env:
             - {name: MOCO_PROFILE, value: production}
             - {name: MOCO_ADDR, value: ":8443"}
             - name: MOCO_ADMIN_ADDR
-              value: {{ ternary ":9443" "127.0.0.1:9443" .Values.monitoring.enabled | quote }}
+              value: {{ ternary ":9443" "127.0.0.1:9443" (or .Values.monitoring.enabled .Values.controllerAccess.enabled) | quote }}
             - {name: MOCO_DB_PATH, value: /data/moco/moco.db}
             - {name: MOCO_AUTH_CONFIG, value: /run/moco/access.json}
             - {name: MOCO_CURSOR_HMAC_KEY_FILE, value: /run/moco/cursor-key}

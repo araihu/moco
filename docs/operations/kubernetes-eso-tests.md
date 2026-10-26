@@ -111,3 +111,7 @@ The printed private workspace holds the matching CLI config and kubeconfig.
 Use that config with `vcluster --config PATH/config.json delete CLUSTER --driver
 docker` afterward, then remove the private workspace. Treat a kept cluster and
 its workspace as sensitive even though its credentials are disposable.
+
+## Management controller acceptance
+
+The harness now builds the current `controller/` source into a digest-addressed OCI archive and imports it into the vind node. It installs `charts/moco-controller` and creates tenant, vault and the full authorization snapshot through the three CRDs before configuring ESO. Additional checks cover unresolved references, CRD identity/singleton validation, external drift repair, controller restart and status recovery, credential Secret refresh and retained resources after CR deletion. The image build requires Docker buildx; a unique temporary builder is removed after exporting the archive. See [the controller runbook](kubernetes-controller.md).

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: moco-controller
+description: Namespaced declarative tenant, vault and authorization management for one Moco instance.
+type: application
+version: 0.1.0
+appVersion: dev
+kubeVersion: ">=1.32.0-0"

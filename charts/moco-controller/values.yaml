@@ -1,0 +1,15 @@
+# Build controller/Dockerfile and publish an immutable digest before deploying.
+image:
+  repository: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+# Same namespace as the controller and CRs. Contains only token and ca.pem.
+credentialsSecret: moco-controller-credentials
+publicURL: ""
+adminURL: ""
+# Must match the principal ID for this token in Moco's access.json.
+subject: moco-controller
+reconcileInterval: 30s
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 512Mi}

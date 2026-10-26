@@ -68,6 +68,7 @@ class Acceptance:
         self.credentials = directory / "credentials"
         self.values_path = directory / "values.json"
         self.reader = secrets.token_hex(32)
+        self.controller_token = secrets.token_hex(32)
         self.password = secrets.token_bytes(32)
         self.key = "apps/demo/password+space &value"
 
@@ -200,7 +201,7 @@ class Acceptance:
                      "-keyout", c/"ca.key", "-out", c/"ca.pem"])
         command(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=moco",
                  "-keyout", c/"tls.key", "-out", c/"server.csr"])
-        (c/"san.txt").write_text("subjectAltName=DNS:localhost,DNS:moco,DNS:moco."+self.ns+".svc,DNS:moco."+self.ns+".svc.cluster.local,DNS:moco-metrics."+self.ns+".svc\n"
+        (c/"san.txt").write_text("subjectAltName=DNS:localhost,DNS:moco,DNS:moco."+self.ns+".svc,DNS:moco."+self.ns+".svc.cluster.local,DNS:moco-metrics."+self.ns+".svc,DNS:moco-admin."+self.ns+".svc\n"
             "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
             "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
         command(["openssl", "x509", "-req", "-in", c/"server.csr", "-CA", c/"ca.pem", "-CAkey", c/"ca.key",
@@ -219,6 +220,13 @@ class Acceptance:
         self.access = json.loads((self.credentials/"access.json").read_text())
         self.access["principals"].append({"id": "eso-reader", "tokenSha256": hashlib.sha256(self.reader.encode()).hexdigest()})
         (self.credentials/"access.json").write_text(json.dumps(self.access))
+        self.access["principals"].append({"id": "moco-controller", "tokenSha256": hashlib.sha256(self.controller_token.encode()).hexdigest()})
+        # Bootstrap management privileges; authoritative CR reconciliation replaces these.
+        self.access["policies"].extend([
+            {"subject": "moco-controller", "domain": "*", "path": "/api/v1/*", "method": "*"},
+            {"subject": "moco-controller", "domain": "*", "path": "/internal/v1/authorization", "method": "GET"},
+            {"subject": "moco-controller", "domain": "*", "path": "/internal/v1/authorization", "method": "PUT"}])
+        (self.credentials/"access.json").write_text(json.dumps(self.access))
         self.certificate()
         self.credentials_secret()
         self.secret(self.ns, "metrics-only", {"metrics-token": (self.credentials/"metrics-token").read_bytes(), "ca.pem": (self.credentials/"ca.pem").read_bytes()})
@@ -230,7 +238,9 @@ class Acceptance:
                         "intervalSeconds": 30, "timeoutSeconds": 10, "maxAgeSeconds": 120},
             "monitoring": {"enabled": True, "existingSecret": "metrics-only", "namespaceSelector": {
                 "matchLabels": {"kubernetes.io/metadata.name": self.obs}}, "podSelector": {"matchLabels": {"app": "prometheus"}}},
-            "networkPolicy": {"publicPeers": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": n}}} for n in [self.app, self.eso]]}}
+            "controllerAccess": {"enabled": True, "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": self.ns}},
+                "podSelector": {"matchLabels": {"app.kubernetes.io/name": "moco-controller"}}},
+            "networkPolicy": {"publicPeers": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": n}}} for n in [self.app, self.eso, self.ns]]}}
         self.upgrade()
         self.start_forward()
 
@@ -296,25 +306,94 @@ class Acceptance:
         return json.loads(self.python("workbench", self.ns,
                           "from pathlib import Path; print(Path('/storage/backups/moco/status.json').read_text())").stdout)
 
+    def controller_install(self):
+        self.secret(self.ns, "moco-controller-credentials", {"token": self.controller_token.encode(),
+                    "ca.pem": (self.credentials/"ca.pem").read_bytes()})
+        values = {"image": {"repository": self.options.controller_image.split("@")[0],
+                            "digest": self.options.controller_image.split("@")[1], "pullPolicy": "Never"},
+                  "publicURL": f"https://moco.{self.ns}.svc:8443", "adminURL": f"https://moco-admin.{self.ns}.svc:9443",
+                  "reconcileInterval": "2s"}
+        path = self.directory/"controller-values.json"
+        path.write_text(json.dumps(values))
+        command([self.options.helm, "upgrade", "--install", "moco-management", ROOT/"charts/moco-controller",
+                 "--namespace", self.ns, "--kubeconfig", self.options.kubeconfig, "-f", path, "--wait", "--timeout", "240s"], timeout=270)
+        self.kubectl("wait", "--for=condition=Established", "crd/mocotenants.moco.araihu.io",
+                     "crd/mocovaults.moco.araihu.io", "crd/mocoauthorizations.moco.araihu.io", "--timeout=60s")
+
+    def cr(self, kind, name, spec):
+        return self.resource(kind, name, spec, self.ns, api="moco.araihu.io/v1alpha1")
+
+    def cr_ready(self, kind, name):
+        obj = self.get(kind, name, self.ns)
+        return any(c["type"] == "Ready" and c["status"] == "True" and
+                   c.get("observedGeneration") == obj["metadata"]["generation"]
+                   for c in obj.get("status", {}).get("conditions", []))
+
     def seed(self):
-        tenant = {"name": "eso-acceptance", "externalId": "moco-acceptance-tenant"}
-        headers = {"Idempotency-Key": "moco-acceptance-tenant"}
-        status, first, _ = self.api("/api/v1/tenants", method="POST", body=tenant, headers=headers)
-        assert status == 201
-        assert self.api("/api/v1/tenants", method="POST", body=tenant, headers=headers)[1]["id"] == first["id"]
-        self.tenant = first["id"]
-        self.vault = self.api(f"/api/v1/tenants/{self.tenant}/vaults", method="POST",
-                             body={"name": "demo-app", "externalId": "moco-acceptance-vault"})[1]["id"]
+        self.tenant_cr = self.cr("MocoTenant", "demo", {"name": "eso-acceptance", "externalId": "moco-acceptance-tenant"})
+        self.vault_cr = self.cr("MocoVault", "demo", {"name": "demo-app", "externalId": "moco-acceptance-vault", "tenantRef": "demo"})
+        # Start with an unresolved dependency to exercise periodic reference reconciliation.
+        self.apply(self.vault_cr)
+        wait(lambda: self.ready("mocovault", "demo", self.ns, value="False"), "vault accepted a missing tenant reference")
+        self.apply(self.tenant_cr)
+        wait(lambda: self.cr_ready("mocotenants", "demo"), "controller did not create tenant")
+        wait(lambda: self.cr_ready("mocovaults", "demo"), "controller did not create dependent vault")
+        self.tenant = self.get("mocotenants", "demo", self.ns)["status"]["id"]
+        self.vault = self.get("mocovaults", "demo", self.ns)["status"]["id"]
         self.route = f"/api/v1/tenants/{self.tenant}/vaults/{self.vault}/secret"
         self.secret_route = self.route + "?" + urllib.parse.urlencode({"path": self.key})
-        status, snapshot, headers = self.api("/internal/v1/authorization", internal=True)
+        status, snapshot, _ = self.api("/internal/v1/authorization", internal=True)
         assert status == 200
-        self.policy = {"roleBindings": snapshot["roleBindings"], "policies": snapshot["policies"] + [
-            {"subject": "eso-reader", "domain": self.tenant, "path": self.route, "method": "GET"}]}
-        assert self.api("/internal/v1/authorization", internal=True, method="PUT", body=self.policy,
-                        headers={"If-Match": headers["ETag"]})[0] == 200
+        # Retain bootstrap-admin for break-glass and operational drills; controller injects its own narrow permissions.
+        policies = [p for p in snapshot["policies"] if p["subject"] != "moco-controller"]
+        self.authorization_cr = self.cr("MocoAuthorization", "moco", {"adoptRevision": snapshot["revision"], "roleBindings": [],
+            "policies": policies + [{"subject": "eso-reader", "tenantRef": "demo", "path": self.route, "method": "GET"}]})
+        self.apply(self.authorization_cr)
+        wait(lambda: self.cr_ready("mocoauthorizations", "moco"), "controller did not apply authoritative authorization")
         assert self.api(self.secret_route, method="PUT", body={"value": base64.b64encode(self.password).decode()})[0] == 201
         assert self.api(self.secret_route, token=self.reader)[0] == 200
+        assert self.api(self.secret_route, token=self.controller_token)[0] == 403, "controller must not read secret values"
+        self.apply([self.tenant_cr, self.vault_cr, self.authorization_cr])
+        time.sleep(4)
+        assert self.get("mocotenants", "demo", self.ns)["status"]["id"] == self.tenant
+        assert self.get("mocovaults", "demo", self.ns)["status"]["id"] == self.vault
+
+    def controller_drift(self):
+        path = f"/api/v1/tenants/{self.tenant}"
+        status, tenant, headers = self.api(path)
+        assert status == 200
+        assert self.api(path, method="PUT", body={"name": "external-drift", "description": None, "labels": {}},
+                        headers={"If-Match": headers["ETag"]})[0] == 200
+        wait(lambda: self.api(path)[1]["name"] == "eso-acceptance", "controller did not repair tenant drift")
+        # External writes to the full snapshot are repaired without dropping management access.
+        _, snapshot, headers = self.api("/internal/v1/authorization", internal=True)
+        desired = {"policies": [p for p in snapshot["policies"] if p["subject"] != "eso-reader"], "roleBindings": snapshot["roleBindings"]}
+        assert self.api("/internal/v1/authorization", internal=True, method="PUT", body=desired, headers={"If-Match": headers["ETag"]})[0] == 200
+        wait(lambda: self.api(self.secret_route, token=self.reader)[0] == 200, "controller did not repair authorization drift")
+        # Remove status, then restart the controller. Stable external IDs recover the same resources.
+        self.kubectl("patch", "mocotenants", "demo", "-n", self.ns, "--subresource=status", "--type=merge", "-p", '{"status":null}')
+        self.kubectl("rollout", "restart", "deployment/moco-management-controller", "-n", self.ns)
+        self.kubectl("rollout", "status", "deployment/moco-management-controller", "-n", self.ns, "--timeout=120s")
+        wait(lambda: self.cr_ready("mocotenants", "demo"), "controller did not recover tenant status")
+        assert self.get("mocotenants", "demo", self.ns)["status"]["id"] == self.tenant
+        for kind, name, spec in [("MocoTenant", "demo", {**self.tenant_cr["spec"], "externalId": "changed"}),
+                                  ("MocoVault", "demo", {**self.vault_cr["spec"], "tenantRef": "changed"}),
+                                  ("MocoAuthorization", "second", self.authorization_cr["spec"])]:
+            result = self.kubectl("apply", "--dry-run=server", "-f", "-", data=json.dumps(self.cr(kind, name, spec)).encode(), check=False)
+            assert result.returncode != 0, "CRD admitted an immutable identity change or a second snapshot"
+        # Invalid credential rotation must fail closed, then recover with the same Secret name.
+        self.secret(self.ns, "moco-controller-credentials", {"token": b"invalid", "ca.pem": (self.credentials/"ca.pem").read_bytes()})
+        wait(lambda: self.ready("mocotenants", "demo", self.ns, value="False"), "controller accepted invalid credentials")
+        self.secret(self.ns, "moco-controller-credentials", {"token": self.controller_token.encode(), "ca.pem": (self.credentials/"ca.pem").read_bytes()})
+        wait(lambda: self.cr_ready("mocotenants", "demo"), "controller did not recover rotated credentials")
+
+    def controller_retention(self):
+        for kind, name in [("mocoauthorizations", "moco"), ("mocovaults", "demo"), ("mocotenants", "demo")]:
+            self.kubectl("delete", kind, name, "-n", self.ns, "--wait=true")
+        assert self.api(f"/api/v1/tenants/{self.tenant}/vaults/{self.vault}")[0] == 200
+        assert self.api(self.secret_route, token=self.reader)[0] == 200
+        self.force_sync()
+        wait(self.secret_matches, "deleting management CRs destroyed retained secrets")
 
     def isolation(self):
         tenant = self.api("/api/v1/tenants", method="POST", body={"name": "other"})[1]["id"]
@@ -409,12 +488,18 @@ class Acceptance:
 
     def token_rotation(self):
         previous, self.reader = self.reader, secrets.token_hex(32)
+        old_controller, self.controller_token = self.controller_token, secrets.token_hex(32)
+        self.access["principals"][2]["tokenSha256"] = hashlib.sha256(self.controller_token.encode()).hexdigest()
         self.access["principals"][1]["tokenSha256"] = hashlib.sha256(self.reader.encode()).hexdigest()
         (self.credentials/"access.json").write_text(json.dumps(self.access))
         self.credentials_secret()
         self.values["credentials"]["revision"] = "3"
         self.upgrade()
         self.start_forward()
+        assert self.api("/api/v1/tenants", token=old_controller)[0] == 401
+        wait(lambda: self.ready("mocotenants", "demo", self.ns, value="False"), "controller retained access after token revocation")
+        self.secret(self.ns, "moco-controller-credentials", {"token": self.controller_token.encode(), "ca.pem": (self.credentials/"ca.pem").read_bytes()})
+        wait(lambda: self.cr_ready("mocotenants", "demo"), "controller failed after management token rotation")
         assert self.api(self.secret_route, token=previous)[0] == 401
         assert self.api(self.secret_route, token=self.reader)[0] == 200
         self.reader_secret()
@@ -528,7 +613,9 @@ except (urllib.error.URLError,TimeoutError,socket.timeout):
         for name, action in [
             ("vind-calico-eso-install", self.infrastructure), ("separate-persistent-storage-and-mirror", self.storage),
             ("production-chart-tls-and-verified-backup-readiness", self.install),
-            ("idempotent-api-bootstrap-and-scoped-policy", self.seed), ("tenant-vault-write-and-admin-isolation", self.isolation),
+            ("controller-installation-and-namespaced-rbac", self.controller_install),
+            ("declarative-tenant-vault-and-authoritative-authorization", self.seed),
+            ("controller-drift-status-recovery-credential-rotation-and-crd-guards", self.controller_drift), ("tenant-vault-write-and-admin-isolation", self.isolation),
             ("eso-declarative-sync-url-encoding-binary-value-and-consumer", self.eso_sync),
             ("conditional-write-and-live-consumer-update", self.updates),
             ("eso-invalid-token-retention-and-recovery", self.auth_failure), ("eso-tls-trust-failure-and-recovery", self.tls_failure),
@@ -536,7 +623,8 @@ except (urllib.error.URLError,TimeoutError,socket.timeout):
             ("reader-token-rotation-and-revocation", self.token_rotation), ("networkpolicy-and-protected-metrics", self.network),
             ("automatic-verified-mirrored-snapshot", self.snapshot), ("root-key-rotation-and-rewrap", self.root_rotation),
             ("mirror-loss-readiness-and-recovery", self.mirror_failure), ("pod-replacement-with-persistent-data", self.pod_restart),
-            ("offline-mirror-restore-with-historical-root-key-and-eso-resync", self.restore)]:
+            ("offline-mirror-restore-with-historical-root-key-and-eso-resync", self.restore),
+            ("controller-deletion-retains-data-and-eso-access", self.controller_retention)]:
             self.checkpoint(name, action)
 
 
@@ -546,13 +634,14 @@ def main():
     parser.add_argument("--cluster-name", default="moco-eso-e2e")
     parser.add_argument("--kubectl", default="kubectl")
     parser.add_argument("--helm", default="helm")
+    parser.add_argument("--controller-image", required=True, help="Source-built OCI digest imported into the vind node")
     parser.add_argument("--ops", type=Path, default=ROOT/"bin/moco-ops")
     parser.add_argument("--report", type=Path, default=ROOT/"bin/kubernetes-report.json")
     options = parser.parse_args()
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix="moco-acceptance-") as directory:
         drill = Acceptance(options, Path(directory))
-        report = {"passed": False, "driver": "vind", "mocoVersion": LOCK["mocoVersion"],
+        report = {"passed": False, "driver": "vind", "controllerImage": options.controller_image, "mocoVersion": LOCK["mocoVersion"],
                   "versions": LOCK, "startedAt": datetime.now(timezone.utc).isoformat(), "checks": drill.results,
                   "limitations": ["Static local RWO volumes in a disposable single-node cluster; not CSI/RWOP certification.",
                                   "Mirror uses a distinct volume on the same Docker host; not proof of off-host durability."]}

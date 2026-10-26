@@ -428,6 +428,26 @@
           "const": "moco.araihu.io/credentials-revision"
         }
       }
+    },
+    "controllerAccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "namespaceSelector",
+        "podSelector"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespaceSelector": {
+          "$ref": "#/definitions/selector"
+        },
+        "podSelector": {
+          "$ref": "#/definitions/selector"
+        }
+      }
     }
   },
   "required": [
@@ -703,6 +723,96 @@
                 "minLength": 1,
                 "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
               },
+              "namespaceSelector": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/selector"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "matchLabels"
+                        ],
+                        "properties": {
+                          "matchLabels": {
+                            "minProperties": 1
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "matchExpressions"
+                        ],
+                        "properties": {
+                          "matchExpressions": {
+                            "minItems": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              "podSelector": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/selector"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "matchLabels"
+                        ],
+                        "properties": {
+                          "matchLabels": {
+                            "minProperties": 1
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "matchExpressions"
+                        ],
+                        "properties": {
+                          "matchExpressions": {
+                            "minItems": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "networkPolicy": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "controllerAccess": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "controllerAccess": {
+            "properties": {
               "namespaceSelector": {
                 "allOf": [
                   {

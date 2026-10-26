@@ -10,6 +10,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import tarfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +66,22 @@ def main():
     success = False
     created = False
     try:
+        # Build an OCI archive from this exact checkout; no registry publication is needed.
+        archive = directory/"controller.oci.tar"
+        builder = name+"-builder"
+        subprocess.run(["docker", "buildx", "create", "--name", builder, "--driver", "docker-container"],
+                       check=True, stdout=log, stderr=subprocess.STDOUT, timeout=60)
+        try:
+            print("Building controller image from the current source", flush=True)
+            subprocess.run(["docker", "buildx", "build", "--builder", builder, "--provenance=false",
+                "--output", "type=oci,dest="+str(archive), "-t", "docker.io/library/moco-controller:acceptance",
+                str(ROOT/"controller")], check=True, stdout=log, stderr=subprocess.STDOUT, timeout=900)
+        finally:
+            subprocess.run(["docker", "buildx", "rm", builder], stdout=log, stderr=subprocess.STDOUT, timeout=60, check=False)
+        with tarfile.open(archive) as bundle:
+            index = json.load(bundle.extractfile("index.json"))
+            digest = index["manifests"][0]["digest"]
+        controller_image = "docker.io/library/moco-controller@"+digest
         print("Creating isolated vind cluster "+name, flush=True)
         # An isolated CLI config and --connect=false preserve global contexts.
         created = True
@@ -74,9 +91,14 @@ def main():
             subprocess.run([*base, "connect", name, "--driver", "docker", "--print"],
                            env=environment, stdout=target, stderr=log, check=True, timeout=120)
         kubeconfig.chmod(0o600)
+        node = "vcluster.cp."+name
+        subprocess.run(["docker", "cp", str(archive), node+":/tmp/controller.oci.tar"],
+                       check=True, stdout=log, stderr=subprocess.STDOUT, timeout=60)
+        subprocess.run(["docker", "exec", node, "ctr", "--namespace=k8s.io", "images", "import", "--digests", "/tmp/controller.oci.tar"],
+                       check=True, stdout=log, stderr=subprocess.STDOUT, timeout=120)
         subprocess.run([sys.executable, str(ROOT/"scripts/kubernetes_test.py"), "--kubeconfig", str(kubeconfig),
                         "--cluster-name", name, "--kubectl", kubectl, "--helm", options.helm,
-                        "--ops", str(Path(options.ops).resolve()), "--report", str(options.report.resolve())],
+                        "--controller-image", controller_image, "--ops", str(Path(options.ops).resolve()), "--report", str(options.report.resolve())],
                        env=environment, check=True, timeout=1800)
         success = True
     finally:
@@ -88,12 +110,15 @@ def main():
             result = subprocess.run(["docker", "ps", "-a", "--filter", "name=vcluster.cp."+name,
                                      "--format", "{{.Names}} {{.Status}}"], capture_output=True)
             (diagnostics/"docker-status.txt").write_bytes(result.stdout)
+            # Build/bootstrap output contains no credential inputs or Secret manifests.
+            import shutil
+            shutil.copyfile(directory/"bootstrap.log", diagnostics/"bootstrap.log")
             if kubeconfig.exists():
                 result = subprocess.run([kubectl, "--kubeconfig", str(kubeconfig), "get", "pods", "-A", "-o", "wide",
                                          "--request-timeout=15s"], capture_output=True, timeout=30)
                 (diagnostics/"pods.txt").write_bytes(result.stdout)
                 print(result.stdout.decode(), flush=True)
-                result = subprocess.run([kubectl, "--kubeconfig", str(kubeconfig), "get", "secretstores,externalsecrets",
+                result = subprocess.run([kubectl, "--kubeconfig", str(kubeconfig), "get", "secretstores,externalsecrets,mocotenants,mocovaults,mocoauthorizations",
                                          "-A", "-o", "json", "--request-timeout=15s"], capture_output=True, timeout=30)
                 if result.returncode == 0:
                     items = json.loads(result.stdout)["items"]
@@ -109,7 +134,7 @@ def main():
                     print(json.dumps(events), flush=True)
                 # Moco operation containers log metadata/errors, never secret responses.
                 with (diagnostics/"moco-operations.log").open("wb") as output:
-                    for pod, container in [("moco-0", "prepare-runtime"), ("moco-0", "backup"),
+                    for pod, container in [("deployment/moco-management-controller", "controller"), ("moco-0", "prepare-runtime"), ("moco-0", "backup"),
                                            ("prepare-mirror", "ops"), ("restore", "prepare"), ("restore", "restore")]:
                         result = subprocess.run([kubectl, "--kubeconfig", str(kubeconfig), "-n", name,
                             "logs", pod, "-c", container, "--tail=30", "--request-timeout=10s"],
