@@ -154,8 +154,13 @@ class Acceptance:
         self.apply(obj)
 
     def python(self, pod, namespace, code, payload=None, check=True):
-        return self.kubectl("exec", "-i", pod, "-n", namespace, "--", "python", "-c", code,
-                            data=json.dumps(payload).encode() if payload is not None else None, check=check)
+        result = self.kubectl("exec", "-i", pod, "-n", namespace, "--", "python", "-c", code,
+                             data=json.dumps(payload).encode() if payload is not None else None, check=False)
+        if check and result.returncode:
+            # Our probes never print their stdin, bearer credentials or secret values.
+            print(result.stderr.decode(errors="replace"), flush=True)
+            raise RuntimeError("Kubernetes Python probe failed")
+        return result
 
     def storage(self):
         self.node = json.loads(self.kubectl("get", "nodes", "-o", "json").stdout)["items"][0]["metadata"]["name"]
@@ -191,12 +196,16 @@ class Acceptance:
         if not (c / "ca.key").exists():
             command(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
                      "-subj", "/CN=Moco acceptance CA", "-addext", "basicConstraints=critical,CA:TRUE",
+                     "-addext", "keyUsage=critical,keyCertSign,cRLSign", "-addext", "subjectKeyIdentifier=hash",
                      "-keyout", c/"ca.key", "-out", c/"ca.pem"])
         command(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=moco",
                  "-keyout", c/"tls.key", "-out", c/"server.csr"])
-        (c/"san.txt").write_text("subjectAltName=DNS:localhost,DNS:moco,DNS:moco."+self.ns+".svc,DNS:moco."+self.ns+".svc.cluster.local,DNS:moco-metrics."+self.ns+".svc\nextendedKeyUsage=serverAuth\n")
+        (c/"san.txt").write_text("subjectAltName=DNS:localhost,DNS:moco,DNS:moco."+self.ns+".svc,DNS:moco."+self.ns+".svc.cluster.local,DNS:moco-metrics."+self.ns+".svc\n"
+            "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
+            "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
         command(["openssl", "x509", "-req", "-in", c/"server.csr", "-CA", c/"ca.pem", "-CAkey", c/"ca.key",
                  "-CAcreateserial", "-days", "2", "-extfile", c/"san.txt", "-out", c/"tls.crt"])
+        command(["openssl", "verify", "-x509_strict", "-CAfile", c/"ca.pem", c/"tls.crt"])
         for path in c.iterdir():
             path.chmod(0o600)
 
