@@ -82,7 +82,11 @@ The declarative webhook resources are in
 Secret containing only the scoped reader token and public CA, use `$.value`
 and `decodingStrategy: Base64`, and retain the application Secret when the
 upstream service fails. Never grant ESO the bootstrap administrator token.
-See the upstream [ESO webhook documentation](https://external-secrets.io/latest/provider/webhook/).
+ESO already URL-encodes `remoteRef.key` when expanding the URL: use
+`{{ .remoteRef.key }}` directly and do not add `urlquery`. Otherwise slashes,
+plus signs and spaces are encoded twice and Moco looks up a different path.
+See the upstream [ESO webhook documentation](https://external-secrets.io/latest/provider/webhook/)
+and [the pinned implementation](https://github.com/external-secrets/external-secrets/blob/helm-chart-2.14.0/providers/v1/webhook/pkg/webhook/webhook.go).
 
 ## Evidence and limits
 

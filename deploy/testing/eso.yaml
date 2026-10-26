@@ -8,7 +8,8 @@ metadata:
 spec:
   provider:
     webhook:
-      url: 'https://moco.@@MOCO_NAMESPACE@@.svc:8443/api/v1/tenants/@@TENANT_ID@@/vaults/@@VAULT_ID@@/secret?path={{ .remoteRef.key | urlquery }}'
+      # ESO already URL-escapes remoteRef.key; another urlquery would double-encode it.
+      url: 'https://moco.@@MOCO_NAMESPACE@@.svc:8443/api/v1/tenants/@@TENANT_ID@@/vaults/@@VAULT_ID@@/secret?path={{ .remoteRef.key }}'
       method: GET
       timeout: 5s
       headers:
