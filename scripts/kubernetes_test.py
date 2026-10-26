@@ -4,6 +4,7 @@ import argparse
 import base64
 from datetime import datetime, timezone
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -63,6 +64,7 @@ class Acceptance:
         self.run_id = str(uuid.uuid4())
         self.mirror_id = str(uuid.uuid4())
         self.results, self.forward = [], None
+        self.connections = {}
         self.credentials = directory / "credentials"
         self.values_path = directory / "values.json"
         self.reader = secrets.token_hex(32)
@@ -224,6 +226,9 @@ class Acceptance:
         self.start_forward()
 
     def stop_forward(self):
+        for connection in self.connections.values():
+            connection.close()
+        self.connections.clear()
         if self.forward:
             self.forward.terminate()
             self.forward.wait(timeout=10)
@@ -254,13 +259,25 @@ class Acceptance:
         if body is not None:
             headers["Content-Type"] = "application/json"
             data = json.dumps(body).encode()
-        request = urllib.request.Request(f"https://localhost:{port}"+path, data=data, headers=headers, method=method)
-        try:
-            response = urllib.request.urlopen(request, context=self.tls, timeout=10)
-        except urllib.error.HTTPError as error:
-            response = error
+        # Reuse TLS sessions through kubectl's tunnel. Retry only safe reads
+        # after a transport failure; never replay an uncertain mutation.
+        for attempt in range(3):
+            connection = self.connections.get(port)
+            if connection is None:
+                connection = http.client.HTTPSConnection("localhost", port, context=self.tls, timeout=10)
+                self.connections[port] = connection
+            try:
+                connection.request(method, path, body=data, headers=headers)
+                response = connection.getresponse()
+                payload = response.read()
+                break
+            except (OSError, http.client.HTTPException) as error:
+                connection.close()
+                del self.connections[port]
+                if method not in {"GET", "HEAD"} or attempt == 2 or isinstance(error, ssl.SSLCertVerificationError):
+                    raise
+                time.sleep(0.1 * (attempt + 1))
         with response:
-            payload = response.read()
             content_type = response.headers.get_content_type()
             if payload and not raw and (content_type == "application/json" or content_type.endswith("+json")):
                 payload = json.loads(payload)

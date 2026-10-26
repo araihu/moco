@@ -8,7 +8,7 @@ credentials and a private CA, and never uses production credentials.
 ## Run
 
 Requirements: Linux/macOS amd64/arm64, a working local Docker daemon, Python 3,
-OpenSSL, Helm 3/4, Go matching the repository floor, and enough Docker memory
+OpenSSL 3, Helm 3/4, Go matching the repository floor, and enough Docker memory
 for Kubernetes, Calico and the test workloads (8 GiB recommended).
 
 ```sh
@@ -30,9 +30,9 @@ deliberately when changing the tested release.
 An SSH Docker context cannot bind the runner's local temporary files on the
 daemon machine. Run the command on the Docker host in that case. A nested
 LXC Docker host must provide the kernel facilities needed by kubelet and the
-CNI. The development LXC/OrbStack environment initially failed on `/sys` for
-Kind, and then on inaccessible `/dev/kmsg` for vind. These are bootstrap
-failures, not successful application tests. Do not substitute fake kernel
+CNI. The development LXC/OrbStack environment exposes `/proc/kmsg` but denies
+access to it, preventing kubelet from starting. This is a cluster bootstrap
+failure, not a successful application test. Do not substitute fake kernel
 devices or disable the network policies to obtain a passing report.
 
 The `vind-eso` GitHub Actions workflow runs the same suite on an isolated
