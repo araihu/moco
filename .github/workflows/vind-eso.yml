@@ -2,6 +2,13 @@ name: vind-eso
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Published release artifacts or controller source checkout
+        type: choice
+        required: true
+        default: release
+        options: [release, source]
 
 permissions:
   contents: read
@@ -17,7 +24,10 @@ jobs:
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         with:
           version: v4.3.1
+      - name: Validate release artifact identity guards
+        run: python3 -B -m unittest discover -s scripts -p test_release_artifacts.py
       - name: Build bootstrap operations from the checked out source
+        if: inputs.mode == 'source'
         run: |
           mkdir -p bin
           docker run --rm -v "$PWD:/src" -w /src -e CGO_ENABLED=0 -e GOWORK=off \
@@ -25,7 +35,14 @@ jobs:
             golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 \
             go build -mod=readonly -trimpath -o bin/moco-ops ./cmd/moco-ops
       - name: Run real Kubernetes acceptance with vind and ESO
-        run: python3 -B scripts/vind_test.py
+        env:
+          ARTIFACT_MODE: ${{ inputs.mode }}
+        run: |
+          case "$ARTIFACT_MODE" in
+            release) python3 -B scripts/vind_test.py ;;
+            source) python3 -B scripts/vind_test.py --source ;;
+            *) exit 2 ;;
+          esac
       - name: Upload sanitized acceptance evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

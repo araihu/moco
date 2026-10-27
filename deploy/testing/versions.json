@@ -13,8 +13,8 @@
     "darwin-amd64": "71a3aa7c2ee2c974d9fbb462cba0c5c04a4df2e8d85eee94714fd819ea3c4e63",
     "darwin-arm64": "c9e4f713d6fee0043a3d835cca13077cda2bc0973840eb9779360df0b5bdfc69"
   },
-  "mocoImage": "ghcr.io/araihu/moco@sha256:588c2d0b1e93f04b2522a44eb46a7c21f9ae2feaed419d092a90c7646ca5a667",
-  "mocoVersion": "0.0.2",
+  "mocoImage": "ghcr.io/araihu/moco@sha256:d6a8167c48c771884729405ff4a0d3c8f65bb1b69bbcb96c091745de6eade180",
+  "mocoVersion": "0.0.3",
   "pythonImage": "python@sha256:601e99e090cb08c2784a42395487709500bc39930307fe72f3f11a8f3c430762",
   "esoChart": {
     "version": "2.14.0",
@@ -30,5 +30,25 @@
     "version": "0.94.2",
     "url": "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.94.2/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml",
     "sha256": "cb968e1de715d14168b6131a07b047a8bf6e35630108276d994c10ff8fd896a8"
+  },
+  "mocoControllerImage": "ghcr.io/araihu/moco-controller@sha256:b5a1ec66f8fc562584202c5e117de4af827acba5fd60bc082f516e72e7e04ffa",
+  "mocoRelease": {
+    "url": "https://github.com/araihu/moco/releases/download/v0.0.3/release.json",
+    "sha256": "f25b8fcfafaa920f42fda8b3c8c65c344d93b7f9f5ef061ebe9ef4a5dde69399",
+    "commit": "d3230a01676007350f3452f0ad6b2c79c6697cd5"
+  },
+  "mocoCharts": {
+    "moco": {
+      "repository": "oci://ghcr.io/araihu/charts/moco",
+      "version": "0.0.3",
+      "digest": "sha256:3cb2436980cf30c4aea7ce45f885ce287237211d8134f67472d9fcafa1a0a29b",
+      "sha256": "dc9707077c4ef49b97a05668dba6f63495534551400de904cddc16ea65942482"
+    },
+    "moco-controller": {
+      "repository": "oci://ghcr.io/araihu/charts/moco-controller",
+      "version": "0.0.3",
+      "digest": "sha256:b04d453da6d146f5b762b85bf35aa8be47f0807122c12fe37a6a3f55e52e6b50",
+      "sha256": "c60c4085cebefbae60323605a9d68673cce3bbdb42e692fea754d41b9177b174"
+    }
   }
 }

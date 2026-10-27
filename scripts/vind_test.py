@@ -13,6 +13,8 @@ import tempfile
 import tarfile
 import urllib.request
 
+from release_artifacts import published_charts
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "deploy/testing"
 LOCK = json.loads((FIXTURES / "versions.json").read_text())
@@ -47,6 +49,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--helm", default="helm")
     parser.add_argument("--ops", default=str(ROOT/"bin/moco-ops"))
+    parser.add_argument("--source", action="store_true", help="build the controller and use checkout charts instead of published release artifacts")
     parser.add_argument("--keep", action="store_true", help="retain cluster and private workspace for debugging")
     parser.add_argument("--report", type=Path, default=ROOT/"bin/kubernetes-report.json")
     options = parser.parse_args()
@@ -66,22 +69,27 @@ def main():
     success = False
     created = False
     try:
-        # Build an OCI archive from this exact checkout; no registry publication is needed.
-        archive = directory/"controller.oci.tar"
-        builder = name+"-builder"
-        subprocess.run(["docker", "buildx", "create", "--name", builder, "--driver", "docker-container"],
-                       check=True, stdout=log, stderr=subprocess.STDOUT, timeout=60)
-        try:
-            print("Building controller image from the current source", flush=True)
-            subprocess.run(["docker", "buildx", "build", "--builder", builder, "--provenance=false",
-                "--output", "type=oci,dest="+str(archive), "-t", "docker.io/library/moco-controller:acceptance",
-                str(ROOT/"controller")], check=True, stdout=log, stderr=subprocess.STDOUT, timeout=900)
-        finally:
-            subprocess.run(["docker", "buildx", "rm", builder], stdout=log, stderr=subprocess.STDOUT, timeout=60, check=False)
-        with tarfile.open(archive) as bundle:
-            index = json.load(bundle.extractfile("index.json"))
-            digest = index["manifests"][0]["digest"]
-        controller_image = "docker.io/library/moco-controller@"+digest
+        charts = {}
+        if not options.source:
+            charts = published_charts(LOCK, directory, options.helm)
+            controller_image = LOCK["mocoControllerImage"]
+        else:
+            # Build an OCI archive from this exact checkout; no registry publication is needed.
+            archive = directory/"controller.oci.tar"
+            builder = name+"-builder"
+            subprocess.run(["docker", "buildx", "create", "--name", builder, "--driver", "docker-container"],
+                           check=True, stdout=log, stderr=subprocess.STDOUT, timeout=60)
+            try:
+                print("Building controller image from the current source", flush=True)
+                subprocess.run(["docker", "buildx", "build", "--builder", builder, "--provenance=false",
+                    "--output", "type=oci,dest="+str(archive), "-t", "docker.io/library/moco-controller:acceptance",
+                    str(ROOT/"controller")], check=True, stdout=log, stderr=subprocess.STDOUT, timeout=900)
+            finally:
+                subprocess.run(["docker", "buildx", "rm", builder], stdout=log, stderr=subprocess.STDOUT, timeout=60, check=False)
+            with tarfile.open(archive) as bundle:
+                index = json.load(bundle.extractfile("index.json"))
+                digest = index["manifests"][0]["digest"]
+            controller_image = "docker.io/library/moco-controller@"+digest
         print("Creating isolated vind cluster "+name, flush=True)
         # An isolated CLI config and --connect=false preserve global contexts.
         created = True
@@ -91,19 +99,22 @@ def main():
             subprocess.run([*base, "connect", name, "--driver", "docker", "--print"],
                            env=environment, stdout=target, stderr=log, check=True, timeout=120)
         kubeconfig.chmod(0o600)
-        node = "vcluster.cp."+name
-        # Stream the OCI archive into ctr: vm-container's mount namespaces can make
-        # files copied with docker cp into /tmp invisible to an exec process.
-        with archive.open("rb") as source:
-            subprocess.run(["docker", "exec", "-i", node, "ctr", "--namespace=k8s.io", "images", "import", "--local", "--base-name", "docker.io/library/moco-controller",
-                            "--digests", "--label", "io.cri-containerd.image=managed", "-"],
-                           stdin=source, check=True, stdout=log, stderr=subprocess.STDOUT, timeout=120)
-        names = subprocess.check_output(["docker", "exec", node, "ctr", "--namespace=k8s.io", "images", "list", "--quiet"], text=True)
-        if controller_image not in names.splitlines():
-            raise RuntimeError("controller OCI digest reference was not registered in the node runtime")
+        if options.source:
+            node = "vcluster.cp."+name
+            # Stream the OCI archive into ctr: vm-container's mount namespaces can make
+            # files copied with docker cp into /tmp invisible to an exec process.
+            with archive.open("rb") as source:
+                subprocess.run(["docker", "exec", "-i", node, "ctr", "--namespace=k8s.io", "images", "import", "--local", "--base-name", "docker.io/library/moco-controller",
+                                "--digests", "--label", "io.cri-containerd.image=managed", "-"],
+                               stdin=source, check=True, stdout=log, stderr=subprocess.STDOUT, timeout=120)
+            names = subprocess.check_output(["docker", "exec", node, "ctr", "--namespace=k8s.io", "images", "list", "--quiet"], text=True)
+            if controller_image not in names.splitlines():
+                raise RuntimeError("controller OCI digest reference was not registered in the node runtime")
+        artifact_args = (["--published-release", "--server-chart", str(charts["moco"]),
+                          "--controller-chart", str(charts["moco-controller"])] if not options.source else [])
         subprocess.run([sys.executable, str(ROOT/"scripts/kubernetes_test.py"), "--kubeconfig", str(kubeconfig),
                         "--cluster-name", name, "--kubectl", kubectl, "--helm", options.helm,
-                        "--controller-image", controller_image, "--ops", str(Path(options.ops).resolve()), "--report", str(options.report.resolve())],
+                        *artifact_args, "--controller-image", controller_image, "--ops", str(Path(options.ops).resolve()), "--report", str(options.report.resolve())],
                        env=environment, check=True, timeout=1800)
         success = True
     finally:

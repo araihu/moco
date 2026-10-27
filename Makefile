@@ -37,7 +37,7 @@ GOLANGCI_LINT := $(abspath $(TOOL_BIN_DIR))/golangci-lint
 endif
 
 .PHONY: workflow-lint spec-lint spec-bundle cli-spec-bundle cli-spec-check cli-generate cli-check-generated cli-build cli-check cli-smoke api-generate internal-api-generate sqlc-generate db-migrate test lint vulncheck run check operational-test load-test image image-check monitoring-check
-.PHONY: chart-check chart-unittest vind-test controller-check controller-generate controller-image
+.PHONY: chart-check chart-unittest vind-test vind-source-test controller-check controller-generate controller-image
 
 workflow-lint:
 	GOWORK=off $(ACTIONLINT) .github/workflows/*.yml
@@ -60,9 +60,12 @@ chart-check: chart-unittest
 	HELM="$(HELM)" GOWORK=off $(GO) -C tools test -tags=helmtest ./helmchart ./cmd/moco-release -count=1
 
 vind-test:
+	python3 -B scripts/vind_test.py --helm "$(HELM)"
+
+vind-source-test:
 	@mkdir -p bin
 	GOWORK=off $(GO) build -mod=readonly -trimpath -o bin/moco-ops ./cmd/moco-ops
-	python3 -B scripts/vind_test.py --helm "$(HELM)"
+	python3 -B scripts/vind_test.py --source --helm "$(HELM)"
 
 spec-lint:
 	GOWORK=off $(VACUUM) lint --ruleset openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d openapi/public.yaml
@@ -118,6 +121,7 @@ db-migrate:
 	GOWORK=off $(MIGRATE_SQLITE) -path db/migrations -database "sqlite://$(abspath $(DB_PATH))" up
 
 test:
+	python3 -B -m unittest discover -s scripts -p test_release_artifacts.py
 	GOWORK=off $(GO) test ./... -count=1
 	GOWORK=off $(GO) -C tools test ./... -count=1
 	@if [ -f dagger/dagger.gen.go ]; then GOWORK=off $(GO) -C dagger test ./... -count=1; fi

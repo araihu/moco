@@ -19,6 +19,8 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from release_artifacts import validate_chart
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "deploy/testing"
 LOCK = json.loads((FIXTURES / "versions.json").read_text())
@@ -64,6 +66,7 @@ class Acceptance:
         self.run_id = str(uuid.uuid4())
         self.mirror_id = str(uuid.uuid4())
         self.results, self.forward = [], None
+        self.artifact_evidence, self.declarative_evidence = {}, {}
         self.connections = {}
         self.credentials = directory / "credentials"
         self.values_path = directory / "values.json"
@@ -215,7 +218,14 @@ class Acceptance:
         self.secret(self.ns, "moco-credentials", {n: (self.credentials/n).read_bytes() for n in names})
 
     def install(self):
-        command([self.options.ops, "init", "--directory", self.credentials])
+        if self.options.published_release:
+            # All application/operations code comes from the released OCI image.
+            command(["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "--network", "none",
+                     "--workdir", "/acceptance", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                     "--mount", f"type=bind,source={self.directory},target=/acceptance",
+                     "--entrypoint", "/moco-ops", LOCK["mocoImage"], "init", "--directory", "/acceptance/credentials"])
+        else:
+            command([self.options.ops, "init", "--directory", self.credentials])
         self.admin = (self.credentials/"admin-token").read_text()
         self.access = json.loads((self.credentials/"access.json").read_text())
         self.access["principals"].append({"id": "eso-reader", "tokenSha256": hashlib.sha256(self.reader.encode()).hexdigest()})
@@ -241,6 +251,9 @@ class Acceptance:
             "controllerAccess": {"enabled": True, "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": self.ns}},
                 "podSelector": {"matchLabels": {"app.kubernetes.io/name": "moco-controller"}}},
             "networkPolicy": {"publicPeers": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": n}}} for n in [self.app, self.eso, self.ns]]}}
+        if self.options.published_release:
+            # Exercise the published chart's image defaults, without overriding its pin.
+            del self.values["image"]
         self.upgrade()
         self.start_forward()
 
@@ -266,7 +279,7 @@ class Acceptance:
 
     def upgrade(self):
         self.values_path.write_text(json.dumps(self.values))
-        command([self.options.helm, "upgrade", "--install", "moco", ROOT/"charts/moco", "--namespace", self.ns,
+        command([self.options.helm, "upgrade", "--install", "moco", self.options.server_chart, "--namespace", self.ns,
                  "--kubeconfig", self.options.kubeconfig, "-f", self.values_path, "--wait", "--timeout", "240s"], timeout=270)
 
     def api(self, path, *, token="admin", method="GET", body=None, headers=None, internal=False, raw=False):
@@ -309,16 +322,34 @@ class Acceptance:
     def controller_install(self):
         self.secret(self.ns, "moco-controller-credentials", {"token": self.controller_token.encode(),
                     "ca.pem": (self.credentials/"ca.pem").read_bytes()})
-        values = {"image": {"repository": self.options.controller_image.split("@")[0],
-                            "digest": self.options.controller_image.split("@")[1], "pullPolicy": "Never"},
-                  "publicURL": f"https://moco.{self.ns}.svc:8443", "adminURL": f"https://moco-admin.{self.ns}.svc:9443",
+        values = {"publicURL": f"https://moco.{self.ns}.svc:8443", "adminURL": f"https://moco-admin.{self.ns}.svc:9443",
                   "reconcileInterval": "2s"}
+        if not self.options.published_release:
+            values["image"] = {"repository": self.options.controller_image.split("@")[0],
+                               "digest": self.options.controller_image.split("@")[1], "pullPolicy": "Never"}
         path = self.directory/"controller-values.json"
         path.write_text(json.dumps(values))
-        command([self.options.helm, "upgrade", "--install", "moco-management", ROOT/"charts/moco-controller",
+        command([self.options.helm, "upgrade", "--install", "moco-management", self.options.controller_chart,
                  "--namespace", self.ns, "--kubeconfig", self.options.kubeconfig, "-f", path, "--wait", "--timeout", "240s"], timeout=270)
         self.kubectl("wait", "--for=condition=Established", "crd/mocotenants.moco.araihu.io",
                      "crd/mocovaults.moco.araihu.io", "crd/mocoauthorizations.moco.araihu.io", "--timeout=60s")
+
+    def artifact_identity(self):
+        releases = json.loads(command([self.options.helm, "list", "--namespace", self.ns,
+            "--kubeconfig", self.options.kubeconfig, "--output", "json"]).stdout)
+        expected = {"moco": ("moco", LOCK["mocoImage"]), "moco-management": ("moco-controller", self.options.controller_image)}
+        for release, (name, image) in expected.items():
+            entry = next(r for r in releases if r["name"] == release)
+            if self.options.published_release:
+                assert entry["chart"] == name+"-"+LOCK["mocoVersion"] and entry["app_version"] == LOCK["mocoVersion"], "installed chart is not the published release"
+            resource = self.get("statefulset" if name == "moco" else "deployment", "moco" if name == "moco" else "moco-management-controller", self.ns)
+            spec = resource["spec"]["template"]["spec"]
+            assert spec["containers"][0]["image"] == image, "installed image differs from the release digest"
+            pods = json.loads(self.kubectl("get", "pods", "-n", self.ns, "-l", "app.kubernetes.io/name="+name, "-o", "json").stdout)["items"]
+            runtime_ids = [c["imageID"] for p in pods for c in p.get("status", {}).get("containerStatuses", [])]
+            assert runtime_ids, "image did not start in the real node runtime"
+            self.artifact_evidence[name] = {"helmRelease": release, "chart": entry["chart"], "appVersion": entry["app_version"],
+                "image": image, "runtimeImageIDs": runtime_ids}
 
     def cr(self, kind, name, spec):
         return self.resource(kind, name, spec, self.ns, api="moco.araihu.io/v1alpha1")
@@ -353,6 +384,13 @@ class Acceptance:
         assert self.api(self.secret_route, method="PUT", body={"value": base64.b64encode(self.password).decode()})[0] == 201
         assert self.api(self.secret_route, token=self.reader)[0] == 200
         assert self.api(self.secret_route, token=self.controller_token)[0] == 403, "controller must not read secret values"
+        tenant_status = self.get("mocotenants", "demo", self.ns)["status"]
+        vault_status = self.get("mocovaults", "demo", self.ns)["status"]
+        auth_status = self.get("mocoauthorizations", "moco", self.ns)["status"]
+        self.declarative_evidence.update({"creation": "CRDs reconciled by the published controller" if self.options.published_release else "CRDs reconciled by the source controller",
+            "tenant": {"cr": "demo", "id": self.tenant, "conditions": tenant_status["conditions"]},
+            "vault": {"cr": "demo", "id": self.vault, "tenantId": self.tenant, "conditions": vault_status["conditions"]},
+            "authorization": {"cr": "moco", "revision": auth_status["revision"], "conditions": auth_status["conditions"]}})
         self.apply([self.tenant_cr, self.vault_cr, self.authorization_cr])
         time.sleep(4)
         assert self.get("mocotenants", "demo", self.ns)["status"]["id"] == self.tenant
@@ -614,6 +652,7 @@ except (urllib.error.URLError,TimeoutError,socket.timeout):
             ("vind-calico-eso-install", self.infrastructure), ("separate-persistent-storage-and-mirror", self.storage),
             ("production-chart-tls-and-verified-backup-readiness", self.install),
             ("controller-installation-and-namespaced-rbac", self.controller_install),
+            ("installed-chart-version-and-running-image-digests", self.artifact_identity),
             ("declarative-tenant-vault-and-authoritative-authorization", self.seed),
             ("controller-drift-status-recovery-credential-rotation-and-crd-guards", self.controller_drift), ("tenant-vault-write-and-admin-isolation", self.isolation),
             ("eso-declarative-sync-url-encoding-binary-value-and-consumer", self.eso_sync),
@@ -634,14 +673,26 @@ def main():
     parser.add_argument("--cluster-name", default="moco-eso-e2e")
     parser.add_argument("--kubectl", default="kubectl")
     parser.add_argument("--helm", default="helm")
-    parser.add_argument("--controller-image", required=True, help="Source-built OCI digest imported into the vind node")
+    parser.add_argument("--controller-image", required=True, help="Published or source-built controller OCI digest")
+    parser.add_argument("--published-release", action="store_true")
+    parser.add_argument("--server-chart", type=Path, default=ROOT/"charts/moco")
+    parser.add_argument("--controller-chart", type=Path, default=ROOT/"charts/moco-controller")
     parser.add_argument("--ops", type=Path, default=ROOT/"bin/moco-ops")
     parser.add_argument("--report", type=Path, default=ROOT/"bin/kubernetes-report.json")
     options = parser.parse_args()
     os.umask(0o077)
+    if options.published_release:
+        if options.controller_image != LOCK["mocoControllerImage"]:
+            raise RuntimeError("controller image differs from the published release pin")
+        validate_chart(options.server_chart, "moco", LOCK)
+        validate_chart(options.controller_chart, "moco-controller", LOCK)
     with tempfile.TemporaryDirectory(prefix="moco-acceptance-") as directory:
         drill = Acceptance(options, Path(directory))
         report = {"passed": False, "driver": "vind", "controllerImage": options.controller_image, "mocoVersion": LOCK["mocoVersion"],
+                  "artifactMode": "published-release" if options.published_release else "source",
+                  "releaseCommit": LOCK["mocoRelease"]["commit"] if options.published_release else None,
+                  "bootstrapImage": LOCK["mocoImage"] if options.published_release else None,
+                  "installedArtifacts": drill.artifact_evidence, "declarativeResources": drill.declarative_evidence,
                   "versions": LOCK, "startedAt": datetime.now(timezone.utc).isoformat(), "checks": drill.results,
                   "limitations": ["Static local RWO volumes in a disposable single-node cluster; not CSI/RWOP certification.",
                                   "Mirror uses a distinct volume on the same Docker host; not proof of off-host durability."]}
