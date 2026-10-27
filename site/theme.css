@@ -26,6 +26,16 @@
   --margo-accent: var(--color-primary);
   --margo-outline: var(--color-outline);
 }
+/* Inline code shares the surrounding text baseline and wraps with the sentence. */
+html .margo-document :not(pre) > code {
+  display: inline;
+  vertical-align: baseline;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
 html .margo-landing-hero { gap: 3rem; padding-block: clamp(3rem, 7vw, 6rem); }
 html .margo-landing-hero__copy h1 {
   max-inline-size: 12ch;
