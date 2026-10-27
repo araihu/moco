@@ -1,6 +1,6 @@
 ---
 title: Mocó — secrets on your infrastructure
-description: Self-hosted secret management with an API, a CLI and declarative Kubernetes resources. Encrypted SQLite, transactional audit and verified recovery.
+description: Self-hosted secret management with an API, a CLI and declarative Kubernetes resources. Encrypted secret values, transactional audit and verified recovery.
 language: en
 layout:
   kind: landing

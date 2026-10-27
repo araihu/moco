@@ -5,7 +5,7 @@ assets: local
 offline: true
 site:
   name: Mocó
-  description: Self-hosted secrets, from your terminal to your cluster. An API, CLI and Kubernetes controller backed by encrypted local SQLite.
+  description: Self-hosted secrets, from your terminal to your cluster. An API, CLI and Kubernetes controller with encrypted secret values in local SQLite.
   version: v0.0.3
   repository_url: https://github.com/araihu/moco
   base_url: https://moco.araihu.com

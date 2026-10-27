@@ -113,4 +113,3 @@ CLI metadata is maintained separately in `openapi/overlays/cli.*.yaml`.
 name commands such as `moco tenants create` and `moco secrets get`, while
 preserving the principal API contracts. See the
 [OpenAPI pipeline](../openapi/README.md#cli-metadata-overlays).
-
