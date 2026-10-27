@@ -3,6 +3,8 @@ image:
   repository: ""
   digest: ""
   pullPolicy: IfNotPresent
+# Existing Kubernetes registry credential Secrets for private images.
+imagePullSecrets: []
 # Same namespace as the controller and CRs. Contains only token and ca.pem.
 credentialsSecret: moco-controller-credentials
 publicURL: ""

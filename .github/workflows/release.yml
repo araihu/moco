@@ -18,6 +18,7 @@ jobs:
       oci_tag: ${{ steps.plan.outputs.oci_tag }}
       commit: ${{ steps.plan.outputs.commit }}
       image_repository: ${{ steps.plan.outputs.image_repository }}
+      controller_image_repository: ${{ steps.plan.outputs.controller_image_repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -118,15 +119,46 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=moco-release
           cache-to: type=gha,mode=max,scope=moco-release
-      - name: Publish pinned Helm chart and attach verified release assets
+      - name: Inspect an existing controller image without overwriting another release
+        id: existing-controller
+        run: |
+          "$RUNNER_TEMP/release-tools/moco-release" image-status \
+            --plan "$RUNNER_TEMP/release-tools/release-plan.json" --component controller --output "$GITHUB_OUTPUT"
+      - name: Publish multi-platform controller image
+        id: controller-image
+        if: steps.existing-controller.outputs.exists == 'false'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: controller
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.prepare.outputs.controller_image_repository }}:${{ needs.prepare.outputs.oci_tag }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+            REVISION=${{ needs.prepare.outputs.commit }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.commit }}
+          annotations: |
+            index:org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            index:org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            index:org.opencontainers.image.revision=${{ needs.prepare.outputs.commit }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=moco-controller-release
+          cache-to: type=gha,mode=max,scope=moco-controller-release
+      - name: Publish both pinned Helm charts and attach all verified release assets
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_DIGEST: ${{ steps.existing.outputs.digest || steps.image.outputs.digest }}
+          CONTROLLER_IMAGE_DIGEST: ${{ steps.existing-controller.outputs.digest || steps.controller-image.outputs.digest }}
         run: |
           set -euo pipefail
           printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          "$RUNNER_TEMP/release-tools/moco-release" publish-chart \
+          "$RUNNER_TEMP/release-tools/moco-release" publish-release \
             --plan "$RUNNER_TEMP/release-tools/release-plan.json" --image-digest "$IMAGE_DIGEST" \
-            --chart charts/moco --out "$RUNNER_TEMP/release-assets"
+            --controller-image-digest "$CONTROLLER_IMAGE_DIGEST" \
+            --chart charts/moco --controller-chart charts/moco-controller --out "$RUNNER_TEMP/release-assets"
           cat "$RUNNER_TEMP/release-assets/release.json" >> "$GITHUB_STEP_SUMMARY"

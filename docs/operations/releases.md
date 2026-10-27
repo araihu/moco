@@ -1,8 +1,8 @@
 # SemVer image and Helm releases
 
 Pushing a version tag triggers `.github/workflows/release.yml`. It validates
-the source, publishes the Moco image and Helm chart to GHCR, creates a draft
-GitHub Release and attaches the chart, `release.json` and `SHA256SUMS` before
+the source, publishes the server and controller images and Helm charts to GHCR, creates a draft
+GitHub Release and attaches both charts, `release.json` and `SHA256SUMS` before
 publishing it. This order supports GitHub's
 [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases): assets lock at publication. Do not publish
 the release manually while CI is running. Invalid version tags fail validation.
@@ -27,16 +27,20 @@ move `latest`, major or minor aliases.
 
 For `araihu/moco`, destinations are:
 
-- Image: `ghcr.io/araihu/moco:<OCI-tag>`, with Linux **amd64 and arm64** manifests.
-- Helm: `oci://ghcr.io/araihu/charts/moco`, selected with the SemVer `--version`.
-- GitHub Release assets: `moco-<SemVer>.tgz`, `release.json`, `SHA256SUMS`.
+- Server image: `ghcr.io/araihu/moco:<OCI-tag>`.
+- Controller image: `ghcr.io/araihu/moco-controller:<OCI-tag>`.
+- Both images contain Linux **amd64 and arm64** manifests, provenance and SBOM attestations.
+- Helm: `oci://ghcr.io/araihu/charts/moco` and `oci://ghcr.io/araihu/charts/moco-controller`, selected with the same SemVer `--version`.
+- GitHub Release assets: `moco-<SemVer>.tgz`, `moco-controller-<SemVer>.tgz`, `release.json`, `SHA256SUMS`.
+
+The controller artifacts are included starting with **v0.0.3**. Older releases contain only the server artifacts.
 
 Chart version and `appVersion` match the release version. The packaged chart
-sets `image.repository` and the published **multi-platform image digest** in
+sets `image.repository` and the published **multi-platform image digest** for its own component in
 its default values, and carries the Git source revision in its annotations.
 The source chart remains unchanged, with development defaults requiring an
 explicit image. Secrets, mirror identity and PVC settings remain external
-deployment inputs.
+deployment inputs. Controller API endpoints and its credential Secret also remain operator inputs.
 
 ## Validation and publication order
 
@@ -53,18 +57,21 @@ deployment inputs.
 3. Only the publishing job receives `contents: write` and `packages: write`.
    It checks out the validated commit, authenticates with the automatic
    `GITHUB_TOKEN` and checks whether the exact version already exists.
-4. Buildx builds both architectures with the native pinned Go builder,
+4. Buildx builds both images for both architectures with the native pinned Go builder,
    cross-compiling static binaries without QEMU. The image includes source,
    revision and version metadata, BuildKit provenance and SBOM attestations.
    External actions and Go/BuildKit images are pinned by commit/digest.
-5. The release helper creates or resumes a draft release and pins the actual
-   image digest into a temporary chart copy, sets versions/revision, runs lint
-   and rendering with production-input fixtures, packages and verifies it,
-   then pushes the OCI chart.
-6. The helper attaches the exact chart
-   archive, a JSON manifest recording source/version/image/chart digests and
-   archive checksum, and checksum file. It publishes the draft only after all
-   uploads succeed. SemVer prereleases are marked accordingly and never latest.
+5. The release helper creates or resumes a draft release and verifies both images
+   against the same version, source commit, architectures and expected digests before
+   publishing any chart. It pins the corresponding image digest into a temporary copy
+   of each chart, sets versions/revision, runs lint and rendering with component-specific
+   fixtures, packages and verifies each archive, then pushes both OCI charts. Controller
+   chart verification also requires all three Moco CRDs.
+6. The helper attaches both exact chart archives, a JSON manifest recording
+   source/version and both components' image/chart digests and archive checksums, and
+   `SHA256SUMS`. It publishes the draft only after all four uploads succeed. A partial
+   controller upload leaves a resumable draft. SemVer prereleases are marked accordingly
+   and never latest.
 
 The workflow does not change cluster resources. Source/release tags should
 remain immutable. Registry owners can still move tags manually; use immutable
@@ -78,7 +85,7 @@ already exists from a manual push, connect it to this repository and grant its
 Actions access. See GitHub's [GITHUB_TOKEN/package permissions](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
 New GHCR packages are private by default. After initial publication, a package
-owner can make the image and `charts/moco` package public for anonymous pulls.
+owner can make both image packages and both `charts/moco` / `charts/moco-controller` packages public for anonymous pulls.
 For private distribution, consumers authenticate Helm and configure namespaced
 `imagePullSecrets`. Publication does not change package visibility or
 organization policy automatically.
@@ -108,6 +115,8 @@ above are illustrative, not a list of artifacts already published.
 
 ```sh
 docker pull ghcr.io/araihu/moco:1.2.3
+docker pull ghcr.io/araihu/moco-controller:1.2.3
+helm pull oci://ghcr.io/araihu/charts/moco-controller --version 1.2.3
 helm pull oci://ghcr.io/araihu/charts/moco --version 1.2.3
 helm show values oci://ghcr.io/araihu/charts/moco --version 1.2.3
 helm upgrade --install moco oci://ghcr.io/araihu/charts/moco \
@@ -124,24 +133,34 @@ For independent verification and offline installation:
 
 ```sh
 gh release download v1.2.3 --repo araihu/moco \
-  --pattern 'moco-1.2.3.tgz' --pattern release.json --pattern SHA256SUMS \
+  --pattern 'moco-1.2.3.tgz' --pattern 'moco-controller-1.2.3.tgz' --pattern release.json --pattern SHA256SUMS \
   --dir /private/moco/release
 (cd /private/moco/release && sha256sum -c SHA256SUMS)
 ```
 
-`release.json` records `imageDigest`, `chartDigest` (registry manifest digest)
-and `chartSHA256` (`.tgz` bytes). These identify different objects. Retain this
+`release.json` records an ordered `components` array (server, controller), each with `name`,
+`imageRepository`, `imageDigest`, `chartRepository`, `chartDigest` (registry manifest digest),
+`chartSHA256` (`.tgz` bytes) and `archive`. Top-level `imageDigest`, `chartDigest` and
+`chartSHA256` retain their original server meaning for existing consumers. These identify different objects. Retain this
 manifest, chart, matching image and independently held key/configuration
-material with recovery records. The image pin covers server, backup and init.
+material with recovery records. The server image pin covers server, backup and init; the controller image has its own pin.
+
+For controller installation, supply `publicURL`, `adminURL` and the existing same-namespace
+credential Secret as described in the [controller runbook](kubernetes-controller.md):
+
+```sh
+helm upgrade --install moco-management oci://ghcr.io/araihu/charts/moco-controller \
+  --version 0.0.3 --namespace moco -f /private/moco/controller-values.yaml
+```
 
 ## Interrupted publication and retries
 
 Publication is serialized per OCI version, including optional `v` aliases.
 Re-run failed jobs after correcting an operational problem:
 
-- Existing images are reused only when source/revision/version match and both
+- Each existing image is reused only when source/revision/version match and both
   supported Linux architectures are present.
-- Existing charts are pulled and reused only when version, source revision,
+- Each existing chart is pulled and reused only when version, source revision,
   schema and image digest match. Their original archive bytes are retained.
 - Existing draft assets are downloaded and checksum-compared. Identical assets
   are skipped, missing assets uploaded and conflicting assets never clobbered.

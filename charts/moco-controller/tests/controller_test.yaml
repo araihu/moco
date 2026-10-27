@@ -47,3 +47,11 @@ tests:
     asserts:
       - hasDocuments:
           count: 3
+  - it: references existing pull credentials for a private controller image
+    template: templates/deployment.yaml
+    set:
+      imagePullSecrets: [{name: ghcr-readonly}]
+    asserts:
+      - equal:
+          path: spec.template.spec.imagePullSecrets
+          value: [{name: ghcr-readonly}]

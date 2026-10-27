@@ -33,13 +33,14 @@ var (
 )
 
 type plan struct {
-	Tag             string `json:"tag"`
-	Version         string `json:"version"`
-	OCITag          string `json:"ociTag"`
-	Commit          string `json:"commit"`
-	Repository      string `json:"repository"`
-	ImageRepository string `json:"imageRepository"`
-	ChartRegistry   string `json:"chartRegistry"`
+	Tag                       string `json:"tag"`
+	Version                   string `json:"version"`
+	OCITag                    string `json:"ociTag"`
+	Commit                    string `json:"commit"`
+	Repository                string `json:"repository"`
+	ImageRepository           string `json:"imageRepository"`
+	ChartRegistry             string `json:"chartRegistry"`
+	ControllerImageRepository string `json:"controllerImageRepository"`
 }
 
 func releasePlan(tag, commit, repository string, prerelease bool) (plan, error) {
@@ -55,7 +56,28 @@ func releasePlan(tag, commit, repository string, prerelease bool) (plan, error) 
 		return plan{}, errors.New("invalid release commit/repository or OCI tag longer than 128 characters")
 	}
 	lower := strings.ToLower(repository)
-	return plan{tag, version, ociTag, commit, repository, "ghcr.io/" + lower, "oci://ghcr.io/" + strings.Split(lower, "/")[0] + "/charts"}, nil
+	return plan{tag, version, ociTag, commit, repository, "ghcr.io/" + lower, "oci://ghcr.io/" + strings.Split(lower, "/")[0] + "/charts", "ghcr.io/" + lower + "-controller"}, nil
+}
+
+type component struct {
+	Name            string
+	ImageRepository string
+}
+
+func server(p plan) component { return component{Name: "moco", ImageRepository: p.ImageRepository} }
+func controller(p plan) component {
+	return component{Name: "moco-controller", ImageRepository: p.ControllerImageRepository}
+}
+
+func selectComponent(p plan, name string) (component, error) {
+	switch name {
+	case "server":
+		return server(p), nil
+	case "controller":
+		return controller(p), nil
+	default:
+		return component{}, errors.New("component must be server or controller")
+	}
 }
 
 type runner func(context.Context, string, ...string) ([]byte, error)
@@ -106,8 +128,8 @@ func inspect(ctx context.Context, run runner, ref string) (descriptor, bool, err
 	return result, true, nil
 }
 
-func imageStatus(ctx context.Context, run runner, p plan) (descriptor, bool, error) {
-	result, exists, err := inspect(ctx, run, p.ImageRepository+":"+p.OCITag)
+func imageStatus(ctx context.Context, run runner, p plan, c component) (descriptor, bool, error) {
+	result, exists, err := inspect(ctx, run, c.ImageRepository+":"+p.OCITag)
 	if err != nil || !exists {
 		return result, exists, err
 	}
@@ -205,13 +227,13 @@ func yamlMap(path string) (map[string]any, error) {
 	return value, err
 }
 
-func packageChart(ctx context.Context, run runner, p plan, digest, source, out string) (string, error) {
+func packageChart(ctx context.Context, run runner, p plan, c component, digest, source, out string) (string, error) {
 	stageRoot, err := os.MkdirTemp(out, ".chart-*")
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(stageRoot) }()
-	stage := filepath.Join(stageRoot, "moco")
+	stage := filepath.Join(stageRoot, c.Name)
 	if err := os.CopyFS(stage, os.DirFS(source)); err != nil {
 		return "", err
 	}
@@ -219,8 +241,8 @@ func packageChart(ctx context.Context, run runner, p plan, digest, source, out s
 	if err != nil {
 		return "", err
 	}
-	if chart["name"] != "moco" {
-		return "", errors.New("release chart must be named moco")
+	if chart["name"] != c.Name {
+		return "", errors.New("release chart name does not match its component")
 	}
 	chart["version"], chart["appVersion"] = p.Version, p.Version
 	annotations, _ := chart["annotations"].(map[string]any)
@@ -242,13 +264,17 @@ func packageChart(ctx context.Context, run runner, p plan, digest, source, out s
 	if !ok {
 		return "", errors.New("source chart is missing image settings")
 	}
-	image["repository"], image["digest"] = p.ImageRepository, digest
+	image["repository"], image["digest"] = c.ImageRepository, digest
 	if err := writeJSON(filepath.Join(stage, "values.yaml"), values); err != nil {
 		return "", err
 	}
 	fixture := filepath.Join(out, ".validation-values.json")
 	defer func() { _ = os.Remove(fixture) }()
-	if err := writeJSON(fixture, map[string]any{"credentials": map[string]any{"existingSecret": "release-validation"}, "backups": map[string]any{"mirrorClaim": "release-mirror-validation", "mirrorID": "11111111-1111-4111-8111-111111111111"}}); err != nil {
+	validationValues := map[string]any{"credentials": map[string]any{"existingSecret": "release-validation"}, "backups": map[string]any{"mirrorClaim": "release-mirror-validation", "mirrorID": "11111111-1111-4111-8111-111111111111"}}
+	if c.Name == "moco-controller" {
+		validationValues = map[string]any{"publicURL": "https://moco.release-validation.svc:8443", "adminURL": "https://moco-admin.release-validation.svc:9443"}
+	}
+	if err := writeJSON(fixture, validationValues); err != nil {
 		return "", err
 	}
 	for _, args := range [][]string{{"lint", "--strict", stage, "-f", fixture}, {"template", "release-validation", stage, "-f", fixture, "--kube-version", "1.32.0"}, {"package", stage, "--destination", out}} {
@@ -256,10 +282,10 @@ func packageChart(ctx context.Context, run runner, p plan, digest, source, out s
 			return "", fmt.Errorf("release chart validation/packaging failed: %s: %w", output, err)
 		}
 	}
-	return filepath.Join(out, "moco-"+p.Version+".tgz"), nil
+	return filepath.Join(out, c.Name+"-"+p.Version+".tgz"), nil
 }
 
-func verifyChart(path string, p plan, digest string) error {
+func verifyChart(path string, p plan, c component, digest string) error {
 	file, err := openLocal(path)
 	if err != nil {
 		return err
@@ -283,7 +309,7 @@ func verifyChart(path string, p plan, digest string) error {
 		if header.Size < 0 || header.Size > 8<<20 || (header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeDir) {
 			return errors.New("release chart contains an unsafe or oversized archive entry")
 		}
-		if header.Name == "moco/Chart.yaml" || header.Name == "moco/values.yaml" || header.Name == "moco/values.schema.json" {
+		if header.Name == c.Name+"/Chart.yaml" || header.Name == c.Name+"/values.yaml" || header.Name == c.Name+"/values.schema.json" || (c.Name == "moco-controller" && strings.HasPrefix(header.Name, c.Name+"/crds/")) {
 			if _, duplicate := documents[header.Name]; duplicate {
 				return errors.New("duplicate release chart metadata")
 			}
@@ -298,42 +324,58 @@ func verifyChart(path string, p plan, digest string) error {
 	var values struct {
 		Image struct{ Repository, Digest string }
 	}
-	if yaml.Unmarshal(documents["moco/Chart.yaml"], &metadata) != nil || yaml.Unmarshal(documents["moco/values.yaml"], &values) != nil {
+	if yaml.Unmarshal(documents[c.Name+"/Chart.yaml"], &metadata) != nil || yaml.Unmarshal(documents[c.Name+"/values.yaml"], &values) != nil {
 		return errors.New("invalid packaged chart metadata")
 	}
 	annotations, _ := metadata["annotations"].(map[string]any)
-	if metadata["name"] != "moco" || metadata["version"] != p.Version || metadata["appVersion"] != p.Version || annotations["org.opencontainers.image.revision"] != p.Commit || annotations["org.opencontainers.image.source"] != "https://github.com/"+p.Repository || values.Image.Repository != p.ImageRepository || values.Image.Digest != digest || !json.Valid(documents["moco/values.schema.json"]) {
+	if metadata["name"] != c.Name || metadata["version"] != p.Version || metadata["appVersion"] != p.Version || annotations["org.opencontainers.image.revision"] != p.Commit || annotations["org.opencontainers.image.source"] != "https://github.com/"+p.Repository || values.Image.Repository != c.ImageRepository || values.Image.Digest != digest || !json.Valid(documents[c.Name+"/values.schema.json"]) {
 		return errors.New("existing chart/version/image does not match this release; refusing to replace it")
 	}
+	if c.Name == "moco-controller" {
+		for _, kind := range []string{"mocotenants", "mocovaults", "mocoauthorizations"} {
+			var crd struct {
+				APIVersion string `yaml:"apiVersion"`
+				Kind       string `yaml:"kind"`
+				Metadata   struct {
+					Name string `yaml:"name"`
+				} `yaml:"metadata"`
+			}
+			data := documents[c.Name+"/crds/moco.araihu.io_"+kind+".yaml"]
+			if yaml.Unmarshal(data, &crd) != nil || crd.APIVersion != "apiextensions.k8s.io/v1" || crd.Kind != "CustomResourceDefinition" || crd.Metadata.Name != kind+".moco.araihu.io" {
+				return errors.New("controller chart must include all three Moco CRDs")
+			}
+		}
+	}
+
 	return nil
 }
 
-func publishChart(ctx context.Context, run runner, p plan, digest, source, out string) (string, descriptor, error) {
+func publishChart(ctx context.Context, run runner, p plan, c component, digest, source, out string) (string, descriptor, error) {
 	if !digestPattern.MatchString(digest) {
 		return "", descriptor{}, errors.New("release image digest is invalid")
 	}
 	if err := os.MkdirAll(out, 0o700); err != nil {
 		return "", descriptor{}, err
 	}
-	ref := strings.TrimPrefix(p.ChartRegistry, "oci://") + "/moco:" + p.OCITag
+	ref := strings.TrimPrefix(p.ChartRegistry, "oci://") + "/" + c.Name + ":" + p.OCITag
 	remote, exists, err := inspect(ctx, run, ref)
 	if err != nil {
 		return "", remote, err
 	}
 	var path string
 	if exists {
-		output, err := run(ctx, "helm", "pull", p.ChartRegistry+"/moco", "--version", p.Version, "--destination", out)
+		output, err := run(ctx, "helm", "pull", p.ChartRegistry+"/"+c.Name, "--version", p.Version, "--destination", out)
 		if err != nil {
 			return "", remote, fmt.Errorf("pull existing chart: %s: %w", output, err)
 		}
-		path = filepath.Join(out, "moco-"+p.Version+".tgz")
+		path = filepath.Join(out, c.Name+"-"+p.Version+".tgz")
 	} else {
-		path, err = packageChart(ctx, run, p, digest, source, out)
+		path, err = packageChart(ctx, run, p, c, digest, source, out)
 		if err != nil {
 			return "", remote, err
 		}
 	}
-	if err := verifyChart(path, p, digest); err != nil {
+	if err := verifyChart(path, p, c, digest); err != nil {
 		return "", remote, err
 	}
 	if !exists {
@@ -397,7 +439,7 @@ func prepareRelease(ctx context.Context, run runner, p plan) (bool, error) {
 		for _, asset := range release.Assets {
 			names[asset.Name] = true
 		}
-		for _, name := range []string{"moco-" + p.Version + ".tgz", "release.json", "SHA256SUMS"} {
+		for _, name := range []string{"moco-" + p.Version + ".tgz", "moco-controller-" + p.Version + ".tgz", "release.json", "SHA256SUMS"} {
 			if !names[name] {
 				return false, errors.New("published release is missing assets; immutable releases require uploading all assets to a draft before publication")
 			}
@@ -406,18 +448,50 @@ func prepareRelease(ctx context.Context, run runner, p plan) (bool, error) {
 	return release.Draft, nil
 }
 
-func attachAssets(ctx context.Context, run runner, p plan, out, chartPath, imageDigest, chartDigest string) error {
-	chartSum, err := checksum(chartPath)
-	if err != nil {
-		return err
+type publishedComponent struct {
+	Component   component
+	Path        string
+	ImageDigest string
+	ChartDigest string
+}
+
+type componentMetadata struct {
+	Name            string `json:"name"`
+	ImageRepository string `json:"imageRepository"`
+	ImageDigest     string `json:"imageDigest"`
+	ChartRepository string `json:"chartRepository"`
+	ChartDigest     string `json:"chartDigest"`
+	ChartSHA256     string `json:"chartSHA256"`
+	Archive         string `json:"archive"`
+}
+
+type releaseMetadata struct {
+	plan
+	// Preserve the original server fields for consumers of the v0.0.2 manifest.
+	ImageDigest string              `json:"imageDigest"`
+	ChartDigest string              `json:"chartDigest"`
+	ChartSHA256 string              `json:"chartSHA256"`
+	Components  []componentMetadata `json:"components"`
+}
+
+func attachAssets(ctx context.Context, run runner, p plan, out string, components []publishedComponent) error {
+	if len(components) != 2 || components[0].Component != server(p) || components[1].Component != controller(p) {
+		return errors.New("release requires the server and controller artifacts in order")
 	}
+	metadata := releaseMetadata{plan: p}
+	var sums string
+	paths := make([]string, 0, 4)
+	for _, artifact := range components {
+		chartSum, err := checksum(artifact.Path)
+		if err != nil {
+			return err
+		}
+		metadata.Components = append(metadata.Components, componentMetadata{Name: artifact.Component.Name, ImageRepository: artifact.Component.ImageRepository, ImageDigest: artifact.ImageDigest, ChartRepository: p.ChartRegistry + "/" + artifact.Component.Name, ChartDigest: artifact.ChartDigest, ChartSHA256: chartSum, Archive: filepath.Base(artifact.Path)})
+		sums += chartSum + "  " + filepath.Base(artifact.Path) + "\n"
+		paths = append(paths, artifact.Path)
+	}
+	metadata.ImageDigest, metadata.ChartDigest, metadata.ChartSHA256 = metadata.Components[0].ImageDigest, metadata.Components[0].ChartDigest, metadata.Components[0].ChartSHA256
 	metadataPath := filepath.Join(out, "release.json")
-	metadata := struct {
-		plan
-		ImageDigest string `json:"imageDigest"`
-		ChartDigest string `json:"chartDigest"`
-		ChartSHA256 string `json:"chartSHA256"`
-	}{p, imageDigest, chartDigest, chartSum}
 	if err := writeJSON(metadataPath, metadata); err != nil {
 		return err
 	}
@@ -425,11 +499,13 @@ func attachAssets(ctx context.Context, run runner, p plan, out, chartPath, image
 	if err != nil {
 		return err
 	}
-	sums := chartSum + "  " + filepath.Base(chartPath) + "\n" + metadataSum + "  release.json\n"
+	sums += metadataSum + "  release.json\n"
 	sumsPath := filepath.Join(out, "SHA256SUMS")
 	if err := os.WriteFile(sumsPath, []byte(sums), 0o600); err != nil {
 		return err
 	}
+	paths = append(paths, metadataPath, sumsPath)
+
 	data, err := run(ctx, "gh", "release", "view", p.Tag, "--repo", p.Repository, "--json", "assets")
 	if err != nil {
 		return fmt.Errorf("read release assets: %w", err)
@@ -442,7 +518,7 @@ func attachAssets(ctx context.Context, run runner, p plan, out, chartPath, image
 	for _, asset := range release.Assets {
 		existing[asset.Name] = true
 	}
-	for _, path := range []string{chartPath, metadataPath, sumsPath} {
+	for _, path := range paths {
 		if existing[filepath.Base(path)] {
 			stage, err := os.MkdirTemp(out, ".asset-*")
 			if err != nil {
@@ -466,7 +542,7 @@ func attachAssets(ctx context.Context, run runner, p plan, out, chartPath, image
 
 func run(ctx context.Context, args []string, execute runner) error {
 	if len(args) == 0 {
-		return errors.New("usage: moco-release <plan|image-status|publish-chart> [flags]")
+		return errors.New("usage: moco-release <plan|image-status|publish-release> [flags]")
 	}
 	flags := flag.NewFlagSet("moco-release", flag.ContinueOnError)
 	tag := flags.String("tag", "", "GitHub release tag")
@@ -476,6 +552,9 @@ func run(ctx context.Context, args []string, execute runner) error {
 	planPath := flags.String("plan", "release-plan.json", "validated plan JSON")
 	output := flags.String("output", "", "GITHUB_OUTPUT file")
 	imageDigest := flags.String("image-digest", "", "published multi-platform image digest")
+	componentName := flags.String("component", "server", "image-status component: server or controller")
+	controllerDigest := flags.String("controller-image-digest", "", "published controller multi-platform digest")
+	controllerSource := flags.String("controller-chart", "charts/moco-controller", "controller source chart")
 	source := flags.String("chart", "charts/moco", "source chart")
 	out := flags.String("out", "dist/release", "release staging directory")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -502,7 +581,7 @@ func run(ctx context.Context, args []string, execute runner) error {
 		if err := writeJSON(*planPath, p); err != nil {
 			return err
 		}
-		return outputs(*output, map[string]string{"version": p.Version, "oci_tag": p.OCITag, "commit": p.Commit, "image_repository": p.ImageRepository})
+		return outputs(*output, map[string]string{"version": p.Version, "oci_tag": p.OCITag, "commit": p.Commit, "image_repository": p.ImageRepository, "controller_image_repository": p.ControllerImageRepository})
 	}
 	p, err := loadPlan(*planPath)
 	if err != nil {
@@ -513,27 +592,45 @@ func run(ctx context.Context, args []string, execute runner) error {
 	}
 	switch args[0] {
 	case "image-status":
-		image, exists, err := imageStatus(ctx, execute, p)
+		c, err := selectComponent(p, *componentName)
+		if err != nil {
+			return err
+		}
+		image, exists, err := imageStatus(ctx, execute, p, c)
 		if err != nil {
 			return err
 		}
 		return outputs(*output, map[string]string{"exists": fmt.Sprint(exists), "digest": image.Digest})
-	case "publish-chart":
+	case "publish-release":
 		draft, err := prepareRelease(ctx, execute, p)
 		if err != nil {
 			return err
 		}
-		image, exists, err := imageStatus(ctx, execute, p)
-		if err != nil || !exists || image.Digest != *imageDigest {
-			return errors.New("published image is absent or differs from the validated digest")
+		components := []component{server(p), controller(p)}
+		digests := []string{*imageDigest, *controllerDigest}
+		sources := []string{*source, *controllerSource}
+		// Verify both images before publishing either chart or attaching any assets.
+		for i, c := range components {
+			image, exists, err := imageStatus(ctx, execute, p, c)
+			if err != nil {
+				return err
+			}
+			if !digestPattern.MatchString(digests[i]) || !exists || image.Digest != digests[i] {
+				return fmt.Errorf("published %s image is absent or differs from the validated digest", c.Name)
+			}
 		}
-		path, chart, err := publishChart(ctx, execute, p, *imageDigest, *source, *out)
-		if err != nil {
+		var artifacts []publishedComponent
+		for i, c := range components {
+			path, chart, err := publishChart(ctx, execute, p, c, digests[i], sources[i], *out)
+			if err != nil {
+				return err
+			}
+			artifacts = append(artifacts, publishedComponent{Component: c, Path: path, ImageDigest: digests[i], ChartDigest: chart.Digest})
+		}
+		if err := attachAssets(ctx, execute, p, *out, artifacts); err != nil {
 			return err
 		}
-		if err := attachAssets(ctx, execute, p, *out, path, *imageDigest, chart.Digest); err != nil {
-			return err
-		}
+
 		if draft {
 			latest := semver.Prerelease("v"+p.Version) == ""
 			if output, err := execute(ctx, "gh", "release", "edit", p.Tag, "--repo", p.Repository, "--draft=false", "--latest="+fmt.Sprint(latest)); err != nil {

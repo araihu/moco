@@ -30,7 +30,7 @@ func TestSemVerAndOCIIdentity(t *testing.T) {
 		version := strings.TrimPrefix(tag, "v")
 		pre := strings.Contains(strings.Split(version, "+")[0], "-")
 		p, err := releasePlan(tag, testCommit, "Araihu/Moco", pre)
-		if err != nil || p.Version != version || p.OCITag != strings.ReplaceAll(version, "+", "_") || p.ImageRepository != "ghcr.io/araihu/moco" || p.ChartRegistry != "oci://ghcr.io/araihu/charts" {
+		if err != nil || p.Version != version || p.OCITag != strings.ReplaceAll(version, "+", "_") || p.ImageRepository != "ghcr.io/araihu/moco" || p.ControllerImageRepository != "ghcr.io/araihu/moco-controller" || p.ChartRegistry != "oci://ghcr.io/araihu/charts" {
 			t.Fatalf("tag %s: %+v %v", tag, p, err)
 		}
 	}
@@ -123,7 +123,7 @@ func TestExistingImagesAreValidatedAndFailuresDoNotBecomeMissing(t *testing.T) {
 			d.Manifests = d.Manifests[:1]
 		}
 		run := func(context.Context, string, ...string) ([]byte, error) { return json.Marshal(d) }
-		_, exists, err := imageStatus(t.Context(), run, p)
+		_, exists, err := imageStatus(t.Context(), run, p, server(p))
 		if failure == "" && (err != nil || !exists) {
 			t.Fatal("existing image not reusable", err)
 		}
@@ -142,14 +142,14 @@ func TestExistingImagesAreValidatedAndFailuresDoNotBecomeMissing(t *testing.T) {
 		run := func(context.Context, string, ...string) ([]byte, error) {
 			return []byte(tc.message), errors.New("registry failure")
 		}
-		_, exists, err := imageStatus(t.Context(), run, p)
+		_, exists, err := imageStatus(t.Context(), run, p, server(p))
 		if exists || (err == nil) != tc.missing {
 			t.Fatalf("registry failure %q misclassified: %v", tc.message, err)
 		}
 	}
 }
 
-func chartFixture(t *testing.T, path string, p plan, digest string, schema bool) {
+func chartFixture(t *testing.T, path string, p plan, c component, digest string, schema, includeCRDs bool) {
 	t.Helper()
 	file, err := os.Create(path) // #nosec G304 -- test-owned temporary archive fixture.
 	if err != nil {
@@ -157,18 +157,24 @@ func chartFixture(t *testing.T, path string, p plan, digest string, schema bool)
 	}
 	compressed := gzip.NewWriter(file)
 	archive := tar.NewWriter(compressed)
-	metadata, err := json.Marshal(map[string]any{"name": "moco", "version": p.Version, "appVersion": p.Version, "annotations": map[string]string{"org.opencontainers.image.revision": p.Commit, "org.opencontainers.image.source": "https://github.com/" + p.Repository}})
+	metadata, err := json.Marshal(map[string]any{"name": c.Name, "version": p.Version, "appVersion": p.Version, "annotations": map[string]string{"org.opencontainers.image.revision": p.Commit, "org.opencontainers.image.source": "https://github.com/" + p.Repository}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, err := json.Marshal(map[string]any{"image": map[string]string{"repository": p.ImageRepository, "digest": digest}})
+	values, err := json.Marshal(map[string]any{"image": map[string]string{"repository": c.ImageRepository, "digest": digest}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries := map[string][]byte{"moco/Chart.yaml": metadata, "moco/values.yaml": values}
+	entries := map[string][]byte{c.Name + "/Chart.yaml": metadata, c.Name + "/values.yaml": values}
 	if schema {
-		entries["moco/values.schema.json"] = []byte(`{"type":"object"}`)
+		entries[c.Name+"/values.schema.json"] = []byte(`{"type":"object"}`)
 	}
+	if c.Name == "moco-controller" && includeCRDs {
+		for _, kind := range []string{"mocotenants", "mocovaults", "mocoauthorizations"} {
+			entries[c.Name+"/crds/moco.araihu.io_"+kind+".yaml"] = []byte("apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: " + kind + ".moco.araihu.io\n")
+		}
+	}
+
 	for name, data := range entries {
 		if err := archive.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Typeflag: tar.TypeReg, Size: int64(len(data))}); err != nil {
 			t.Fatal(err)
@@ -196,8 +202,8 @@ func TestChartMustCarryMatchingSourceVersionDigestAndSchema(t *testing.T) {
 			digest = "sha256:" + strings.Repeat("f", 64)
 		}
 		path := filepath.Join(t.TempDir(), "moco.tgz")
-		chartFixture(t, path, actual, digest, failure != "schema")
-		err := verifyChart(path, p, testDigest)
+		chartFixture(t, path, actual, server(actual), digest, failure != "schema", true)
+		err := verifyChart(path, p, server(p), testDigest)
 		if (err == nil) != (failure == "") {
 			t.Fatalf("chart mismatch %s: %v", failure, err)
 		}
@@ -214,12 +220,12 @@ func TestResumeReusesChartAndDoesNotRepublish(t *testing.T) {
 			return json.Marshal(descriptor{Digest: testDigest})
 		}
 		if name == "helm" && args[0] == "pull" {
-			chartFixture(t, filepath.Join(out, "moco-"+p.Version+".tgz"), p, testDigest, true)
+			chartFixture(t, filepath.Join(out, "moco-"+p.Version+".tgz"), p, server(p), testDigest, true, true)
 			return nil, nil
 		}
 		return nil, errors.New("unexpected command")
 	}
-	path, _, err := publishChart(t.Context(), run, p, testDigest, "does-not-exist", out)
+	path, _, err := publishChart(t.Context(), run, p, server(p), testDigest, "does-not-exist", out)
 	if err != nil || path == "" {
 		t.Fatal("resume failed", err)
 	}
@@ -232,7 +238,11 @@ func TestReleaseAssetsAreIdempotentAndNeverClobbered(t *testing.T) {
 	p := fixturePlan(t)
 	out := t.TempDir()
 	chartPath := filepath.Join(out, "moco-"+p.Version+".tgz")
-	chartFixture(t, chartPath, p, testDigest, true)
+	chartFixture(t, chartPath, p, server(p), testDigest, true, true)
+	controllerPath := filepath.Join(out, "moco-controller-"+p.Version+".tgz")
+	chartFixture(t, controllerPath, p, controller(p), testDigest, true, true)
+	artifacts := []publishedComponent{{Component: server(p), Path: chartPath, ImageDigest: testDigest, ChartDigest: testDigest}, {Component: controller(p), Path: controllerPath, ImageDigest: testDigest, ChartDigest: testDigest}}
+
 	assets := map[string][]byte{}
 	uploads := 0
 	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -261,27 +271,27 @@ func TestReleaseAssetsAreIdempotentAndNeverClobbered(t *testing.T) {
 		return nil, errors.New("unexpected release operation")
 	}
 	for range 2 {
-		if err := attachAssets(t.Context(), run, p, out, chartPath, testDigest, testDigest); err != nil {
+		if err := attachAssets(t.Context(), run, p, out, artifacts); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if uploads != 3 {
-		t.Fatalf("assets uploaded %d times; expected three", uploads)
+	if uploads != 4 {
+		t.Fatalf("assets uploaded %d times; expected four", uploads)
 	}
 	assets["SHA256SUMS"] = []byte("conflicting asset")
-	if err := attachAssets(t.Context(), run, p, out, chartPath, testDigest, testDigest); err == nil {
+	if err := attachAssets(t.Context(), run, p, out, artifacts); err == nil {
 		t.Fatal("conflicting assets were silently replaced")
 	}
-	if uploads != 3 {
+	if uploads != 4 {
 		t.Fatal("existing asset overwritten")
 	}
 }
 
 func TestPublicationUploadsToDraftBeforePublishing(t *testing.T) {
 	for _, tc := range []struct {
-		tag        string
-		failUpload bool
-	}{{"v1.2.3", false}, {"v1.2.3-rc.1", false}, {"v1.2.3", true}} {
+		tag          string
+		failUploadAt int
+	}{{"v1.2.3", 0}, {"v1.2.3-rc.1", 0}, {"v1.2.3", 1}, {"v1.2.3", 2}, {"v1.2.3", 3}, {"v1.2.3", 4}} {
 		t.Run(tc.tag, func(t *testing.T) {
 			tag := tc.tag
 			pre := strings.Contains(tag, "-rc")
@@ -308,7 +318,11 @@ func TestPublicationUploadsToDraftBeforePublishing(t *testing.T) {
 					if args[0] != "pull" || !created {
 						t.Fatal("chart must be pulled after release preparation", args)
 					}
-					chartFixture(t, filepath.Join(out, "moco-"+p.Version+".tgz"), p, testDigest, true)
+					c := server(p)
+					if strings.HasSuffix(args[1], "/moco-controller") {
+						c = controller(p)
+					}
+					chartFixture(t, filepath.Join(out, c.Name+"-"+p.Version+".tgz"), p, c, testDigest, true, true)
 					return nil, nil
 				case "gh":
 					if args[0] == "api" {
@@ -328,11 +342,11 @@ func TestPublicationUploadsToDraftBeforePublishing(t *testing.T) {
 							t.Fatal("assets must be uploaded while draft")
 						}
 						uploads++
-						if tc.failUpload {
+						if uploads == tc.failUploadAt {
 							return nil, errors.New("upload interrupted")
 						}
 					case "edit":
-						if uploads != 3 || !strings.Contains(strings.Join(args, " "), "--draft=false --latest="+map[bool]string{true: "false", false: "true"}[pre]) {
+						if uploads != 4 || !strings.Contains(strings.Join(args, " "), "--draft=false --latest="+map[bool]string{true: "false", false: "true"}[pre]) {
 							t.Fatal("publish only after all uploads, with matching latest policy", args)
 						}
 						published = true
@@ -341,8 +355,8 @@ func TestPublicationUploadsToDraftBeforePublishing(t *testing.T) {
 				}
 				return nil, errors.New("unexpected tool")
 			}
-			err = run(t.Context(), []string{"publish-chart", "--plan", planPath, "--image-digest", testDigest, "--out", out}, execute)
-			if tc.failUpload {
+			err = run(t.Context(), []string{"publish-release", "--plan", planPath, "--image-digest", testDigest, "--controller-image-digest", testDigest, "--out", out}, execute)
+			if tc.failUploadAt > 0 {
 				if err == nil || published || !created {
 					t.Fatal("failed uploads must leave the release as a draft", err)
 				}
@@ -393,8 +407,9 @@ func TestReleasePreparationFailsClosedAndSupportsRetries(t *testing.T) {
 		draft    bool
 	}{
 		{`{"tag_name":"v1.2.3","draft":true}`, false, true},
-		{`{"tag_name":"v1.2.3","assets":[{"name":"moco-1.2.3.tgz"},{"name":"release.json"},{"name":"SHA256SUMS"}]}`, false, false},
+		{`{"tag_name":"v1.2.3","assets":[{"name":"moco-1.2.3.tgz"},{"name":"moco-controller-1.2.3.tgz"},{"name":"release.json"},{"name":"SHA256SUMS"}]}`, false, false},
 		{`{"tag_name":"v1.2.3","immutable":true,"assets":[]}`, true, false},
+		{`{"tag_name":"v1.2.3","assets":[{"name":"moco-1.2.3.tgz"},{"name":"release.json"},{"name":"SHA256SUMS"}]}`, true, false},
 		{`{"tag_name":"v1.2.3","draft":true,"prerelease":true}`, true, false},
 		{`{"tag_name":"v9.9.9","draft":true}`, true, false},
 		{`invalid JSON`, true, false},

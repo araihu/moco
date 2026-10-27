@@ -61,6 +61,14 @@ func TestReleasePublicationRequiresValidatedSource(t *testing.T) {
 	if !strings.Contains(workflow[publish:], "ref: ${{ needs.prepare.outputs.commit }}") || !strings.Contains(workflow, "platforms: linux/amd64,linux/arm64") {
 		t.Fatal("release images must use the validated commit and both Linux architectures")
 	}
+	for _, required := range []string{"controller_image_repository", "--component controller", "context: controller", "scope=moco-controller-release", "--controller-image-digest", "--controller-chart charts/moco-controller", "publish-release"} {
+		if !strings.Contains(workflow[publish:], required) {
+			t.Fatalf("controller artifacts missing from release publication: %s", required)
+		}
+	}
+	if strings.Count(workflow[publish:], "platforms: linux/amd64,linux/arm64") != 2 {
+		t.Fatal("both release images must contain the two supported architectures")
+	}
 	for _, match := range regexp.MustCompile(`(?m)^\s+(?:-\s+)?uses:\s+(\S+)`).FindAllStringSubmatch(workflow, -1) {
 		if strings.HasPrefix(match[1], "./") {
 			continue
