@@ -43,7 +43,7 @@ notification, capacity and security checks before storing production secrets.
 
 ## Run locally
 
-Go 1.27.3 or newer is required; mise selects the latest stable Go. Supply
+Go 1.27.3 or newer is required; mise selects Go 1.27.3. Supply
 independent high-entropy credentials plus one base64-encoded 256-bit encryption key:
 
 ```bash
