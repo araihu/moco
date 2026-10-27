@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 from urllib.parse import urlsplit, unquote
 
+from site_brand import verify as verify_brand
+
 ROOT = Path(__file__).resolve().parent.parent
 # source, public route, navigation title, description
 GUIDES = [
@@ -84,6 +86,7 @@ def stage_content(build):
 
 def main():
     os.chdir(ROOT)
+    verify_brand()
     build = ROOT / 'site/.build'
     build.mkdir(parents=True, exist_ok=True)
     (ROOT / 'dist').mkdir(exist_ok=True)
@@ -108,6 +111,7 @@ def main():
         run('tools/bin/site/manja', 'export', 'verify', '--output', str(stage / 'manja'), report=build / 'manja-verification.json')
         shutil.move(stage / 'manja', stage / 'public/openapi')
         shutil.copyfile(ROOT / 'site/headers', stage / 'public/_headers')
+        shutil.copytree(ROOT / 'site/assets/brand', stage / 'public/site/assets/brand', dirs_exist_ok=True)
         # Enrich only Margo HTML; Manja bytes remain covered by its export receipt.
         os.environ['SITE_VERSION'] = version
         run('python3', '-B', 'scripts/site_structured_data.py', str(stage / 'public'))

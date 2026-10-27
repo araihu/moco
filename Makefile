@@ -186,3 +186,7 @@ site site-check:
 
 site-preview: site
 	python3 -m http.server 4173 --bind 127.0.0.1 --directory dist/site
+
+.PHONY: site-assets-update
+site-assets-update:
+	python3 -B scripts/site_brand.py update

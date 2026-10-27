@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "repository": "araihu/assets",
+  "release": "v0.2.6",
+  "sourceCommit": "96c81116e6610a882f89cca2b40b92b20d59fbb0",
+  "releaseURL": "https://github.com/araihu/assets/releases/tag/v0.2.6",
+  "archive": {
+    "name": "araihu-assets-v0.2.6.tar.gz",
+    "sha256": "2d86ebd0c0724e4293175186e80e7108fd8e813ed885f66bb192bc871b64d16b"
+  },
+  "catalogSha256": "172fab5947b0aa1f3cb72113e9f8a91af353bd733da2102f4844b5d20b847121",
+  "files": {
+    "logo-light.svg": {
+      "sourcePath": "brand/moco/logo/light-transparent-optical.svg",
+      "sha256": "4c525e7186e20b7ef289c2e967e4c5c15180d70b124681759401615a4c0e5bb5"
+    },
+    "logo-dark.svg": {
+      "sourcePath": "brand/moco/logo/dark-transparent-optical.svg",
+      "sha256": "39285ed157868d9f66261c9a2ea24fdb55ba0eba82ce839372d45de7e3801bee"
+    },
+    "icon-dark.svg": {
+      "sourcePath": "icons/brand/moco-icon-dark-transparent-optical.svg",
+      "sha256": "5f9aa1b96ac0ae788566616cb27f8517863d7fb4821691bfbd0924b026d76998"
+    },
+    "icon.svg": {
+      "sourcePath": "icons/brand/moco-icon-dark-plate-optical.svg",
+      "sha256": "3f0ad4320f7581ef25ba454596e83ce679d4b633512eb342e41847bdf2702c38"
+    },
+    "favicon.svg": {
+      "sourcePath": "platform/web/moco/favicon.svg",
+      "sha256": "99830f5f48b986658cc4ede72c9ce97600aecfa7c0fc0debbe3f673c8aa63590"
+    },
+    "NOTICE": {
+      "sourcePath": "NOTICE",
+      "sha256": "a2352282b84512d3d19605db486143ae092bc54a0b26e87f3ee4b0968fbf998e"
+    },
+    "LICENSE": {
+      "sourcePath": "licenses/Apache-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  }
+}

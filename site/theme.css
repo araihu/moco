@@ -26,6 +26,40 @@
   --margo-accent: var(--color-primary);
   --margo-outline: var(--color-outline);
 }
+html.dark {
+  --margo-surface: var(--color-surface-dark);
+  --margo-surface-alt: var(--color-surface-dark-alt);
+  --margo-text: var(--color-on-surface-dark);
+  --margo-text-strong: var(--color-on-surface-dark-strong);
+  --margo-accent: var(--color-primary-dark);
+  --margo-outline: var(--color-outline-dark);
+}
+/* The official wordmark includes the product name. Keep its natural ratio. */
+html .landing-shell__brand > img,
+html .margo-site-brand > img,
+html .component-doc-shell__managed-logo {
+  inline-size: 7.5rem;
+  block-size: auto;
+  max-inline-size: 7.5rem;
+  max-block-size: 2rem;
+  object-fit: contain;
+}
+html .landing-shell__brand-copy,
+html .margo-site-brand > span,
+html .component-doc-shell__brand-compact-mark,
+html .component-doc-shell__brand-name {
+  display: none;
+}
+html .component-doc-shell__brand-logo-source {
+  display: inline-flex;
+  flex: none;
+}
+html.dark .landing-shell__brand > img,
+html.dark .margo-site-brand > img,
+html.dark .component-doc-shell__managed-logo {
+  content: url("/site/assets/brand/logo-dark.svg");
+}
+
 html .margo-landing-hero { gap: 3rem; padding-block: clamp(3rem, 7vw, 6rem); }
 html .margo-landing-hero__copy h1 {
   max-inline-size: 12ch;

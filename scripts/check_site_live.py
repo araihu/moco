@@ -59,6 +59,10 @@ for route in ("/does-not-exist", "/openapi/does-not-exist.json"):
         raise RuntimeError(f"{route}: expected 404, got {result.stdout}")
 for route, expected in (
     ("/site/assets/social.png", "image/png"),
+    ("/site/assets/brand/logo-light.svg", "image/svg+xml"),
+    ("/site/assets/brand/icon.svg", "image/svg+xml"),
+    ("/site/assets/brand/favicon.svg", "image/svg+xml"),
+    ("/site/assets/brand/provenance.json", "application/json"),
     ("/openapi/sw.js", "text/javascript"),
     ("/media/architecture.svg", "image/svg+xml"),
 ):

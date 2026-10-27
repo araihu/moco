@@ -10,8 +10,8 @@ site:
   repository_url: https://github.com/araihu/moco
   base_url: https://moco.araihu.com
   home: index.md
-  logo: site/assets/mark.svg
-  icon: site/assets/mark.svg
+  logo: site/assets/brand/logo-light.svg
+  icon: site/assets/brand/icon.svg
   social_image:
     path: site/assets/social.png
     alt: Mocó. Secret management for your homelab, with an API, CLI and Kubernetes controller.
@@ -33,6 +33,7 @@ navigation:
 theme:
   builtin: true
   name: modern
-  color_mode: light
+  color_mode: system
+  allow_switch_theme: true
 custom_css:
   - css_url: site/theme.css

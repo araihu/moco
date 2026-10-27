@@ -23,9 +23,40 @@ python3 -m http.server 4173 --bind 127.0.0.1 --directory dist/site
 `site.yaml` configures Margo's built-in landing/docs layouts, local assets,
 search, sidebar and table of contents. `site/theme.css` uses public semantic
 theme tokens. There are no external fonts, analytics or hosted runtime dependencies.
-The small vault mark and architecture/social illustrations in `site/assets/`
-are repository-owned website artwork, not an organization-wide brand asset.
-`social.png` is the raster preview of the checked-in `social.svg` (1280×640).
+The official Mocó logo and icon come from [araihu/assets v0.2.6](https://github.com/araihu/assets/releases/tag/v0.2.6).
+`site/assets/brand/` preserves the selected SVG bytes, license and notice from
+that release. `provenance.json` records the source commit, archive/catalog
+checksums and each imported file's path and hash. The build verifies these
+files offline and includes their notices in the publication.
+
+To import the pinned release again, use `make site-assets-update`. The updater
+requires GitHub CLI access, verifies the published archive and every extracted
+file, and checks the catalog against the tagged source before replacing the
+brand directory. Change `VERSION` in `scripts/site_brand.py` deliberately when
+adopting another release. Update identity geometry in the shared Assets
+repository, rather than editing imported SVGs here.
+
+The architecture illustration is local website artwork. `social.svg` composes
+the official dark logo and icon without changing their geometry or colors;
+`social.png` is its 1280×640 raster preview. After updating the composition,
+re-render it with librsvg 2.62.1:
+
+```sh
+rsvg-convert --width 1280 --height 640 site/assets/social.svg --output site/assets/social.png
+```
+
+`theme.color_mode: system` and `theme.allow_switch_theme: true` enable Margo's
+built-in light/dark control on the home and docs pages. The browser's preference
+sets the initial appearance; the shell persists a manual choice. The header
+selects the unchanged official light or dark wordmark to match. The official
+dark plate icon serves as a favicon with contrast in both modes.
+The imported adaptive favicon is preserved for future use:
+Margo v0.0.26 rejects its color-scheme media rule in SVG assets
+([Margo #79](https://github.com/araihu/margo/issues/79)). The header also bounds
+the logo height while [Margo #78](https://github.com/araihu/margo/issues/78)
+tracks overflowing square logos in the default docs shell. Manja's API export
+uses the same social preview and retains its own renderer identity: v0.1.17
+cannot export custom logo/favicon files outside its embedded asset inventory.
 
 ## Content ownership
 
