@@ -74,7 +74,8 @@ jobs:
         fromJSON('["self-hosted","Linux","X64","hostinger-vps-trusted"]') ||
         'ubuntu-24.04'
       }}
-    timeout-minutes: 45
+    # Cold tool builds plus the controller's Kubernetes/race checks can exceed 45 minutes.
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
