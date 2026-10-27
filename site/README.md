@@ -62,8 +62,8 @@ trigger a separate `release.published` workflow. Prereleases do not update the s
 Only the deployment job uses the GitHub `production` environment's
 `CLOUDFLARE_API_TOKEN`. Configure a dedicated token with **Workers Editor** for
 account `482241c1c361c24977ac6540df946c2f`, and **Zone Read** plus
-**Workers Routes Write** restricted to the `araihu.com` zone. Cloudflare scopes
-Worker editing at the account level; this is not a per-Worker permission.
+**Workers Routes Write** restricted to the `araihu.com` zone. The configured token grants
+Worker editing at the account level; it is not restricted to this Worker.
 Workers Editor can update and deploy an existing Worker, but cannot create or
 delete one. An account owner must provision `moco-site` once before the first
 CI deployment (already done for this installation). Keep creation privileges
@@ -85,11 +85,16 @@ copy and `site.yaml` in the release source before tagging. Historical release
 evidence pages retain their original version and source identity.
 
 Deployment uses pinned Wrangler 4.151.3 and the verified build artifact, then
-compares **every deployed file** by SHA-256 and checks MIME types and true 404s.
-To run that verification manually:
+waits up to five minutes for DNS/TLS and the expected home page, then compares
+**every deployed file** by SHA-256 and checks MIME types and true 404s.
+Compare against the **exact uploaded artifact**, not an independent rebuild:
+Manja's publication receipt includes build-specific metadata. To verify manually,
+replace `RUN_ID` with the successful deployment run:
 
 ```sh
-python3 -B scripts/check_site_live.py
+gh run download RUN_ID --repo araihu/moco --name moco-site-RUN_ID \
+  --dir /tmp/moco-published-site
+python3 -B scripts/check_site_live.py --root /tmp/moco-published-site
 ```
 
 Keep `Cache-Control: no-transform` from `site/headers`. Disable HTML/JavaScript

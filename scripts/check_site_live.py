@@ -5,12 +5,14 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from pathlib import Path
 import subprocess
+import time
 from urllib.parse import quote, urlsplit
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--root", type=Path, default=Path("dist/site"))
 parser.add_argument("--origin", default="https://moco.araihu.com")
 parser.add_argument("--resolve", help="Public IPv4 address to bypass stale DNS")
+parser.add_argument("--wait-seconds", type=int, default=300, help="Bounded wait for DNS, TLS and the deployed home page")
 args = parser.parse_args()
 origin = args.origin.rstrip("/")
 curl = ["curl", "--silent", "--show-error", "--location", "--max-time", "30",
@@ -18,6 +20,21 @@ curl = ["curl", "--silent", "--show-error", "--location", "--max-time", "30",
         "--retry-all-errors"]
 if args.resolve:
     curl += ["--resolve", f"{urlsplit(origin).hostname}:443:{args.resolve}"]
+
+
+# New custom domains need time for DNS/TLS and deployment propagation. Wait once
+# before starting the full inventory; never skip TLS or accept different bytes.
+expected_home = hashlib.sha256((args.root / "index.html").read_bytes()).digest()
+deadline = time.monotonic() + max(args.wait_seconds, 0)
+while True:
+    ready = subprocess.run(curl + ["--fail", origin + "/"], capture_output=True)
+    if ready.returncode == 0 and hashlib.sha256(ready.stdout).digest() == expected_home:
+        break
+    if time.monotonic() >= deadline:
+        detail = ready.stderr.decode(errors="replace").strip()[-500:]
+        raise RuntimeError(f"Deployment not ready at {origin}: curl {ready.returncode}; {detail or 'home bytes differ'}")
+    print("Waiting for DNS, TLS and the expected deployment...", flush=True)
+    time.sleep(min(5, max(0, deadline - time.monotonic())))
 
 
 def verify(path):

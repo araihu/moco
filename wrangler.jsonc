@@ -9,5 +9,6 @@
     "not_found_handling": "404-page"
   },
   "routes": [{"pattern": "moco.araihu.com", "custom_domain": true}],
+  "preview_urls": false,
   "workers_dev": true
 }
