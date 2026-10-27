@@ -64,6 +64,10 @@ Only the deployment job uses the GitHub `production` environment's
 account `482241c1c361c24977ac6540df946c2f`, and **Zone Read** plus
 **Workers Routes Write** restricted to the `araihu.com` zone. Cloudflare scopes
 Worker editing at the account level; this is not a per-Worker permission.
+Workers Editor can update and deploy an existing Worker, but cannot create or
+delete one. An account owner must provision `moco-site` once before the first
+CI deployment (already done for this installation). Keep creation privileges
+out of the recurring CI token.
 Do not reuse a product API credential. Account, Worker and domain identifiers
 in `wrangler.jsonc` are public configuration, not secrets.
 
