@@ -5,7 +5,7 @@ assets: local
 offline: true
 site:
   name: Mocó
-  description: Self-hosted secrets, from your terminal to your cluster. An API, CLI and Kubernetes controller with encrypted secret values in local SQLite.
+  description: Self-hosted secret management for your homelab. Manage application credentials through the API, CLI or Kubernetes controller.
   version: v0.0.3
   repository_url: https://github.com/araihu/moco
   base_url: https://moco.araihu.com
@@ -14,7 +14,7 @@ site:
   icon: site/assets/mark.svg
   social_image:
     path: site/assets/social.png
-    alt: Mocó. Your secrets, on your infrastructure. API, CLI and GitOps with SQLite and ESO.
+    alt: Mocó. Secret management for your homelab, with an API, CLI and Kubernetes controller.
 layout:
   kind: docs
   default:

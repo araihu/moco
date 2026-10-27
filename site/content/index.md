@@ -1,6 +1,6 @@
 ---
-title: Mocó — secrets on your infrastructure
-description: Self-hosted secret management with an API, a CLI and declarative Kubernetes resources. Encrypted secret values, transactional audit and verified recovery.
+title: Mocó secret management for your homelab
+description: Store application secrets on your own infrastructure. Manage them through the API, CLI or Kubernetes controller, and deliver values to workloads with External Secrets Operator.
 language: en
 layout:
   kind: landing
@@ -9,53 +9,62 @@ layout:
     navigation: [getting-started/index.md, guides/index.md, reference/index.md]
     navigation_label: Documentation
 ---
-# Your secrets. Your infrastructure.
+# Secrets for your homelab
 
-Manage secrets from your terminal. Declare access in Git. Deliver values to your
-workloads with ESO. Mocó stores encrypted secret values in local SQLite — with audit
-and recovery built in.
+Store passwords, tokens and application credentials on your own infrastructure.
+Manage them through the API or command line, or declare tenants, vaults and
+access policies in Kubernetes.
 
-- [Get started](getting-started/index.md)
-- [Explore the API](/openapi/)
+- [Try Moco locally](getting-started/index.md)
+- [Install Moco](guides/installation/index.md)
 
-![Moco connects an API and CLI or declarative Kubernetes resources to encrypted SQLite, then delivers scoped values through ESO to applications.](media/architecture.svg)
+![The API, CLI and Kubernetes controller manage Moco resources. Moco encrypts secret values in local SQLite. External Secrets Operator reads permitted values and creates Kubernetes Secrets for applications.](media/architecture.svg)
 
-## One service. Three ways in.
+## Manage secrets through the API or CLI
 
-**API.** Create tenants and vaults, address secrets by logical path and protect
-updates with ETags. The public and administrative contracts are documented.
+Organize secrets into tenants and vaults, then address each secret with a path
+such as `prod/database/password`. Read metadata separately from values. Use
+conditional updates to avoid overwriting a newer version.
 
-**CLI.** Use familiar commands such as `moco tenants list`. Read tables in your
-terminal, JSON in scripts or CSV in a spreadsheet. [Use the CLI](guides/cli/index.md).
+The CLI uses commands such as `moco tenants list`. Tables are the default;
+choose JSON for scripts or CSV for tabular exports.
+[Read the CLI guide](guides/cli/index.md) or [browse the API reference](/openapi/).
 
-**GitOps.** Declare `MocoTenant`, `MocoVault` and `MocoAuthorization` in a trusted
-namespace. The controller reconciles metadata and access; ESO delivers values.
-[Meet the controller](guides/controller/index.md).
+## Declare resources and access in Kubernetes
 
-## Small footprint. Explicit boundaries.
+Keep tenants, vaults and access policies in Git using `MocoTenant`, `MocoVault`
+and `MocoAuthorization`. The Moco controller reconciles these resources and
+repairs drift. [Set up the controller](guides/controller/index.md).
 
-One server, one SQLite writer. Per-vault envelope encryption. Default-deny
-permissions scoped to tenants and secret-path prefixes. Successful mutations
-commit with their audit event or roll back together.
+External Secrets Operator, or ESO, reads permitted values through its webhook
+provider and creates Kubernetes Secrets for your applications.
+[Connect Moco to ESO](guides/eso/index.md).
 
-Backups capture the full database, verify checksums and restore offline with the
-required historical keys. Automatic mirrored snapshots and protected metrics
-help you operate the service. [Read the production profile](guides/production/index.md).
+## Audit writes and recover your data
 
-## Released together. Tested together.
+Moco encrypts secret values with a separate key for each vault and lets you
+rotate the root key. Successful API changes and their audit records commit in
+the same SQLite transaction. If Moco cannot write the audit record, it rolls
+back the change.
+[Read the audit guarantees](guides/audit/index.md).
 
-**v0.0.3** ships server and controller images for Linux amd64/arm64 and two Helm
-charts with image digests pinned. The published artifacts passed 21 scenarios
-with vind, Calico and ESO, including policy reconciliation, token and root-key
-rotation, and restoration followed by a fresh ESO sync.
+Automatic backups capture the full database and copy verified archives to a
+configured mirror. Restore offline with the required historical root keys,
+which you keep separately from the backups.
+[Configure backups and rehearse a restore](guides/backup-restore/index.md).
 
-[Review the release evidence and its limits](reference/release-0.0.3/index.md).
-This is a single-instance service. Validate off-host backup custody and recovery
-on your own storage before keeping production secrets.
+## Deploy Moco 0.0.3
 
-## Start where you are.
+Run one server with local SQLite using Docker Compose or Helm. Add the separate
+controller when you want Kubernetes to manage resources and access. The released
+server and controller images support Linux amd64 and arm64, and both Helm
+charts pin their images by digest. [Install the release](guides/installation/index.md).
 
-- [Run locally](getting-started/index.md) — start an API and try the CLI.
-- [Install the release](guides/installation/index.md) — Docker Compose or Kubernetes.
-- [Operate and recover](guides/index.md) — security, audit, backups and failure drills.
-- [Read the source](https://github.com/araihu/moco) — Go modules and reviewed contracts.
+Keep SQLite data on a local filesystem and maintain an off-host backup copy.
+The supported topology has one writer, with downtime during recovery.
+[Follow the production runbook](guides/production/index.md).
+
+The published v0.0.3 images and charts passed 21 Kubernetes integration and
+recovery scenarios, including token rotation, root-key rotation and a database
+restore followed by fresh secret delivery through ESO.
+[Review the test results and limits](reference/release-0.0.3/index.md).

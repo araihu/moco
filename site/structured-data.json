@@ -1,9 +1,16 @@
 {
-  "description": "Self-hosted secret management with an API, CLI and Kubernetes controller, encrypted local SQLite, transactional audit and verified backups.",
+  "description": "Self-hosted secret management for your homelab. Manage application credentials through the API, CLI or Kubernetes controller. Moco encrypts secret values in local SQLite and supports audited writes, backups and offline recovery.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux",
   "processorRequirements": "amd64 or arm64",
   "sameAs": "https://github.com/araihu/moco",
   "installUrl": "https://moco.araihu.com/guides/installation/",
-  "featureList": ["Tenant and vault isolation", "Envelope encryption and root-key rotation", "Transactional audit", "Verified backup and offline restore", "CLI with table, JSON and CSV output", "Declarative Kubernetes resources and ESO webhook integration"]
+  "featureList": [
+    "Tenant and vault isolation",
+    "Envelope encryption and root-key rotation",
+    "Transactional audit",
+    "Verified backup and offline restore",
+    "CLI with table, JSON and CSV output",
+    "Declarative Kubernetes resources and ESO webhook integration"
+  ]
 }

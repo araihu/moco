@@ -2,12 +2,13 @@ version: 1
 organization:
   title: Moco API
   readme: >-
-    Public resource operations and restricted administrative operations for your own Moco instance.
-    This is a static reference, not a hosted secret service or interactive API console.
-    Administrative routes require a private deployment origin and explicit permissions.
-    [Get started](https://moco.araihu.com/getting-started/) ·
-    [Security](https://moco.araihu.com/guides/security/) ·
-    [Installation](https://moco.araihu.com/guides/installation/).
+    Look up requests, responses and errors for your own Moco instance.
+    Use the public API to manage tenants, vaults and secrets. Use the administrative API
+    to manage authorization, audit and root-key rotation with an explicitly permitted principal.
+    Administrative endpoints belong on a private deployment origin.
+    [Try Moco locally](https://moco.araihu.com/getting-started/) ·
+    [Configure security](https://moco.araihu.com/guides/security/) ·
+    [Install Moco](https://moco.araihu.com/guides/installation/).
   seo:
     description: Moco OpenAPI reference for tenants, vaults, secrets, authorization, audit and encryption maintenance.
     canonicalBase: https://moco.araihu.com/openapi
@@ -16,14 +17,13 @@ organization:
 catalogs:
   - id: moco
     mount: /catalogs/moco
-    title: Moco contracts
+    title: Moco API contracts
     readme: >-
-      Start with the public contract for tenant, vault and secret lifecycles.
-      The internal contract documents probes and restricted administration, including authorization,
-      audit and root-key rotation. Publication of this contract does not expose your private endpoints.
-      Supply your own deployment URL and scoped bearer credential.
-      Software release versions, OpenAPI info versions and the v1 route namespace evolve independently.
-      [Contract sources and CLI overlays](https://moco.araihu.com/reference/openapi-pipeline/).
+      Choose the public contract for tenant, vault and secret operations, or the internal
+      contract for probes and administrative operations. Use your deployment URL and a bearer
+      credential with permission for the operation. This site provides read-only documentation;
+      it does not accept credentials or send API requests.
+      [Read how contracts and CLI overlays work](https://moco.araihu.com/reference/openapi-pipeline/).
     defaultDocument: public
     profile: strict-v1
     seo:
