@@ -1,0 +1,9 @@
+{
+  "description": "Self-hosted secret management with an API, CLI and Kubernetes controller, encrypted local SQLite, transactional audit and verified backups.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux",
+  "processorRequirements": "amd64 or arm64",
+  "sameAs": "https://github.com/araihu/moco",
+  "installUrl": "https://moco.araihu.com/guides/installation/",
+  "featureList": ["Tenant and vault isolation", "Envelope encryption and root-key rotation", "Transactional audit", "Verified backup and offline restore", "CLI with table, JSON and CSV output", "Declarative Kubernetes resources and ESO webhook integration"]
+}

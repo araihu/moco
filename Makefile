@@ -179,3 +179,10 @@ check: controller-check workflow-lint spec-lint api-generate cli-spec-check sqlc
 	GOWORK=off $(GO) vet ./...
 	GOWORK=off $(GO) -C dagger/third_party/otel-go vet ./...
 	@if [ -f dagger/dagger.gen.go ]; then GOWORK=off $(GO) -C dagger vet ./...; fi
+
+.PHONY: site site-check site-preview
+site site-check:
+	bash scripts/build-site.sh
+
+site-preview: site
+	python3 -m http.server 4173 --bind 127.0.0.1 --directory dist/site

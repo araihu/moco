@@ -15,6 +15,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       version: ${{ steps.plan.outputs.version }}
+      site_stable: ${{ steps.plan.outputs.site_stable }}
       oci_tag: ${{ steps.plan.outputs.oci_tag }}
       commit: ${{ steps.plan.outputs.commit }}
       image_repository: ${{ steps.plan.outputs.image_repository }}
@@ -44,6 +45,11 @@ jobs:
             --tag "$RELEASE_TAG" \
             --commit "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" \
             --plan "$RUNNER_TEMP/release-tools/release-plan.json" --output "$GITHUB_OUTPUT"
+          # Ignore build metadata when deciding whether SemVer is a prerelease.
+          release_core="${RELEASE_TAG%%+*}"
+          if [[ "$release_core" != *-* ]]; then
+            echo 'site_stable=true' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-tools-${{ steps.plan.outputs.commit }}
@@ -162,3 +168,11 @@ jobs:
             --controller-image-digest "$CONTROLLER_IMAGE_DIGEST" \
             --chart charts/moco --controller-chart charts/moco-controller --out "$RUNNER_TEMP/release-assets"
           cat "$RUNNER_TEMP/release-assets/release.json" >> "$GITHUB_STEP_SUMMARY"
+
+  site:
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.site_stable == 'true'
+    uses: ./.github/workflows/site.yml
+    with:
+      deploy: true
+      release_tag: ${{ github.ref_name }}

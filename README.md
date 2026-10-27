@@ -1,404 +1,103 @@
 # Mocó
 
-Mocó is an API-first, self-hosted secret-management service. Its product
-direction combines tenant isolation, S3-like logical secret paths, and envelope
-encryption.
+Self-hosted secret management for your homelab. Use the HTTP API or CLI directly,
+or declare tenants, vaults and authorization in Kubernetes and deliver secret
+values to applications with External Secrets Operator (ESO).
 
-## Current status
+**Current release: [v0.0.3](https://github.com/araihu/moco/releases/tag/v0.0.3).**
+[Website and documentation](https://moco.araihu.com/) ·
+[Get started](docs/getting-started.md) · [Installation](docs/installation.md) ·
+[Public and administrative API reference](https://moco.araihu.com/openapi/)
 
-The public and internal OpenAPI contracts are source-controlled and validated.
-The current executable vertical slices implement tenant, vault, and encrypted
-secret lifecycles:
+## What Moco does
 
-- bearer-authenticated tenant and tenant-scoped vault create, list, get, replace, and delete;
-- path-based secret create/replace, value read, metadata read/list, and conditional delete;
-- HKDF-SHA-256/AES-256-GCM envelope encryption with one random wrapped data key per vault;
-- deployment root-key keyrings with read support for previous eras and bounded online vault-key rewrapping;
-- multi-principal bearer authentication from token digests and default-deny Casbin policies;
-- SQLite authorization policy snapshots with atomic revision-guarded replacement, coalesced local signals, and shared-store polling reloads;
-- restricted internal `GET`/`PUT /internal/v1/authorization` snapshot administration;
-- restricted internal `GET /internal/v1/audit` request metadata ledger;
-- restricted internal `POST /internal/v1/audit/retention` bounded local ledger retention;
-- local read-only `moco-audit-export` JSONL audit snapshots;
-- complete live SQLite recovery archives with checksums, required key-era IDs, and verified offline restoration;
-- a single-instance SQLite production profile with an OCI image, native TLS, private administration/metrics, verified automatic mirrored backups, retention and operational recovery drills;
-- restricted internal `POST /internal/v1/encryption/rotation` bounded root-key rewrap batches;
-- SQLite persistence with embedded startup migrations and sqlc-generated queries;
-- strong ETags for conditional reads and compare-and-swap mutations;
-- creation idempotency scoped to the authenticated principal for at least 24 hours;
-- HMAC-authenticated, expiring cursors over stable insertion snapshots;
-- durable `resourceVersion` watch polling for cross-process reconciliation;
-- tenant-scoped `trv-*` watch polling for least-privilege reconciliation;
-- unauthenticated `/livez` and `/readyz` process probes.
-- optional native HTTPS with locally supplied certificate and private key files.
+- Isolates tenants and vaults; addresses secrets with logical paths such as `prod/database/password`.
+- Encrypts values with per-vault data keys and AES-256-GCM envelope encryption; supports root-key rotation and rewrapping.
+- Applies default-deny, tenant- and path-scoped authorization with revision-guarded policy snapshots.
+- Commits successful mutations and audit events in the same SQLite transaction.
+- Produces verified full backups with automatic mirrored snapshots, retention and offline recovery using historical keys.
+- Provides a Cobra CLI with **table** output by default, plus **JSON** and **CSV**.
+- Reconciles `MocoTenant`, `MocoVault` and `MocoAuthorization` through a dedicated Kubernetes controller.
+- Exposes probes, protected Prometheus metrics and operational alerts.
 
-Secret metadata operations never select or return ciphertext or plaintext, and
-secret-bearing reads use `Cache-Control: no-store`. External KMS/HSM providers,
-and cross-host policy transport when instances do not share the SQLite store
-are not implemented. Audit shipping and independent deployment custody remain
-operator responsibilities.
-Use the [single-instance production runbook](docs/operations/production-sqlite.md)
-to deploy and validate this profile. Complete target-environment recovery,
-notification, capacity and security checks before storing production secrets.
+Moco has an API, CLI and Kubernetes controller. It does not currently provide a
+management UI or TUI. The website is documentation.
 
-## Run locally
+## Choose how to use it
 
-Go 1.27.3 or newer is required; mise selects Go 1.27.3. Supply
-independent high-entropy credentials plus one base64-encoded 256-bit encryption key:
+| Workflow | Start here |
+| --- | --- |
+| Explore locally with Go and SQLite | [Local quick start](docs/getting-started.md) |
+| Operate through a terminal | [CLI guide](cli/README.md) |
+| Run one instance with Docker Compose | [Production SQLite profile](docs/operations/production-sqlite.md) |
+| Deploy to Kubernetes with Helm | [Server chart](charts/moco/README.md) |
+| Manage resources declaratively | [Controller and CRDs](docs/operations/kubernetes-controller.md) |
+| Deliver secrets with ESO | [Kubernetes/ESO acceptance and examples](docs/operations/kubernetes-eso-tests.md) |
 
-```bash
+## Try it locally
+
+Requires Go **1.27.3 or newer**, OpenSSL and Make. This development configuration
+uses HTTP on localhost; use the [production profile](docs/operations/production-sqlite.md)
+for TLS, separated credentials and persistent storage.
+
+```sh
+git clone https://github.com/araihu/moco.git
+cd moco
+export MOCO_ADDR=127.0.0.1:8080
 export MOCO_BEARER_TOKEN="$(openssl rand -hex 32)"
 export MOCO_CURSOR_HMAC_KEY="$(openssl rand -hex 32)"
 export MOCO_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-export MOCO_ENCRYPTION_KEY_ID="local-v1"
+export MOCO_ENCRYPTION_KEY_ID=local-v1
 make run
 ```
 
-The server listens on `:8080` and stores data in `./moco.db` by default. Override
-those values with `MOCO_ADDR` and `MOCO_DB_PATH`. Startup automatically applies
-embedded migrations. To enable native HTTPS, set both `MOCO_TLS_CERT_FILE` and
-`MOCO_TLS_KEY_FILE` to PEM files and optionally set `MOCO_ADDR=:8443`. TLS 1.2 or
-newer is required. Certificates are loaded and validated as a matching pair
-before opening the database; missing or invalid files abort startup. Restart
-the server after replacing certificates. Probes use HTTPS on the same listener.
-Certificate issuance and renewal are managed by the deployment. When both
-variables are absent the listener uses HTTP, suitable for local development or
-a deployment with TLS termination in front of it.
+Keep the encryption key with separate recovery custody before retaining data.
+In another terminal, [build the CLI and create your first tenant](docs/getting-started.md).
+The database defaults to `./moco.db`; override it with `MOCO_DB_PATH`.
 
-`MOCO_ENCRYPTION_KEY_ID` is stored with wrapped vault keys and defaults to
-`local-v1`. Keep the exact encryption key with database backups. For a rotation,
-set `MOCO_ENCRYPTION_KEYS` to one strict JSON document containing the active key
-ID and up to 16 standard-base64 256-bit keys, retaining the previous key until
-all vaults are rewrapped:
+## Release 0.0.3
 
-```bash
-export MOCO_ENCRYPTION_KEYS="$(jq -cn \
-  --arg old "$(printf %s "$OLD_KEY_B64")" \
-  --arg active "$(printf %s "$ACTIVE_KEY_B64")" \
-  '{activeKeyId:"root-v2",keys:{"root-v1":$old,"root-v2":$active}}')"
-export MOCO_ENCRYPTION_KEY_EPOCH="2"
-export MOCO_ENCRYPTION_KEY=""
-```
+| Artifact | Published location |
+| --- | --- |
+| Server image (Linux amd64/arm64) | `ghcr.io/araihu/moco:0.0.3` |
+| Controller image (Linux amd64/arm64) | `ghcr.io/araihu/moco-controller:0.0.3` |
+| Server chart | `oci://ghcr.io/araihu/charts/moco`, version `0.0.3` |
+| Controller chart | `oci://ghcr.io/araihu/charts/moco-controller`, version `0.0.3` |
+| Checksums, manifest and both chart archives | [GitHub Release](https://github.com/araihu/moco/releases/tag/v0.0.3) |
 
-The active key ID is used for new vaults. Previous IDs remain read-capable, and
-`POST /internal/v1/encryption/rotation` rewraps at most 200 vault keys per call;
-continue with both returned checkpoints, then run fresh sweeps until
-`complete` is true and `remainingOldKeys` is zero. The epoch is a monotonically
-increasing shared-store fence: bump it with each active-era rollout and start
-all writers with the new key ID and epoch before rotating. Processes from an
-older epoch can still serve compatible reads but cannot write secrets or run
-rotation. Remove the retired key only after a backup and verification. Repeating
-a page is safe. The operation changes only wrapped-key bytes, does not expose
-key material, and does not advance the public resource-watch revision. Do not
-configure a keyring and the legacy `MOCO_ENCRYPTION_KEY` at the same time.
+Released charts pin their component's image digest. Credentials, certificates,
+storage and backup mirror identity are operator inputs; the charts do not
+invent them. Follow the [installation guide](docs/installation.md) before installing.
 
-`GET /internal/v1/encryption/status` is a read-only deployment diagnostic. It
-reports the shared active root-key ID, epoch, and current count of vault keys
-still using an older era. Run a fresh rotation sweep and confirm
-`complete=true` with `remainingOldKeys=0` before removing an old key from the
-deployment keyring; the status is point-in-time and does not reserve the state.
+The published images and charts passed [21 acceptance scenarios with vind,
+Calico and ESO](https://github.com/araihu/moco/actions/runs/40448153000), including
+declarative reconciliation, scoped access, key/token rotation and restore.
+See [the release validation record](docs/releases/0.0.3.md) for evidence and limits.
 
-The local `MOCO_BEARER_TOKEN` mode creates one backwards-compatible principal
-with full API access. Multi-principal deployments set `MOCO_AUTH_CONFIG` to a
-JSON file containing only SHA-256 token digests, role bindings, and allow
-policies, and leave `MOCO_BEARER_TOKEN` unset:
+The supported production topology is **one writer with local SQLite**.
+External KMS/HSM and high availability are not implemented. A mirror volume on
+the same host is not an independent disaster-recovery copy. Validate off-host
+custody, restore, capacity and alerts in your target environment.
 
-```json
-{
-  "principals": [{"id": "controller", "tokenSha256": "<64 lowercase hex characters>"}],
-  "roleBindings": [{"principal": "controller", "role": "secret-reader", "domain": "11111111-1111-4111-8111-111111111111"}],
-  "policies": [{
-    "subject": "secret-reader",
-    "domain": "11111111-1111-4111-8111-111111111111",
-    "path": "/api/v1/tenants/{tenantId}/vaults/{vaultId}/secret",
-    "method": "GET"
-  }]
-}
-```
+## Documentation and development
 
-On the first start with `MOCO_AUTH_CONFIG`, role bindings and policies are
-validated and persisted as one SQLite snapshot. Once initialized, that
-snapshot is authoritative across restarts; changing the file's role bindings or
-policies does not silently replace it. Principals and their token digests stay
-in the file because they are needed to authenticate requests. An intentionally
-empty role/policy set is also persisted and remains default-deny.
-
-The internal authorization endpoint requires an explicit Casbin policy for
-`/internal/v1/authorization` with `GET` and/or `PUT`; it is not part of the
-public API. Keep that permission on a dedicated deployment principal and
-restrict the direct deployment origin with network policy as well.
-
-The internal audit endpoint requires its own explicit `GET` policy for
-`/internal/v1/audit`. Successful API mutations and their audit event commit in
-one SQLite transaction, before success headers or a body are sent. An audit or
-commit failure rolls back the complete mutation and returns `503`, including
-tenant/vault cascades, idempotency, watch revisions, new vault keys, policy
-changes, retention and each rotation batch. Startup epoch/policy initialization
-also commits with a `STARTUP /internal/startup` event from `system:startup`.
-The ledger includes status and principal metadata, without request bodies,
-query strings, bearer credentials, or plaintext secret paths. The audit read
-itself is excluded so a tailing client cannot create a self-sustaining stream
-of its own polls. Logical secret paths and list prefixes are represented only
-by keyed HMAC-SHA-256 digests derived with a domain-separated label from
-`MOCO_CURSOR_HMAC_KEY`. Rotating that key intentionally breaks correlation of
-path digests across key eras. The ledger is for security observability, not a
-reconciliation/change feed; controllers and operators use `/api/v1/watch` plus
-relist for convergence. Read-only requests and rejected attempts keep independent
-post-response audit logging; a failure there cannot undo a delivered read. Audit
-failures are logged and monitored. Policy invalidations publish only after the
-audited commit; a notification failure keeps the committed success response and
-is logged, while SQLite polling allows reload convergence. See the
-[transactional audit runbook](docs/operations/transactional-audit.md) for guarantees,
-failure behavior and operational tests.
-
-The internal audit-retention endpoint requires its own explicit `POST` policy
-for `/internal/v1/audit/retention`. For deletion, supply a cutoff at least one
-hour old and repeat the bounded request until `complete` is true and `remaining`
-is zero. Set `dryRun=true` first to preview the current matching count (even
-with a more recent past cutoff); a dry run never deletes and is not a
-convergence loop. Retention deletes only ledger rows older than the cutoff,
-preserves monotonic sequence allocation, and does not advance the public
-resource-watch revision. The response is a current diagnostic rather than a
-snapshot; keep the operation on the deployment origin and export any retained
-data before purging it.
-
-For offline backup, run `moco-audit-export` against the SQLite file. It opens the
-database read-only, captures the current highest audit sequence as a finite
-snapshot boundary, streams one metadata object per JSONL line, and writes a new
-destination with mode `0600` without overwriting an existing file. Use
-`--after-sequence` to resume after a previous export; rows appended after the
-snapshot boundary are intentionally left for the next run. `-output -` streams
-JSONL to stdout and leaves the caller responsible for protecting the pipe.
-Supplying `--manifest` writes a second private JSON file containing the
-snapshot bounds, count, and SHA-256 of the exact JSONL bytes; pass both files
-back with `--verify` to validate the checksum, schema, ordering, and bounds
-without opening SQLite.
-
-```bash
-STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-go run ./cmd/moco-audit-export \
-  --database ./moco.db \
-  --output "./audit-$STAMP.jsonl" \
-  --manifest "./audit-$STAMP.manifest.json"
-
-go run ./cmd/moco-audit-export \
-  --verify \
-  --output ./audit-20260829T000000Z.jsonl \
-  --manifest ./audit-20260829T000000Z.manifest.json
-```
-
-The internal encryption rotation endpoint requires its own explicit `POST`
-policy for `/internal/v1/encryption/rotation`. It is a maintenance operation,
-not a public resource API; restrict it to a dedicated operator principal and
-deployment origin. Key material is supplied through startup configuration, not
-through HTTP.
-
-For full disaster recovery, `moco-backup` captures all database state, including
-tenants, vaults, encrypted secrets, policies, audit, idempotency, and watch/key
-epochs. It uses SQLite `VACUUM INTO` against a read-only source, so committed WAL
-transactions are included without migrating or stopping the source. The output
-is one atomically published `0600` tar archive containing a database snapshot
-and checksum manifest; existing outputs are never overwritten.
-
-```bash
-go run ./cmd/moco-backup create --database ./moco.db --output ./moco-backup.tar
-go run ./cmd/moco-backup verify --backup ./moco-backup.tar
-go run ./cmd/moco-backup verify --backup ./moco-backup.tar --keyring /secure/recovery-keys.json
-go run ./cmd/moco-backup restore --backup ./moco-backup.tar \
-  --database ./recovered.db --keyring /secure/recovery-keys.json
-```
-
-Restoration requires a new offline destination and authenticates every vault
-key and secret before publishing the database. The private keyring file uses
-the same JSON format as `MOCO_ENCRYPTION_KEYS`. Root keys, bearer credentials,
-cursor HMAC keys, auth configuration files, and TLS private keys are deliberately
-kept in separate deployment custody. Retain historical root keys for as long as
-any retained backup needs them, even after live rotation is complete. Archives
-also contain readable metadata and must be protected as sensitive files. See
-[the recovery runbook](docs/operations/backup-restore.md) for rotation, deployment
-configuration, version compatibility, and client resynchronization.
-
-Policies are default-deny, use Casbin `keyMatch3` path patterns, and bind
-tenant-scoped requests through `domain`; use the literal tenant ID for an
-isolated tenant. A secret-operation policy can additionally set
-`secretPathPrefix` (for example `prod/database/`) to restrict the decoded
-logical secret path or list prefix to that literal prefix. The reserved value
-`*` preserves legacy vault-wide behavior. Path-scoped list requests must
-include a non-empty prefix. A global policy must explicitly use `domain: "*"`.
-`HEAD` requests consume the corresponding `GET` permission.
-Generate a digest without putting the clear token in the file:
-`printf %s "$TOKEN" | sha256sum`.
-
-Example tenant creation:
-
-```bash
-curl --fail-with-body \
-  -H "Authorization: Bearer $MOCO_BEARER_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: example-tenant-001' \
-  --data '{"name":"production","labels":{}}' \
-  http://127.0.0.1:8080/api/v1/tenants
-```
-
-## Architecture
-
-Mocó uses ports and adapters. `internal/core` contains domain validation, port
-contracts, and transport-independent application services. It imports neither HTTP
-nor SQL. Infrastructure under `internal/adapters` implements those ports, and
-`cmd/moco-server` is the composition root.
-
-- `openapi/`: exploded public/internal contracts, lint rules, and bundles.
-- `cmd/moco-audit-export/`: read-only offline JSONL audit exporter.
-- `cmd/moco-backup/`: full database backup, verification, and offline restore.
-- `tools/`: isolated Go module with pinned development binaries.
-- `db/migrations/`: SQLite migrations embedded into the server.
-- `db/queries/`: sqlc query sources.
-- `internal/core/`: domain types, ports, and application services.
-- `internal/adapters/db/`: SQLite/sqlc repository.
-- `internal/adapters/backup/`: streaming recovery archives and atomic publication.
-- `internal/adapters/encryption/`: HKDF-SHA-256/AES-256-GCM envelope encryption adapter.
-- `internal/adapters/http/`: generated strict contract and handwritten adapter, including audit capture.
-- `internal/adapters/authn/`: bearer token keyring keyed by SHA-256 digests.
-- `internal/adapters/authz/`: reloadable Casbin model, policy bus, and default-deny adapter.
-
-The internal policy administration endpoint is implemented with revision-guarded
-writes. Each configured server instance supervises its SQLite-backed policy
-reloader, using local signals and shared-store polling, and terminates if an
-authoritative snapshot cannot be loaded or validated.
-
-The public watch endpoint is a full-resync signal: it reports only a monotonic
-checkpoint and intentionally does not expose event payloads or tombstones. A
-controller or operator should persist its last checkpoint, poll with a bounded
-timeout, and relist the collections it is authorized to manage after a change.
-The process-wide `/api/v1/watch` endpoint requires its explicit cluster-wide
-watch permission. A tenant-scoped controller can instead use
-`/api/v1/tenants/{tenantId}/watch`; its checkpoint advances for that tenant's
-tenant, vault, and secret mutations, survives deletion as a tombstone, and
-accepts a literal tenant-domain policy.
-
-## Development
-
-Operational drills require Python 3 and OpenSSL on the host. The separate image
-and monitoring gates require Docker Engine and Compose.
-The Linux load/fault suite uses `/proc` and per-child `resource.prlimit`; its
-bounded acceptance profile runs in `make check`. Use `make load-test
-LOAD_REPORT=/tmp/moco-load-fault.json` for a retained JSON report and see the
-[load/fault runbook](docs/operations/load-fault-tests.md) for extended workloads,
-latency/resource budgets and fault guarantees.
-
-Go tool versions are pinned under `tools/`, so global installations are unnecessary.
-`actionlint` and `golangci-lint` have their own nested Go modules to keep their
-dependency graphs isolated from Vacuum:
-
-- actionlint `v1.7.12`
-- Vacuum `v0.30.1`
-- oapi-codegen `v2.8.0`
-- sqlc `v1.31.1`
-- govulncheck `v1.7.0`
-- golangci-lint `v2.15.0`
-- Casbin `v2.135.0`
-- a SQLite-only migration runner backed by golang-migrate `v4.19.1`
-
-Every tool is compiled from its pinned Go module using the selected Go
-toolchain. Module checksums authenticate the sources, and the Go build cache
-keeps repeat runs fast while rebuilding when the toolchain changes. This also
-updates the standard library embedded in `golangci-lint`, rather than retaining
-the older runtime in an upstream precompiled release. Its first build uses one
-worker with a 4 GiB memory target; override `LINT_BUILD_GOMEMLIMIT` and
-`LINT_BUILD_GOGC` when necessary. Other tools retain their 2 GiB memory target.
-
-```bash
-make workflow-lint
-make spec-lint
-make api-generate
-make sqlc-generate
-make db-migrate DB_PATH=./moco.db
-make test
-make lint
-make vulncheck
-make check
-```
-
-`make check` runs generation, tests, `golangci-lint`, `govulncheck` source
-analysis, vulnerability scans of every pinned tool binary, and executable
-restart/recovery/key-rotation drills and concurrent load/fault acceptance. CI
-also exercises the OCI profile and monitoring rules in a separate job. CI invokes the
-same gate through Dagger, explicitly builds every Go-managed tool first, and
-rejects stale generated files. The Dagger module reuses immutable shared modules
-from `araihu/dagger`; the CI tool build includes `golangci-lint` from its isolated
-module and uses the same version and source checksums as local builds.
-Dagger sets `GOTOOLCHAIN=auto` so each module can select its required Go version
-when the shared base image provides an older compiler.
-CLI and engine/SDK are pinned together to v0.21.11; every runner installs that
-CLI and CI validates `dagger functions` before building tools. The pinned engine
-endpoint overrides any older runner-wide engine so SDK bootstrap can load the
-current Go module before its own build functions run.
-The local SDK adapter preserves the reviewed dependency manifests after binding
-generation and compiles the module with a digest-pinned Go 1.27.3 image using
-`-mod=readonly`. See [load/fault acceptance and SDK compatibility](docs/operations/load-fault-tests.md).
-
-The Dagger module selects patched OpenTelemetry v1.45.0, Logs v0.21.0, and
-`golang.org/x/net` v0.60.0. Its SDK telemetry bridge needs a local compatibility
-adaptation for the unified Logs value API; source provenance, license, tests,
-and removal conditions are documented in
-[`dagger/third_party/otel-go/README.moco.md`](dagger/third_party/otel-go/README.moco.md).
-
-Public API source lives in `openapi/public.yaml`; probe-only internal operations
-live in `openapi/internal.yaml`. Both are exploded into paths and reusable
-components. Generated bundles under `openapi/bundled/` and generated Go code are
-checked in for deterministic review.
-
-CLI metadata is maintained separately in `openapi/overlays/cli.*.yaml`.
-`make cli-spec-bundle` uses Vacuum to apply these overlays and publish
-`openapi/bundled/cli/public.json` and `internal.json` for
-[oapi-cli-gen](https://github.com/araihu/oapi-cli-gen). These bundles explicitly
-name commands such as `moco tenants create` and `moco secrets get`, while
-preserving the principal API contracts. See the
-[OpenAPI pipeline](openapi/README.md#cli-metadata-overlays).
-
-## Kubernetes deployment
-
-Published SemVer GitHub Releases produce multi-platform images in
-`ghcr.io/araihu/moco` and OCI charts in `oci://ghcr.io/araihu/charts/moco` after
-the complete validation workflow. Released charts pin the exact image digest;
-the Release also receives the chart, manifest and checksums. See the
-[release workflow/runbook](docs/operations/releases.md).
-
-For Kubernetes deployment, use the [Helm chart](charts/moco/README.md), including
-JSON Schema validation, single-writer SQLite storage, private TLS credentials,
-verified mirrored backup sidecar and optional Prometheus Operator integration.
-Run `make chart-check` for the helm-unittest YAML suites and Helm integration
-checks; CI runs them with Helm 3 and 4 before releasing.
-Run `make vind-test` for real Kubernetes acceptance with vind, Calico and ESO,
-including secret delivery, rotations and mirrored recovery. See the
-[cluster acceptance runbook](docs/operations/kubernetes-eso-tests.md).
-
-## Command-line client
-
-The public API CLI is the independent Go module in [`cli/`](cli/README.md),
-with its source, dependencies and operational tests maintained in this repository.
-It is generated by a pinned [oapi-cli-gen](https://github.com/araihu/oapi-cli-gen)
-build tool from Moco's Vacuum-enriched contract.
+- [Documentation map](docs/README.md)
+- [Security, authorization and root-key management](docs/security.md)
+- [Backup and restore](docs/operations/backup-restore.md)
+- [Transactional audit guarantees](docs/operations/transactional-audit.md)
+- [Architecture, repository layout and development checks](docs/development.md)
+- [OpenAPI contracts, Vacuum overlays and CLI generation](openapi/README.md)
+- [Release publication](docs/operations/releases.md)
+- [Website source, build and deployment](site/README.md)
 
 ```sh
-make cli-build
-export MOCO_SERVER=https://moco.example.com:8443
-# Provide MOCO_TOKEN through your credential mechanism.
-bin/moco tenants list                  # table (default)
-bin/moco tenants list --output json
-bin/moco tenants list --output csv
-bin/moco secrets get --help
+make check              # application, controller, CLI, lint, vulnerability scans and drills
+make chart-check        # helm-unittest and chart integration checks
+make vind-test          # published release acceptance with vind + ESO
+make site-check         # Margo guides + Manja reference, export and link checks
 ```
 
-Run `make cli-generate` after changing the contract or overlays. `make cli-check`
-checks generated drift, runs module tests and vulnerability scans, and exercises
-the CLI against a temporary real server. Root `make check` includes these checks.
-
-## Secret addressing
-
-The secret API uses S3-like logical paths in query parameters. Item
-operations use `/secret?path=prod/db/password`; metadata listing uses
-`/secrets?prefix=prod/db/`. Paths forbid empty, `.`, and `..` segments, and
-metadata operations never return values.
-
-O [controller Kubernetes](docs/operations/kubernetes-controller.md) gerencia tenants, vaults e autorização declarativamente com três CRDs; o ESO entrega os valores dos segredos às aplicações. O código fica no módulo `controller/` e o chart em `charts/moco-controller/`.
+Moco's CLI is the `cli/` module in this repository. The generic
+[oapi-cli-gen](https://github.com/araihu/oapi-cli-gen) remains a separate project.
+The site uses [Margo](https://github.com/araihu/margo) and
+[Manja](https://github.com/araihu/manja), following the AraiHu documentation stack.

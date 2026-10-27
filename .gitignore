@@ -7,3 +7,7 @@ tools/bin/
 /dagger/dagger.gen.go
 /dagger/internal/dagger/
 /bin/
+/dist/
+/site/.build/
+/.wrangler/
+/scripts/__pycache__/

@@ -1,0 +1,115 @@
+name: site
+
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: false
+      release_tag:
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published stable release documented by main (for initial deployment or documentation corrections)'
+        required: true
+        default: v0.0.3
+        type: string
+  pull_request:
+    paths: ['site/**', 'site.yaml', 'wrangler.jsonc', 'docs/**', 'README.md', 'cli/README.md', 'charts/**/README.md', 'openapi/**', 'scripts/*site*', '.github/workflows/site.yml', '.github/workflows/release.yml', 'Makefile']
+  push:
+    branches: [main]
+    paths: ['site/**', 'site.yaml', 'wrangler.jsonc', 'docs/**', 'README.md', 'cli/README.md', 'charts/**/README.md', 'openapi/**', 'scripts/*site*', '.github/workflows/site.yml', '.github/workflows/release.yml', 'Makefile']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      publish: ${{ steps.identity.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Validate deployment identity
+        id: identity
+        env:
+          REQUEST_DEPLOY: ${{ inputs.deploy || github.event_name == 'workflow_dispatch' }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$REQUEST_DEPLOY" != true ]; then
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          tag = os.environ['RELEASE_TAG']
+          number = r'(?:0|[1-9][0-9]*)'
+          if not re.fullmatch(rf'v?{number}\.{number}\.{number}(?:\+[0-9A-Za-z.-]+)?', tag):
+              raise SystemExit('Deployment requires stable SemVer')
+          if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch' and os.environ['GITHUB_REF'] != 'refs/heads/main':
+              raise SystemExit('Manual deployment must run from main')
+          release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/releases/tags/{tag}']))
+          if release['draft'] or release['prerelease'] or release['tag_name'] != tag:
+              raise SystemExit('Release must be published and stable')
+          subprocess.run(['git', 'merge-base', '--is-ancestor', f'refs/tags/{tag}', 'HEAD'], check=True)
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f'SITE_VERSION={tag}\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('publish=true\n')
+          PY
+      - name: Build and verify Margo and Manja publication
+        run: make site-check
+      - name: Validate Cloudflare static assets configuration
+        run: npx --yes wrangler@4.151.3 deploy --dry-run
+      - name: Save verified publication
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: moco-site-${{ github.run_id }}
+          path: dist/site/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://moco.araihu.com
+    concurrency:
+      group: moco-site-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: moco-site-${{ github.run_id }}
+          path: dist/site
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Deploy verified static artifact
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4.151.3 deploy
+      - name: Verify deployed bytes, MIME types and missing routes
+        run: python3 -B scripts/check_site_live.py

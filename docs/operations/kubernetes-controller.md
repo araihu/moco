@@ -14,7 +14,7 @@ The controller repairs external metadata and authorization drift every `reconcil
 
 ## Install and bootstrap
 
-Build and publish the controller OCI image from the repository checkout, then supply its registry digest. This chart is separate from the single-writer server chart; it does not install SQLite, store encryption keys, or manage secret values. Release v0.0.3 and later publish the controller image and chart alongside the server. Use the released chart with its image digest already pinned:
+Use the published controller OCI image and chart from release v0.0.3. This chart is separate from the single-writer server chart; it does not install SQLite, store encryption keys, or manage secret values. Release v0.0.3 and later publish the controller image and chart alongside the server. Use the released chart with its image digest already pinned:
 
 ```sh
 helm upgrade --install moco-management oci://ghcr.io/araihu/charts/moco-controller -n moco \

@@ -20,7 +20,9 @@ Build or install the checked-in module directly with Go:
 
 ```sh
 go -C cli build -o ../bin/moco ./cmd/moco
-go install github.com/araihu/moco/cli/cmd/moco@latest
+# Install the released source from this multi-module repository:
+git clone --branch v0.0.3 --depth 1 https://github.com/araihu/moco.git
+GOWORK=off go -C moco/cli install ./cmd/moco
 ```
 
 Use the public API through the generated Cobra commands:

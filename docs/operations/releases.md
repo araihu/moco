@@ -199,3 +199,15 @@ chart archive checksum are recorded in the
 [v0.0.1 release notes](https://github.com/araihu/moco/releases/tag/v0.0.1). The
 original workflow run reports an asset-upload failure. New versions use the
 draft-first flow above.
+
+## Documentation website
+
+Stable releases whose source contains the website workflow call
+`.github/workflows/site.yml` after artifact publication. The job builds Margo
+and Manja from the validated release source and deploys the verified static
+artifact to `moco.araihu.com`. Prereleases do not change the site. Website
+publication requires the dedicated Cloudflare token in the `production`
+environment; application publication does not use that credential.
+See [site maintenance](../../site/README.md) for the initial v0.0.3 deployment,
+manual documentation corrections, validation and rollback. Software tags remain
+immutable when documentation changes.

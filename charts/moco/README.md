@@ -11,7 +11,7 @@ ServiceMonitor with a separate private Service.
 - Kubernetes **1.32+**; CI tests Helm **3.22.1 and 4.3.1**.
 - An enforcing NetworkPolicy CNI and Linux nodes supporting UID/GID 65532,
   RuntimeDefault seccomp and read-only root filesystems.
-- A **new image built from this revision** with `/moco-ops prepare-runtime` and
+- A compatible production image (published **v0.0.3** or a reviewed source build) with `/moco-ops prepare-runtime` and
   `backup-loop --wait-ready`. Use a SemVer release image/chart or publish your
   own reviewed build. Release charts carry the immutable image digest; source
   chart defaults require an explicit image pin.
@@ -35,7 +35,7 @@ pod, bypass CSI fencing, scale the StatefulSet or start a second release on its
 data. The process's local file lock is an additional check, not distributed
 fencing. See the Kubernetes [StatefulSet/storage documentation](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).
 
-## 1. Build and publish the image
+## 1. Select the published image or build your own
 
 Published SemVer releases provide `ghcr.io/araihu/moco` and
 `oci://ghcr.io/araihu/charts/moco`. Their chart defaults pin the matching image

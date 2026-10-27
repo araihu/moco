@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640" role="img" aria-labelledby="title desc">
+<title id="title">From desired state to delivered secrets</title><desc id="desc">API and CLI or Kubernetes controller connect to Moco, which stores encrypted data in SQLite. ESO reads scoped values and delivers Kubernetes Secrets to applications.</desc>
+<rect width="640" height="640" rx="28" fill="#132d35"/>
+<g fill="none" stroke="#527a78" stroke-width="2"><path d="M170 164v62h150v50M470 164v62H320M320 406v66M320 530v36"/><path d="m311 462 9 10 9-10M311 556l9 10 9-10"/></g>
+<g font-family="system-ui, sans-serif" text-anchor="middle">
+<text x="40" y="48" text-anchor="start" fill="#83d7c4" font-size="12" letter-spacing="3">MOCO / HOW IT CONNECTS</text>
+<g fill="#1c3b43" stroke="#527a78"><rect x="40" y="86" width="260" height="78" rx="12"/><rect x="340" y="86" width="260" height="78" rx="12"/></g>
+<g fill="#fffdf1" font-size="20" font-weight="600"><text x="170" y="119">API + CLI</text><text x="470" y="119">GitOps + controller</text></g>
+<g fill="#bdcfca" font-size="13"><text x="170" y="144">Direct requests</text><text x="470" y="144">Tenants · vaults · authorization</text></g>
+<rect x="130" y="276" width="380" height="130" rx="16" fill="#83d7c4"/>
+<text x="320" y="317" font-size="30" font-weight="700" fill="#132d35">Mocó</text>
+<text x="320" y="347" fill="#132d35" font-size="15">Encrypted values · local SQLite</text>
+<text x="320" y="375" fill="#214c4a" font-size="13">Scoped access / transactional audit / recovery</text>
+<rect x="130" y="472" width="380" height="58" rx="12" fill="#1c3b43" stroke="#527a78"/>
+<text x="320" y="507" fill="#fffdf1" font-size="18">ESO · scoped webhook reader</text>
+<text x="320" y="594" fill="#fffdf1" font-size="18">Application ← Kubernetes Secret</text>
+<text x="320" y="622" fill="#bdcfca" font-size="12">Controller manages metadata. ESO delivers values.</text>
+</g></svg>

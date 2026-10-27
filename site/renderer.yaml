@@ -1,0 +1,37 @@
+version: 1
+organization:
+  title: Moco API
+  readme: >-
+    Public resource operations and restricted administrative operations for your own Moco instance.
+    This is a static reference, not a hosted secret service or interactive API console.
+    Administrative routes require a private deployment origin and explicit permissions.
+    [Get started](https://moco.araihu.com/getting-started/) ·
+    [Security](https://moco.araihu.com/guides/security/) ·
+    [Installation](https://moco.araihu.com/guides/installation/).
+  seo:
+    description: Moco OpenAPI reference for tenants, vaults, secrets, authorization, audit and encryption maintenance.
+    canonicalBase: https://moco.araihu.com/openapi
+    socialImage: https://moco.araihu.com/site/assets/social.png
+    socialImageAlt: Mocó API and administration reference
+catalogs:
+  - id: moco
+    mount: /catalogs/moco
+    title: Moco contracts
+    readme: >-
+      Start with the public contract for tenant, vault and secret lifecycles.
+      The internal contract documents probes and restricted administration, including authorization,
+      audit and root-key rotation. Publication of this contract does not expose your private endpoints.
+      Supply your own deployment URL and scoped bearer credential.
+      Software release versions, OpenAPI info versions and the v1 route namespace evolve independently.
+      [Contract sources and CLI overlays](https://moco.araihu.com/reference/openapi-pipeline/).
+    defaultDocument: public
+    profile: strict-v1
+    seo:
+      description: Public and internal Moco contracts rendered from the checked-in OpenAPI bundles.
+      canonicalBase: https://moco.araihu.com/openapi/catalogs/moco
+      socialImage: https://moco.araihu.com/site/assets/social.png
+      socialImageAlt: Mocó API and administration reference
+    source:
+      kind: files
+      root: ../openapi/bundled
+      include: [public.yaml, internal.yaml]

@@ -1,0 +1,38 @@
+version: 1
+source: site/.build/content
+output: dist/site
+assets: local
+offline: true
+site:
+  name: Mocó
+  description: Self-hosted secrets, from your terminal to your cluster. An API, CLI and Kubernetes controller backed by encrypted local SQLite.
+  version: v0.0.3
+  repository_url: https://github.com/araihu/moco
+  base_url: https://moco.araihu.com
+  home: index.md
+  logo: site/assets/mark.svg
+  icon: site/assets/mark.svg
+  social_image:
+    path: site/assets/social.png
+    alt: Mocó. Your secrets, on your infrastructure. API, CLI and GitOps with SQLite and ESO.
+layout:
+  kind: docs
+  default:
+    families: [docs]
+    sidebar: true
+    toc: true
+    content:
+      layout: article
+  values:
+    family: docs
+locales:
+  default: en
+  supported: [en]
+navigation:
+  mode: file-tree
+theme:
+  builtin: true
+  name: modern
+  color_mode: light
+custom_css:
+  - css_url: site/theme.css

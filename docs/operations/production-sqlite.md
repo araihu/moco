@@ -8,6 +8,16 @@ filesystem. This profile provides recovery, not high availability.
 
 ## Release image and runtime
 
+For the published v0.0.3 release, use the verified multi-platform image index:
+
+```sh
+export MOCO_IMAGE=ghcr.io/araihu/moco@sha256:d6a8167c48c771884729405ff4a0d3c8f65bb1b69bbcb96c091745de6eade180
+docker pull "$MOCO_IMAGE"
+```
+
+See [release evidence](../releases/0.0.3.md) and verify your recovery prerequisites
+before deploying. Building from source is optional; for a reviewed custom build:
+
 ```sh
 make check
 make image-check IMAGE=moco:$(git rev-parse --short HEAD)
@@ -46,10 +56,10 @@ mountpoint -q /mnt/moco-offhost
 sudo install -d -o 65532 -g 65532 -m 0700 /mnt/moco-offhost/archives
 ```
 
-Set `MOCO_IMAGE` to the image you built or its published digest:
+Set `MOCO_IMAGE` to the published digest above or your reviewed custom digest:
 
 ```sh
-export MOCO_IMAGE=moco:REPLACE_WITH_RELEASE_COMMIT
+# MOCO_IMAGE is the immutable server image selected above.
 docker run --rm --network none --read-only \
   --mount type=bind,src=/etc/moco,dst=/bootstrap \
   --entrypoint /moco-ops "$MOCO_IMAGE" init --directory /bootstrap/credentials
