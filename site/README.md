@@ -2,7 +2,7 @@
 
 Product home and documentation for Moco **v0.0.3**, following
 [Balemoh](https://github.com/araihu/balemoh)'s AraiHu static publishing pattern:
-[Margo v0.0.25](https://github.com/araihu/margo) for the home and guides,
+[Margo v0.0.26](https://github.com/araihu/margo) for the home and guides,
 [Manja v0.1.17](https://github.com/araihu/manja) for read-only API reference,
 and Cloudflare Workers Static Assets at **https://moco.araihu.com**.
 The website runs no Moco server and accepts no credentials or secret values.
