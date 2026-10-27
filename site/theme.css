@@ -1,24 +1,5 @@
 /* Public Margo theme tokens; keep layout and interactions owned by Margo. */
-[data-theme="modern"] {
-  --color-surface: #f7f6f0;
-  --color-surface-alt: #eeeee5;
-  --color-on-surface: #35454b;
-  --color-on-surface-strong: #132d35;
-  --color-on-surface-muted: #526469;
-  --color-primary: #006b60;
-  --color-on-primary: #fff;
-  --color-outline: #718680;
-  --color-surface-dark: #102c34;
-  --color-surface-dark-alt: #193b42;
-  --color-on-surface-dark: #e1ece7;
-  --color-on-surface-dark-strong: #fffdf1;
-  --color-on-surface-dark-muted: #b6cbc5;
-  --color-primary-dark: #83d7c4;
-  --color-on-primary-dark: #102c34;
-  --color-outline-dark: #7f9c96;
-  --font-body: ui-sans-serif, system-ui, sans-serif;
-  --font-title: var(--font-body);
-  --document-line-height: 1.7;
+[data-theme="araihu"] {
   --margo-surface: var(--color-surface);
   --margo-surface-alt: var(--color-surface-alt);
   --margo-text: var(--color-on-surface);

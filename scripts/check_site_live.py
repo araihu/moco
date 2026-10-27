@@ -46,7 +46,7 @@ def verify(path):
         raise RuntimeError(f"{relative}: deployed bytes differ")
 
 
-files = sorted(path for path in args.root.rglob("*") if path.is_file() and path.name != "_headers")
+files = sorted(path for path in args.root.rglob("*") if path.is_file() and path.name not in {"_headers", "_redirects"})
 with ThreadPoolExecutor(max_workers=8) as pool:
     for count, _ in enumerate(pool.map(verify, files), 1):
         if count % 100 == 0:
@@ -57,6 +57,13 @@ for route in ("/does-not-exist", "/openapi/does-not-exist.json"):
                             capture_output=True, text=True, check=True)
     if result.stdout != "404":
         raise RuntimeError(f"{route}: expected 404, got {result.stdout}")
+for rule in (args.root / "_redirects").read_text().splitlines():
+    source, target, status = rule.split()
+    result = subprocess.run(curl + ["--no-location", "--output", "/dev/null", "--write-out",
+                                   "%{http_code} %{redirect_url}", origin + source],
+                            capture_output=True, text=True, check=True)
+    if result.stdout != f"{status} {origin}{target}":
+        raise RuntimeError(f"{source}: incorrect documentation redirect {result.stdout}")
 for route, expected in (
     ("/site/assets/social.png", "image/png"),
     ("/site/assets/brand/logo-light.svg", "image/svg+xml"),

@@ -23,7 +23,8 @@ catalogs:
       contract for probes and administrative operations. Use your deployment URL and a bearer
       credential with permission for the operation. This site provides read-only documentation;
       it does not accept credentials or send API requests.
-      [Read how contracts and CLI overlays work](https://moco.araihu.com/reference/openapi-pipeline/).
+      [Understand tenants, vaults and secrets](https://moco.araihu.com/concepts/) or
+      [use the CLI](https://moco.araihu.com/guides/cli/).
     defaultDocument: public
     profile: strict-v1
     seo:

@@ -18,11 +18,14 @@ class Page(HTMLParser):
         self.meta = {}
         self.canonical = []
         self.links = []
+        self.ids = set()
         self.titles = 0
         self.feed(source)
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if attrs.get("id"):
+            self.ids.add(attrs["id"])
         if tag == "title":
             self.titles += 1
         if tag == "meta":
@@ -135,4 +138,17 @@ for path in (identity["publicationBase"], identity["static"]["deploymentBase"]):
 
 for name in ("sitemap.xml", "llms.txt", "openapi/_manja/export.json", "openapi/sw.js"):
     require((root / name).is_file(), f"Missing publication artifact: {name}")
+redirects = set()
+for rule in (root / "_redirects").read_text().splitlines():
+    source, target, status = rule.split()
+    require(status == "301" and source.startswith("/") and source not in redirects,
+            f"Invalid or duplicate documentation redirect: {rule}")
+    redirects.add(source)
+    require(not local_file(source).exists(), f"Retired maintainer page is still published: {source}")
+    destination = local_file(target)
+    require(destination.is_file() and urlsplit(target).path == "/maintainers/",
+            f"Redirect must resolve to the maintainer page: {rule}")
+    fragment = urlsplit(target).fragment
+    require(fragment in Page(destination.read_text()).ids, f"Missing maintainer section: {target}")
 print(f"Verified {checked} pages: metadata, JSON-LD, social image, and local links.")
+print(f"Verified {len(redirects)} redirects to maintainer sections.")

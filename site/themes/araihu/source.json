@@ -1,0 +1,8 @@
+{
+  "module": "github.com/araihu/goshtoso-app-shells",
+  "version": "v0.1.9-0.20260910224508-5b2222e54637",
+  "sourcePath": "componentdocshell/assets/araihu.css",
+  "sha256": "9ec3f3187b736252b18f3aefef4737ba2025ef1c637611c3d0ecf58748043f1b",
+  "license": "MIT",
+  "consumer": "github.com/araihu/margo v0.0.26"
+}

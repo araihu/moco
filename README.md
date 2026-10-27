@@ -27,33 +27,18 @@ management UI or TUI. The website is documentation.
 
 | Workflow | Start here |
 | --- | --- |
-| Explore locally with Go and SQLite | [Local quick start](docs/getting-started.md) |
+| Try the released server locally | [Local quick start](docs/getting-started.md) |
 | Operate through a terminal | [CLI guide](cli/README.md) |
 | Run one instance with Docker Compose | [Production SQLite profile](docs/operations/production-sqlite.md) |
 | Deploy to Kubernetes with Helm | [Server chart](charts/moco/README.md) |
 | Manage resources declaratively | [Controller and CRDs](docs/operations/kubernetes-controller.md) |
-| Deliver secrets with ESO | [Kubernetes/ESO acceptance and examples](docs/operations/kubernetes-eso-tests.md) |
+| Deliver secrets with ESO | [ESO guide](docs/operations/eso.md) |
 
-## Try it locally
+## Get started
 
-Requires Go **1.27.3 or newer**, OpenSSL and Make. This development configuration
-uses HTTP on localhost; use the [production profile](docs/operations/production-sqlite.md)
-for TLS, separated credentials and persistent storage.
-
-```sh
-git clone https://github.com/araihu/moco.git
-cd moco
-export MOCO_ADDR=127.0.0.1:8080
-export MOCO_BEARER_TOKEN="$(openssl rand -hex 32)"
-export MOCO_CURSOR_HMAC_KEY="$(openssl rand -hex 32)"
-export MOCO_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-export MOCO_ENCRYPTION_KEY_ID=local-v1
-make run
-```
-
-Keep the encryption key with separate recovery custody before retaining data.
-In another terminal, [build the CLI and create your first tenant](docs/getting-started.md).
-The database defaults to `./moco.db`; override it with `MOCO_DB_PATH`.
+Read [how Moco works](docs/concepts.md), then
+[create your first secret](docs/getting-started.md) with the released Docker image
+and CLI. For persistent storage, follow [installation](docs/installation.md).
 
 ## Release 0.0.3
 
@@ -69,35 +54,17 @@ Released charts pin their component's image digest. Credentials, certificates,
 storage and backup mirror identity are operator inputs; the charts do not
 invent them. Follow the [installation guide](docs/installation.md) before installing.
 
-The published images and charts passed [21 acceptance scenarios with vind,
-Calico and ESO](https://github.com/araihu/moco/actions/runs/40448153000), including
-declarative reconciliation, scoped access, key/token rotation and restore.
-See [the release validation record](docs/releases/0.0.3.md) for evidence and limits.
-
 The supported production topology is **one writer with local SQLite**.
 External KMS/HSM and high availability are not implemented. A mirror volume on
 the same host is not an independent disaster-recovery copy. Validate off-host
 custody, restore, capacity and alerts in your target environment.
 
-## Documentation and development
+## Documentation
 
-- [Documentation map](docs/README.md)
-- [Security, authorization and root-key management](docs/security.md)
+- [User guides](docs/README.md)
+- [Access and encryption keys](docs/security.md)
 - [Backup and restore](docs/operations/backup-restore.md)
-- [Transactional audit guarantees](docs/operations/transactional-audit.md)
-- [Architecture, repository layout and development checks](docs/development.md)
-- [OpenAPI contracts, Vacuum overlays and CLI generation](openapi/README.md)
-- [Release publication](docs/operations/releases.md)
-- [Website source, build and deployment](site/README.md)
+- [Audit and write failures](docs/operations/transactional-audit.md)
 
-```sh
-make check              # application, controller, CLI, lint, vulnerability scans and drills
-make chart-check        # helm-unittest and chart integration checks
-make vind-test          # published release acceptance with vind + ESO
-make site-check         # Margo guides + Manja reference, export and link checks
-```
-
-Moco's CLI is the `cli/` module in this repository. The generic
-[oapi-cli-gen](https://github.com/araihu/oapi-cli-gen) remains a separate project.
-The site uses [Margo](https://github.com/araihu/margo) and
-[Manja](https://github.com/araihu/manja), following the AraiHu documentation stack.
+Development, code generation, CI, test evidence and publication belong in the
+separate [Maintainers guide](docs/maintainers.md).

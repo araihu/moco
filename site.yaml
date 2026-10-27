@@ -30,9 +30,13 @@ locales:
   supported: [en]
 navigation:
   mode: file-tree
+themes:
+  - name: araihu
+    css_url: site/themes/araihu/theme.css
+    token_catalog: site/themes/araihu/tokens.yaml
 theme:
-  builtin: true
-  name: modern
+  builtin: false
+  name: araihu
   color_mode: system
   allow_switch_theme: true
 custom_css:

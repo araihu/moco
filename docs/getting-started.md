@@ -1,75 +1,83 @@
-# Get started locally
+# Create your first secret
 
-This guide runs a development server bound to localhost. For persistent workloads,
-start with [installation](installation.md) and the [production profile](operations/production-sqlite.md).
+This walkthrough uses the released server in a disposable Docker container.
+You need Docker, OpenSSL and the [Moco CLI](../cli/README.md#install-the-cli).
+Use sample values only: stopping this container removes its database.
+For persistent storage, follow [installation](installation.md).
 
-## Start the server
+## Start Moco
 
-Install Go 1.27.3 or newer, Make and OpenSSL. From a checkout of Moco:
+Run these commands in one terminal so the server and CLI share the demo token:
 
 ```sh
-export MOCO_ADDR=127.0.0.1:8080
-export MOCO_BEARER_TOKEN="$(openssl rand -hex 32)"
+export MOCO_TOKEN="$(openssl rand -hex 32)"
+export MOCO_BEARER_TOKEN="$MOCO_TOKEN"
 export MOCO_CURSOR_HMAC_KEY="$(openssl rand -hex 32)"
 export MOCO_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 export MOCO_ENCRYPTION_KEY_ID=local-v1
-make run
-```
-
-Keep this terminal open. Startup creates `./moco.db` and applies embedded migrations.
-Do not regenerate the encryption key when restarting an existing database.
-The development token grants full access; use dedicated principals for deployments.
-
-## Build and use the CLI
-
-In another terminal at the repository root:
-
-```sh
-make cli-build
 export MOCO_SERVER=http://127.0.0.1:8080
-# Supply the same token from the first terminal through your credential mechanism.
-# Set MOCO_TOKEN without committing it or including it in shell history.
-bin/moco service info
-bin/moco tenants list
-printf '%s\n' '{"name":"homelab","labels":{}}' > tenant.json
-bin/moco tenants create --body-file tenant.json --idempotency-key homelab-tenant-001
-bin/moco tenants list --output json
-bin/moco tenants list --output csv
+
+docker run --detach --rm --name moco-demo \
+  --publish 127.0.0.1:8080:8080 \
+  --env MOCO_ADDR=0.0.0.0:8080 \
+  --env MOCO_BEARER_TOKEN --env MOCO_CURSOR_HMAC_KEY \
+  --env MOCO_ENCRYPTION_KEY --env MOCO_ENCRYPTION_KEY_ID \
+  ghcr.io/araihu/moco:0.0.3
+
+curl --fail "$MOCO_SERVER/readyz"
+moco service info
 ```
 
-`MOCO_TOKEN` is the client credential; `MOCO_BEARER_TOKEN` configures the development
-server. They must contain the same value in this example. The CLI does not store
-credentials. Its default table view is convenient for a terminal; JSON retains
-the full response, including pagination. CSV emits records with headers.
+If readiness is not available yet, check `docker logs moco-demo` and retry.
+The demo listens only on host loopback and grants the token full access.
 
-## Create a vault and store a secret
-
-Use the tenant ID from the create response:
+## Create a tenant and vault
 
 ```sh
-printf '%s\n' '{"name":"application","labels":{}}' > vault.json
-bin/moco vaults create --tenant-id TENANT --body-file vault.json \
-  --idempotency-key homelab-vault-001
-# Replace VAULT with the returned vault ID. This stores the synthetic value "hello".
-printf '%s\n' '{"value":"aGVsbG8=","contentType":"text/plain"}' > secret.json
-bin/moco secrets put --tenant-id TENANT --vault-id VAULT \
-  --path prod/database/password --body-file secret.json --if-none-match '*'
-bin/moco secrets get --tenant-id TENANT --vault-id VAULT --path prod/database/password
+printf '%s\n' '{"name":"homelab","labels":{}}' > tenant.json
+moco tenants create --body-file tenant.json --idempotency-key demo-tenant-001
 ```
 
-The value field is Base64-encoded, as defined by the API contract. This is wire
-encoding, not encryption. Real secret material should come from a protected
-file or pipe, rather than a command saved in shell history.
+Copy the returned tenant ID. Set `TENANT` to that ID, then create a vault:
 
-Mutation bodies come from `--body-file` or `--body-stdin`. Use `--if-match` with
-the current ETag for conditional replacements. Review the [CLI guide](../cli/README.md)
-and [API contracts](../openapi/README.md) for request schemas and flags.
-Secret paths use a query parameter rather than an object-storage API. Metadata
-listing never returns values; protect the output of value reads.
+```sh
+export TENANT=REPLACE_WITH_TENANT_ID
+printf '%s\n' '{"name":"applications","labels":{}}' > vault.json
+moco vaults create --tenant-id "$TENANT" --body-file vault.json \
+  --idempotency-key demo-vault-001
+```
 
-## Next steps
+Set `VAULT` to the returned vault ID:
 
-- [Install released OCI images and Helm charts](installation.md).
-- [Declare tenants, vaults and policies with the controller](operations/kubernetes-controller.md).
-- [Deliver values through ESO](operations/kubernetes-eso-tests.md).
-- [Keep keys and verify recovery](operations/backup-restore.md).
+```sh
+export VAULT=REPLACE_WITH_VAULT_ID
+```
+
+Keep the same idempotency key if you need to retry a create request after a
+connection failure. Use a new key for a different creation.
+
+## Write and read a value
+
+This stores the sample text `hello`, represented as Base64 in the request:
+
+```sh
+printf '%s\n' '{"value":"aGVsbG8=","contentType":"text/plain"}' > secret.json
+moco secrets put --tenant-id "$TENANT" --vault-id "$VAULT" \
+  --path apps/demo/password --body-file secret.json --if-none-match '*'
+moco secrets get --tenant-id "$TENANT" --vault-id "$VAULT" \
+  --path apps/demo/password
+moco secrets list --tenant-id "$TENANT" --vault-id "$VAULT"
+```
+
+The read returns a Base64 value. The list returns metadata without values.
+Keep real secret inputs in protected files or pipes, and keep read output out of logs.
+
+## Stop the demo or continue
+
+```sh
+docker stop moco-demo
+```
+
+This deletes the demo database. For the next step, [install a persistent server](installation.md),
+learn [CLI updates and output formats](../cli/README.md), or
+[deliver a secret to Kubernetes with ESO](operations/eso.md).

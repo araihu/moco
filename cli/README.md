@@ -1,58 +1,80 @@
-# Moco CLI
+# Use the Moco CLI
 
-This directory is the independent Go module `github.com/araihu/moco/cli`.
-The application, generated client/runtime, module dependencies and acceptance
-tests belong to Moco. The generic generator is
-[oapi-cli-gen](https://github.com/araihu/oapi-cli-gen), pinned in `tools/go.mod`.
-It is used only during development and CI; the built CLI runs independently.
+Use `moco` to manage tenants, vaults and secrets from a terminal or script.
+The CLI connects to your server; it does not store credentials.
 
-From the Moco repository root:
+## Install the CLI
 
-```sh
-make cli-build                      # writes bin/moco
-make -C cli install                 # installs moco into GOBIN (or GOPATH/bin)
-make cli-generate                   # principal spec + overlay -> bundle -> CLI
-make cli-check-generated            # read-only generated-source comparison
-make cli-check                      # generation, tests, race, vet, scans, real server
-```
-
-Build or install the checked-in module directly with Go:
+Release 0.0.3 ships server images and Helm charts. Install its CLI from the
+released source using Git and Go 1.27.3 or newer:
 
 ```sh
-go -C cli build -o ../bin/moco ./cmd/moco
-# Install the released source from this multi-module repository:
-git clone --branch v0.0.3 --depth 1 https://github.com/araihu/moco.git
-GOWORK=off go -C moco/cli install ./cmd/moco
+git clone --branch v0.0.3 --depth 1 https://github.com/araihu/moco.git moco-cli-source
+GOWORK=off go -C moco-cli-source/cli install ./cmd/moco
 ```
 
-Use the public API through the generated Cobra commands:
+Put `GOBIN`, or `GOPATH/bin` when `GOBIN` is unset, on your `PATH`.
+Confirm the command is available with `moco --help`.
+
+## Connect to a server
 
 ```sh
 export MOCO_SERVER=https://moco.example.com:8443
-# Provide MOCO_TOKEN through your credential mechanism.
-bin/moco service info
-bin/moco tenants list                  # table is the default
-bin/moco tenants list --output json    # full response, including pagination
-bin/moco tenants list --output csv     # one record per item, with headers
-bin/moco secrets get --tenant-id TENANT --vault-id VAULT --path prod/database
-bin/moco secrets put --help
-bin/moco completion bash
+# Supply MOCO_TOKEN from your credential manager or a protected environment.
+moco --ca-file /private/moco/ca.pem service info
+moco --ca-file /private/moco/ca.pem tenants list
 ```
 
-`--body-file request.json` and `--body-stdin` supply JSON mutation bodies.
-`--response-header ETag`, `--if-match` and `--if-none-match` support conditional
-operations. TLS and authentication settings follow the generic runtime's
-contract; no credentials are stored by the CLI.
+`MOCO_TOKEN` must be a token allowed by that server. Use `--ca-file` on each
+request when the server uses a private CA; public certificates use system trust.
+HTTP is allowed on loopback for the [local walkthrough](../docs/getting-started.md).
 
-Edit naming metadata in `../openapi/overlays/cli.public.yaml`, then run
-`make cli-generate` from the repository root and review the resulting changes.
-The manifest tracks generator-owned files and refuses to overwrite local edits.
-Keep application tests and documentation outside generated files. Upgrading the
-generator means updating its version in `tools/go.mod`, tidying that tools
-module, regenerating the CLI and running `make cli-check`.
+## Find commands and choose output
 
-The CLI tests start a temporary local server with private credentials and SQLite
-data. They cover resource lifecycles, secret round trips, output formats,
-conditional writes, authentication and transactional audit. Internal-contract
-generation/compilation acceptance also lives in this repository under `tools/`.
-Root `make check` runs these checks, and Dagger rejects generated CLI drift.
+```sh
+moco --help
+moco tenants --help
+moco secrets put --help
+moco tenants list                  # table for a terminal
+moco tenants list --output json    # full response, including pagination
+moco tenants list --output csv     # records with a header row
+```
+
+Each list command returns one page. With JSON output, follow `nextCursor` using
+`--cursor` until `hasMore` is false. Repeat the same filters on subsequent pages.
+Use `--limit` to set the page size. CSV and table output do not remove pagination.
+
+## Create resources and write secrets
+
+[The walkthrough](../docs/getting-started.md#create-a-tenant-and-vault) covers
+creating tenants and vaults. Supply JSON request bodies with
+`--body-file request.json` or `--body-stdin`; schemas are in the
+[API reference](https://moco.araihu.com/openapi/).
+
+To replace a secret, first read its current ETag:
+
+```sh
+moco secrets get --tenant-id "$TENANT" --vault-id "$VAULT" \
+  --path apps/demo/password --response-header ETag
+moco secrets put --tenant-id "$TENANT" --vault-id "$VAULT" \
+  --path apps/demo/password --body-file replacement.json \
+  --if-match 'REPLACE_WITH_THE_COMPLETE_ETAG'
+```
+
+Preserve the ETag's quotes. `replacement.json` contains `value` in Base64 and
+`contentType`. Use `--if-none-match '*'` instead when creating a new secret.
+On `412`, read again before deciding whether to overwrite. A timeout does not
+prove the write failed; read the current state before retrying.
+
+## Common errors
+
+| Result | Action |
+| --- | --- |
+| `401` | Check the token and whether it was rotated. |
+| `403` | Ask for permission to the requested tenant, vault, path and method. |
+| `404` | Check the server URL, tenant/vault IDs and logical path. |
+| `412` | Refresh the ETag and review the newer value. |
+| `503` | Check server readiness and the [operations guide](../docs/operations/production-sqlite.md). |
+| Certificate error | Supply the correct CA and use a hostname listed in the certificate. |
+
+Generate shell completion with `moco completion bash`, `zsh`, `fish` or `powershell`.

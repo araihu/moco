@@ -8,13 +8,11 @@ ServiceMonitor with a separate private Service.
 
 ## Requirements and supported topology
 
-- Kubernetes **1.32+**; CI tests Helm **3.22.1 and 4.3.1**.
+- Kubernetes **1.32+** and Helm **3 or 4**.
 - An enforcing NetworkPolicy CNI and Linux nodes supporting UID/GID 65532,
   RuntimeDefault seccomp and read-only root filesystems.
-- A compatible production image (published **v0.0.3** or a reviewed source build) with `/moco-ops prepare-runtime` and
-  `backup-loop --wait-ready`. Use a SemVer release image/chart or publish your
-  own reviewed build. Release charts carry the immutable image digest; source
-  chart defaults require an explicit image pin.
+- The released `oci://ghcr.io/araihu/charts/moco` chart, version **0.0.3**,
+  which pins its matching server image.
 - Data and local backups on distinct filesystem PVCs. SQLite and all its WAL,
   SHM and journal files must remain on one local filesystem. Never use NFS/CIFS
   for the data claim. A StorageClass/PV must enforce the correct node topology;
@@ -35,27 +33,14 @@ pod, bypass CSI fencing, scale the StatefulSet or start a second release on its
 data. The process's local file lock is an additional check, not distributed
 fencing. See the Kubernetes [StatefulSet/storage documentation](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).
 
-## 1. Select the published image or build your own
+## 1. Select the release
 
-Published SemVer releases provide `ghcr.io/araihu/moco` and
-`oci://ghcr.io/araihu/charts/moco`. Their chart defaults pin the matching image
-digest. See the [release runbook](https://github.com/araihu/moco/blob/main/docs/operations/releases.md)
-for version selection, package visibility, checksums and OCI installation.
-For those packages omit `image` from operator values. The source-chart procedure
-below remains available for local/custom image builds.
-
-From the repository root:
+Use the published chart; its default image pin also applies to initialization
+and backups. For the bootstrap commands below, use the same server release:
 
 ```sh
-make check
-make image-check IMAGE=registry.example.com/team/moco:RELEASE
-docker push registry.example.com/team/moco:RELEASE
-# Record the registry's sha256 digest for that reviewed image.
+export MOCO_IMAGE=ghcr.io/araihu/moco@sha256:d6a8167c48c771884729405ff4a0d3c8f65bb1b69bbcb96c091745de6eade180
 ```
-
-Set `image.repository` and `image.digest`. The image's default entrypoint is the
-server, but the chart explicitly selects server/operations commands for each
-container. The same digest is used for initialization, serving and backups.
 
 ## 2. Provision the mirror independently
 
@@ -68,7 +53,7 @@ once using this release image, for example on a host that mounts that filesystem
 sudo install -d -o 65532 -g 65532 -m 0700 /mnt/moco-offhost/moco
 docker run --rm --network none --read-only \
   --mount type=bind,src=/mnt/moco-offhost,dst=/mirror \
-  --entrypoint /moco-ops registry.example.com/team/moco@sha256:REPLACE \
+  --entrypoint /moco-ops "$MOCO_IMAGE" \
   init-mirror --directory /mirror/moco
 ```
 
@@ -104,15 +89,8 @@ and `ca.pem` the trusted issuing CA. Kubernetes Secret API encryption, RBAC,
 external credential custody and certificate renewal remain operator-managed.
 Back up historical root keys independently of the cluster and archive storage.
 
-The non-root init container reads only these seven projected keys, accepting
-Kubernetes' internal projection links within that volume. It creates private,
-regular 0600 copies in memory-backed storage and 0700 application directories
-under the mounted PVC roots. It restores private modes widened by CSI fsGroup,
-rejects storage symlinks/special files, and leaves database/archive bytes intact.
-The server keeps its strict regular-file/permission checks. Source Secret
-projection is mounted only in the init container. The backup container mounts
-only the copied keyring and CA, and mounts live data read-only. See Kubernetes
-[volume security contexts](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/).
+The init container copies the credential files into private runtime storage.
+The server and backup worker use those copies.
 
 Changing an existing Secret does **not** update these private copies. Bump
 `credentials.revision` and upgrade the release to restart the pod and recopy
@@ -123,14 +101,11 @@ authorization API, rather than by replacing the bootstrap policy file alone.
 ## 4. Install and verify
 
 Create a private values file containing names/settings, not credential bytes.
-The following includes the image block required for a source checkout; omit
-that block when installing a released OCI chart with its supplied image pin:
+The released chart supplies the image pin, so your values file only needs the
+deployment-specific inputs:
 
 ```yaml
 fullnameOverride: moco
-image:
-  repository: registry.example.com/team/moco
-  digest: sha256:REPLACE_WITH_THE_64_HEX_REGISTRY_DIGEST
 credentials:
   existingSecret: moco-credentials
   revision: "1"
@@ -144,17 +119,16 @@ backups:
   mirrorID: REPLACE_WITH_PROVISIONED_UUID
 ```
 
-Replace all placeholders. Required image/Secret/mirror inputs intentionally
-have no usable defaults. JSON Schema validation fails before deployment when
+Replace all placeholders. Required Secret/mirror inputs have no usable defaults. JSON Schema validation fails before deployment when
 they are missing, malformed or unknown. Cross-field timing, distinct-claim and
 monitoring guards also run in the templates. Helm's schema validation is
 described in its [chart reference](https://helm.sh/docs/topics/charts/#schema-files).
 
 ```sh
-helm lint --strict charts/moco -f /private/moco/values.yaml
-helm template moco charts/moco -n moco -f /private/moco/values.yaml > /private/moco/rendered.yaml
+helm template moco oci://ghcr.io/araihu/charts/moco --version 0.0.3 \
+  -n moco -f /private/moco/values.yaml > /private/moco/rendered.yaml
 # Review the rendered resources and storage configuration before installation.
-helm upgrade --install moco charts/moco -n moco \
+helm upgrade --install moco oci://ghcr.io/araihu/charts/moco --version 0.0.3 -n moco \
   -f /private/moco/values.yaml --wait --timeout 20m
 kubectl -n moco rollout status statefulset/moco
 kubectl -n moco logs moco-0 -c prepare-runtime
@@ -173,8 +147,8 @@ For a local client, forward the public HTTPS port and use the CA:
 ```sh
 kubectl -n moco port-forward statefulset/moco 8443:8443
 # In another terminal, provide MOCO_TOKEN from administrator custody.
-bin/moco --server https://localhost:8443 --ca-file /private/moco/ca.pem service info
-bin/moco --server https://localhost:8443 --ca-file /private/moco/ca.pem tenants list
+moco --server https://localhost:8443 --ca-file /private/moco/ca.pem service info
+moco --server https://localhost:8443 --ca-file /private/moco/ca.pem tenants list
 ```
 
 Also verify authorized writes, tenant isolation, rejected admin paths on the
@@ -296,50 +270,11 @@ and API errors, and test actual notification delivery. Protect and ship JSON
 container logs through your cluster logging service. Monitor volume/mirror
 availability, node clocks and certificate expiry independently.
 
-## Chart development and validation
-
-```sh
-make chart-unittest                    # helm-unittest YAML suites only
-make chart-check                       # Helm required; no cluster needed
-make chart-check HELM=/path/to/helm
-make check                             # application/CLI/operational checks
-helm package charts/moco --destination /tmp
-```
-
-The five YAML suites in [`tests/`](tests/) use
-[`helm-unittest`](https://github.com/helm-unittest/helm-unittest/tree/v1.2.1)
-1.2.1. Their 40 cases cover container security, external credential handling,
-SQLite writer isolation, retained/existing claims, verified backup configuration,
-public HTTPS/Ingress, protected Prometheus scraping, and rejection of unsafe,
-missing or unknown values. Use explicit assertions and named document selectors
-when multiple resources come from one template; avoid order-dependent snapshots.
-
-`make chart-unittest` downloads the upstream plugin archive on first use, verifies
-its pinned SHA-256, caches it under `tools/bin/helm-unittest/`, and runs
-`helm unittest --strict` with an isolated temporary plugin directory. It supports
-Linux/macOS amd64/arm64, requires Helm, Bash, curl, tar and sha256sum (or macOS
-shasum), and does not install global plugins. Cached archives are verified on
-every run. JUnit output defaults to `bin/chart-tests.xml`; override it with
-`CHART_TEST_REPORT=/path/to/report.xml`. Test suites and fixtures are excluded
-from packaged charts through `.helmignore`.
-
-`make chart-check` requires the YAML suites to pass, then runs the existing Go
-integration tests against the selected real Helm executable: lint, packaging,
-rendering, JSON Schema and template safety guards. This checks actual Helm 3/4
-rendering as well as the plugin's embedded renderer. The separate CI job uses a
-pinned Go container, pinned Helm setup action and both Helm versions above,
-uploads JUnit reports even on failure, and gates release publication. It also
-validates rendered built-in Kubernetes
-resources with kubeconform 0.8.0 against Kubernetes 1.32 schemas. Application
-operational tests exercise the real projected-Secret preparation path, TLS,
-backups, rotation and recovery. These are not evidence of installation on your
-specific Kubernetes distribution, CSI driver, ingress controller or CNI; run
-the installation and recovery acceptance checks there before production.
-
 ## Values reference
 
-See `values.yaml` for defaults and `values.schema.json` for the full Draft-07
-contract. The following table includes all configurable leaf values.
+Use `helm show values oci://ghcr.io/araihu/charts/moco --version 0.0.3` for the
+released defaults. Values are validated by JSON Schema. Image defaults below
+refer to the source chart; the published chart supplies its repository and digest.
 
 | Value | Default | Description |
 | --- | --- | --- |

@@ -21,8 +21,11 @@ python3 -m http.server 4173 --bind 127.0.0.1 --directory dist/site
 ```
 
 `site.yaml` configures Margo's built-in landing/docs layouts, local assets,
-search, sidebar and table of contents. `site/theme.css` uses public semantic
-theme tokens. There are no external fonts, analytics or hosted runtime dependencies.
+search, sidebar and table of contents. Both shells use the official AraiHu theme.
+`site/themes/araihu/` vendors its unchanged stylesheet from the App Shells version
+selected by Margo v0.0.26, with source identity, MIT license and a digest-checked
+Margo token catalog. `site/theme.css` maps public semantic tokens to Margo and
+controls product layout; it does not replace the organization palette. There are no external fonts, analytics or hosted runtime dependencies.
 The official Mocó logo and icon come from [araihu/assets v0.2.6](https://github.com/araihu/assets/releases/tag/v0.2.6).
 `site/assets/brand/` preserves the selected SVG bytes, license and notice from
 that release. `provenance.json` records the source commit, archive/catalog
@@ -60,12 +63,19 @@ cannot export custom logo/favicon files outside its embedded asset inventory.
 
 ## Content ownership
 
-Edit the canonical Markdown guides in `docs/`, `cli/README.md`, chart READMEs
-and `openapi/README.md`. `scripts/build_site.py` lists their routes and stages
+User instructions live in `docs/`, `cli/README.md` and the chart READMEs.
+`scripts/build_site.py` explicitly lists the published routes and stages their
 frontmatter under ignored `site/.build/content/`. It rewrites links between
-published guides into site routes and links remaining repository files to
-GitHub main. Historical `docs/superpowers/` plans are deliberately excluded.
-Only the home and navigation overviews are authored in `site/content/`.
+published guides into site routes and links other repository files to GitHub.
+Home and navigation overviews are authored in `site/content/`.
+
+`docs/maintainers.md` is the only published maintainer page. Development,
+OpenAPI generation, CI, load/fault suites and historical release evidence remain
+repository references linked from that page. Do not re-add them as user guides.
+`site/redirects` maps retired maintainer routes to sections of `/maintainers/`;
+it is copied as Cloudflare's `_redirects` control file and checked locally and
+after deployment. Redirected pages are absent from the navigation, sitemap and
+search index. Historical `docs/superpowers/` plans are not published.
 
 Manja reads only `openapi/bundled/public.yaml` and `internal.yaml` through
 `site/renderer.yaml`. Both are intentionally public documentation; internal

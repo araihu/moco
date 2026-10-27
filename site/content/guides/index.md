@@ -1,24 +1,25 @@
 ---
 title: Guides
-description: Run Moco locally, install a release, manage secrets and access, and prepare backups and recovery.
+description: Create secrets, install Moco, manage access, connect Kubernetes workloads and recover your data.
 language: en
 ---
 # Use and operate Moco
 
-[Start locally](../getting-started/index.md) to create a tenant, vault and secret
-with the CLI. For a persistent deployment, choose Docker Compose or Kubernetes
-in the [installation guide](installation/index.md).
+## Start here
 
-## Manage secrets and access
+1. [Understand tenants, vaults and secrets](../concepts/index.md).
+2. [Create your first secret](../getting-started/index.md) in a disposable local deployment.
+3. [Use the CLI](cli/index.md) to list, read and update resources.
 
-- [Use the CLI](cli/index.md) for table, JSON and CSV output.
-- [Configure the controller](controller/index.md) to declare tenants, vaults and access policies in Kubernetes.
-- [Connect External Secrets Operator](eso/index.md) to deliver secret values to workloads.
-- [Configure security and keys](security/index.md) for scoped permissions and root-key rotation.
+## Deploy and connect workloads
 
-## Run and recover a deployment
+- [Install Moco](installation/index.md) with Docker Compose or Helm.
+- [Declare resources and permissions](controller/index.md) with the Kubernetes controller.
+- [Deliver values with ESO](eso/index.md) into application Secrets.
 
-- [Run the production SQLite profile](production/index.md) with TLS, metrics and automatic backups.
-- [Back up and restore the database](backup-restore/index.md), including backups that need historical keys.
-- [Understand transactional audit](audit/index.md) and what happens when an audit write fails.
-- [Run load and failure tests](load-faults/index.md) to check capacity and recovery behavior.
+## Operate a deployment
+
+- [Run the production profile](production/index.md): storage, TLS, monitoring and upgrades.
+- [Manage access and encryption keys](security/index.md).
+- [Back up and restore](backup-restore/index.md), including historical keys.
+- [Read audit records and investigate write failures](audit/index.md).

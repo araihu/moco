@@ -6,6 +6,17 @@ filesystem. Do not use NFS/CIFS for `/data`, scale the server, or share this dat
 directory between hosts. The mirror may use a separately mounted off-host
 filesystem. This profile provides recovery, not high availability.
 
+## Get the deployment configuration
+
+Use the configuration matching the server release. With Git installed:
+
+```sh
+git clone --branch v0.0.3 --depth 1 https://github.com/araihu/moco.git moco-deployment
+cd moco-deployment
+```
+
+Run the following Compose commands from this directory.
+
 ## Release image and runtime
 
 For the published v0.0.3 release, use the verified multi-platform image index:
@@ -15,33 +26,9 @@ export MOCO_IMAGE=ghcr.io/araihu/moco@sha256:d6a8167c48c771884729405ff4a0d3c8f65
 docker pull "$MOCO_IMAGE"
 ```
 
-See [release evidence](../releases/0.0.3.md) and verify your recovery prerequisites
-before deploying. Building from source is optional; for a reviewed custom build:
-
-```sh
-make check
-make image-check IMAGE=moco:$(git rev-parse --short HEAD)
-make monitoring-check
-```
-
-The Dockerfile pins the Go 1.27.3 builder by manifest digest. Its final OCI image
-uses `scratch`, static executables, a CA bundle and UID/GID `65532`; it contains
-no shell or package manager. The version and source revision are OCI labels,
-and the server reports the embedded version. `make image` builds locally.
-SemVer tag pushes automatically publish multi-platform images and pinned
-Helm charts to GHCR after validation; see [releases.md](releases.md). Deployment
-remains an operator action. You can also publish a reviewed local build to your
-own registry. Record its digest and use that digest in `MOCO_IMAGE`.
-Release builders should rebuild this pin when updating Go, run the required
-checks, and retain the matching binaries/image with backups.
-
-`deploy/production/compose.yaml` limits CPU, memory and PIDs, drops all Linux
-capabilities, sets `no-new-privileges`, mounts the root filesystem read-only,
-rotates JSON logs through Docker's local driver, and bounds writable temporary
-storage. The server has a 35-second graceful shutdown window for outstanding
-watch polls; Compose grants 40 seconds. SQLite and credential directories are
-0700, private files are 0600, and the server sets umask 0077. A host file lock
-rejects a second production writer using the same data directory.
+The image runs as UID/GID `65532`. The supplied Compose configuration limits
+resources, uses a read-only root filesystem and rotates local logs. Prepare the
+storage and credentials below before starting it.
 
 ## Provision private storage and credentials
 
@@ -207,15 +194,8 @@ overdue backups, low disks, API errors and API p95 latency. Scrape errors also
 detect server/host loss. Monitor the mirror mount, host clock, certificate
 expiry and host health in your infrastructure monitoring.
 
-Successful mutations and their audit event now commit in **one SQLite
-transaction before the response**. Audit/commit failure rolls back the complete
-request and returns `503`; no success ETag, Location or body is released. Startup
-epoch/policy initialization is audited too. The production server logs incidents,
-increments metrics and latches readiness false until restart. Investigate storage
-before restarting. Read-only and rejected-attempt audit remains post-response;
-failures there can leave a read/attempt gap, but cannot produce an unaudited
-business mutation. See [transactional-audit.md](transactional-audit.md) for the
-precise scope, client retry rules and fault-injection tests.
+If audit persistence fails, writes return `503` and production readiness stays
+false until restart. Investigate storage first; see [audit troubleshooting](transactional-audit.md).
 
 ## Upgrade, interruption and recovery drills
 
@@ -247,22 +227,6 @@ precise scope, client retry rules and fault-injection tests.
    expires. The backup worker uses the replaced keyring after container
    recreation, so recreate both services after credential/key-file replacement.
 
-`make operational-test` runs real executables through installation, TLS probes,
-least-privilege tenant checks, graceful restart, automatic repeated backups,
-mixed-era rotation, SIGKILL/restart, wrong-key startup, mirror failure detection,
-loss of the original SQLite files and restoration from the mirror with historical
-keys. It checks unchanged ETags, isolation and continued writes. It prints the
-snapshot boundary and measured fixture recovery time. `make check` includes it.
-
-`make image-check` executes this drill with binaries extracted from the built
-image and additionally runs an OCI container with the profile's user/resource
-restrictions, read-only root, TLS, private admin/metrics, health, restart,
-read-only-source backup and separate-volume mirrored recovery checks. It requires a Linux Docker host/client of the same CPU
-architecture; SSH Docker contexts are supported. `make monitoring-check` validates
-the Prometheus rules and alarm behavior using a digest-pinned promtool container.
-CI runs these image/monitoring gates alongside the Dagger check pipeline.
-
-Repository fixtures do not verify your remote filesystem, notification receiver,
-certificate renewal, workload capacity or independent key custody. Run recovery
-drills in the target environment and a load/security review before releasing
-real production secrets.
+Rehearse this procedure with your off-host mirror and separate key custody.
+Measure data loss and recovery time with your actual database size, and test
+that backup and availability alerts reach their intended receiver.

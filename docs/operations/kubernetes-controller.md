@@ -1,36 +1,32 @@
-# Declarative Moco management controller
+# Manage resources with Kubernetes
 
-The independent Go module in `controller/` manages one Moco instance from one Kubernetes namespace. Install exactly one controller release per Moco instance and namespace. Do not point controllers in different namespaces or clusters at the same instance. Leader election serializes replicas in the managed namespace; it cannot coordinate separate clusters. Anyone allowed to write these CRs effectively administers that Moco instance: keep them in a trusted platform namespace and restrict RBAC accordingly.
+Use the Moco controller to keep tenants, vaults and permissions in Git. Install
+one controller release for one Moco instance in a trusted namespace. Anyone
+allowed to write its CRs can administer that instance; restrict Kubernetes RBAC.
+Do not connect controllers from separate namespaces or clusters to the same server.
 
-| CRD | Desired state | Status |
-| --- | --- | --- |
-| `MocoTenant` | tenant name, description, labels, immutable `externalId` | ID, revision, observed generation, Ready condition |
-| `MocoVault` | vault metadata and immutable same-namespace `tenantRef` | vault ID, tenant ID, revision, Ready condition |
-| `MocoAuthorization` | the entire policy/role-binding snapshot, named **moco** | snapshot revision, observed generation, Ready condition |
+| Resource | What you declare |
+| --- | --- |
+| `MocoTenant` | Tenant name, description, labels and a stable external ID |
+| `MocoVault` | Vault metadata and a tenant reference in the same namespace |
+| `MocoAuthorization/moco` | The complete policy and role-binding snapshot |
 
-Deleting a CR **retains** the corresponding remote resource, secrets and authorization. There is no cascade deletion or delete permission in the controller. Remove retained data explicitly through the Moco API when appropriate. A tenant or vault with a matching explicit external ID is adopted, including after Kubernetes status loss; names and status IDs alone never authorize adoption. Duplicate external IDs among managed CRs are rejected. The tenant reference and external ID cannot change in place. Recreating a tenant with a different server ID does not move an existing vault.
+Deleting a CR retains the remote resource and its secrets. Delete data explicitly
+through Moco when needed. Keep external IDs stable: they allow existing resources
+to be adopted after status loss. Tenant references and external IDs cannot be
+changed in place.
 
-The controller repairs external metadata and authorization drift every `reconcileInterval` (default 30 seconds), waits for tenant references to become Ready at their current generation, and performs replacements with fresh ETag/If-Match preconditions. Failed operations expose a Ready=False condition and retry after the interval; uncertain mutations are never blindly replayed. HTTPS certificate verification, explicit CA trust, bounded HTTP requests and rejected redirects protect the management credential. Error conditions omit API response bodies and secret material.
+The controller checks for drift every 30 seconds by default and restores the
+declared state. Wait for `Ready=True` before using a tenant or vault's ID.
+Failed operations set `Ready=False`; inspect the condition before changing state.
 
 ## Install and bootstrap
 
-Use the published controller OCI image and chart from release v0.0.3. This chart is separate from the single-writer server chart; it does not install SQLite, store encryption keys, or manage secret values. Release v0.0.3 and later publish the controller image and chart alongside the server. Use the released chart with its image digest already pinned:
+Use the published controller OCI image and chart from release v0.0.3. This chart is separate from the single-writer server chart; it does not install SQLite, store encryption keys, or manage secret values. Use the released chart with its image digest already pinned:
 
 ```sh
 helm upgrade --install moco-management oci://ghcr.io/araihu/charts/moco-controller -n moco \
   --version 0.0.3 -f /private/moco/controller-values.yaml
-```
-
-For source builds and development, build and distribute the controller image and use the local chart:
-
-```sh
-docker build -t REGISTRY/moco-controller:VERSION controller
-docker push REGISTRY/moco-controller:VERSION
-helm upgrade --install moco-management charts/moco-controller -n moco \
-  --set image.repository=REGISTRY/moco-controller \
-  --set image.digest=sha256:REPLACE_WITH_PUBLISHED_DIGEST \
-  --set publicURL=https://moco.moco.svc:8443 \
-  --set adminURL=https://moco-admin.moco.svc:9443
 ```
 
 For private controller images, create a read-only registry Secret in this namespace and set `imagePullSecrets: [{name: ghcr-readonly}]`. This is distinct from the Moco management credential Secret. Authenticate Helm to GHCR when the chart package is private.
@@ -72,6 +68,40 @@ The reserved management principal always receives these policies with domain `*`
 
 These permissions do not grant secret reads/writes, deletion, audit access or encryption operations. The controller always injects them into the desired snapshot to preserve reconciliation. Preserve any additional break-glass administrator permissions explicitly in the CR. You can copy existing administrator policies from GET `/internal/v1/authorization`; no token digests appear in that response.
 
+## Create a tenant and vault
+
+Save the following as `resources.yaml` and keep their external IDs stable:
+
+```yaml
+apiVersion: moco.araihu.io/v1alpha1
+kind: MocoTenant
+metadata:
+  name: homelab
+spec:
+  externalId: kubernetes://homelab/platform/tenant-homelab
+  name: homelab
+---
+apiVersion: moco.araihu.io/v1alpha1
+kind: MocoVault
+metadata:
+  name: applications
+spec:
+  tenantRef: homelab
+  externalId: kubernetes://homelab/platform/vault-applications
+  name: applications
+```
+
+```sh
+kubectl -n moco apply -f resources.yaml
+kubectl -n moco wait --for=condition=Ready mocotenant/homelab --timeout=2m
+kubectl -n moco wait --for=condition=Ready mocovault/applications --timeout=2m
+kubectl -n moco get mocotenant homelab -o jsonpath='{.status.id}'
+kubectl -n moco get mocovault applications -o jsonpath='{.status.id}'
+```
+
+Use those IDs with the CLI or ESO. Updating metadata in Git changes it in Moco;
+changes made directly to managed metadata are reverted on reconciliation.
+
 ## Authoritative authorization and GitOps
 
 Apply [the example resources](../../deploy/examples/controller.yaml) after replacing example bootstrap policy subjects as necessary. Policies and role bindings select exactly one of `domain` (literal UUID or explicit `*`) and `tenantRef` (same-namespace CR name). A policy's `path` remains a literal Moco route/pattern; use the normal canonical secret route plus `secretPathPrefix` for scoped secret paths, or a literal vault URL when limiting to one vault.
@@ -83,17 +113,32 @@ If Kubernetes status is lost and the remote snapshot already matches, status is 
 CRDs are installed from the chart's `crds/` directory. Helm does not upgrade or uninstall CRDs automatically. For controller API updates, review and apply the new CRDs first:
 
 ```sh
-kubectl apply --server-side -f charts/moco-controller/crds/
-helm upgrade moco-management charts/moco-controller -n moco -f controller-values.yaml
+helm pull oci://ghcr.io/araihu/charts/moco-controller --version NEXT_VERSION \
+  --untar --untardir /private/moco/upgrade
+kubectl apply --server-side -f /private/moco/upgrade/moco-controller/crds/
+helm upgrade moco-management oci://ghcr.io/araihu/charts/moco-controller \
+  --version NEXT_VERSION -n moco -f /private/moco/controller-values.yaml
 kubectl get mocotenants,mocovaults,mocoauthorizations -n moco
 ```
 
 A CR Ready condition means its desired remote state was observed/applied; it does not replace server backup/readiness monitoring. HTTP `/healthz` and `/readyz` on the controller's pod port 8081 cover process health, and the deployment uses non-root, a read-only filesystem and namespace-scoped RBAC. Endpoint/namespace changes require an explicitly reviewed migration; do not repoint a live controller with old CR status at another instance.
 
-## ESO and operational verification
+## Deliver values with ESO
 
-ESO continues to deliver secret values using its generic webhook provider. This controller does not create Kubernetes application Secrets or principal tokens. Use the Ready tenant/vault IDs in `SecretStore` configuration as shown in [the ESO runbook](kubernetes-eso-tests.md). Both resources can be rendered by GitOps after their dependencies become Ready; this initial version does not rewrite ESO manifests automatically.
+The controller does not create application Secrets or principal tokens. Use the
+Ready tenant/vault IDs in [ESO configuration](eso.md). Apply dependent resources
+after they become Ready; the controller does not rewrite ESO manifests.
 
-`make controller-check` runs generation, race-tested reconciliation/HTTP tests and vet; `make check` also includes controller linting and vulnerability scanning. `make chart-check` runs helm-unittest for both charts plus real Helm render/schema/package tests. `make vind-test` builds the current controller into an OCI archive, imports its digest into a disposable vind node, installs the charts and ESO, and exercises real CRD admission, missing-reference recovery, idempotency, drift repair, status recovery across restart, Secret credential refresh, retained deletion and ESO delivery alongside the backup/restore/failure drills. The `vind-eso` workflow runs the same harness on a native Docker host when the local daemon is unsuitable.
+For a failing CR, inspect its conditions without printing credentials:
 
-The image is built from the checked out controller source, while the unchanged server acceptance baseline remains the pinned released Moco image. The test creates/deletes only its unique cluster and temporary buildx builder. Reports contain no secret payloads. See the ESO runbook for storage and single-node test limitations.
+```sh
+kubectl -n moco describe mocotenant homelab
+kubectl -n moco describe mocovault applications
+kubectl -n moco get mocoauthorization moco -o yaml
+kubectl -n moco logs deployment/moco-management-controller
+```
+
+Use the deployment name shown by `kubectl -n moco get deployments` if you chose
+a different release/fullname. For missing references, wait for the tenant's Ready
+condition. For `401`/`403`, check the management principal and token. For `409`/`412`,
+review current remote state and authorization adoption before retrying.

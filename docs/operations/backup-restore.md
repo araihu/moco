@@ -1,43 +1,40 @@
 # Full backup and recovery
 
-The [single-instance production profile](production-sqlite.md) adds scheduling,
-cryptographically verified mirrored copies, retention, health/alerts and executable
-operational drills to the backup primitives documented here.
+Use `moco-backup` to create a complete database snapshot, verify an archive and
+restore into a new offline database. The [production profile](production-sqlite.md)
+already schedules verified mirrored backups; use these commands for manual
+checks and recovery.
 
-`moco-backup` provides a full database snapshot, structural verification, and
-verified restoration to a new offline path. Build it from the same Mocó release
-used by the server:
+## Get the recovery tools
 
-```bash
-go build -o ./moco-backup ./cmd/moco-backup
+The released server image includes both recovery binaries. On a Linux host
+matching the image's CPU architecture, copy them without starting a server:
+
+```sh
+umask 077
+mkdir -p /private/moco/bin
+container=$(docker create ghcr.io/araihu/moco:0.0.3)
+docker cp "$container":/moco-backup /private/moco/bin/moco-backup
+docker cp "$container":/moco-audit-export /private/moco/bin/moco-audit-export
+docker rm "$container"
+export PATH="/private/moco/bin:$PATH"
 ```
+
+Run them as an operator with access to the private files, using the same release
+as the database. On other hosts, run the image with the corresponding tool as
+its entrypoint and private data/archive/key mounts; do not start the server
+entrypoint during restore.
 
 ## What is recovered
 
-The archive contains all SQLite tables and their schema: tenants, vaults,
-wrapped data keys, encrypted secrets and metadata, authorization policies and
-revision, audit ledger and sequences, idempotency responses, insertion
-sequences, global and tenant watch checkpoints (including tombstones), and the
-encryption root-key ID and epoch. Secret values remain envelope encrypted.
+A backup contains tenants, vaults, encrypted values, permissions, audit history
+and synchronization state. It includes committed data at the snapshot boundary,
+not later writes. Creation can run while the server is serving requests.
 
-The source is opened read-only and is never created or migrated by the backup
-command. `VACUUM INTO` creates a transactionally consistent snapshot of the live
-database, including committed WAL data. Uncommitted transactions and mutations
-after the snapshot boundary are excluded. Metadata is inspected on the isolated
-snapshot, so a concurrent rotation cannot mix key-era counts from different
-database states. No shell SQLite binary or external service is required.
-
-The v1 archive contains exactly `manifest.json` followed by `database.sqlite`.
-The manifest records the format, creation time, database length and SHA-256,
-schema version, watch revision, active encryption epoch, and sorted required
-root-key IDs. IDs include every stored wrapped key and the active deployment
-era. `createdAt` marks the start of the snapshot operation, a conservative data
-freshness boundary rather than the completion time of a potentially long copy.
-It contains no root-key material. SHA-256 detects accidental corruption;
-it does not authenticate an archive replaced by an attacker. Store backups in
-access-controlled storage with appropriate encryption and tamper protection.
-Paths, labels, policies, and audit metadata inside the SQLite snapshot are
-readable, even though secret values are encrypted.
+The manifest records the snapshot time, schema version, checksum and required
+root-key IDs. It contains no root-key material. Paths, labels, policies and audit
+metadata remain readable; protect archives with access controls and encryption
+at rest. Checksums detect corruption, not replacement by an attacker.
 
 ## Separate recovery custody
 
@@ -75,43 +72,25 @@ printed in command results.
 ## Create and verify
 
 ```bash
-./moco-backup create --database /var/lib/moco/moco.db \
+moco-backup create --database /var/lib/moco/moco.db \
   --output /backups/moco-20261025T120000Z.tar --timeout 10m
 
-./moco-backup verify --backup /backups/moco-20261025T120000Z.tar
+moco-backup verify --backup /backups/moco-20261025T120000Z.tar
 
-./moco-backup verify --backup /backups/moco-20261025T120000Z.tar \
+moco-backup verify --backup /backups/moco-20261025T120000Z.tar \
   --keyring /secure/recovery-keys.json
 ```
 
-`create` defaults the database to `MOCO_DB_PATH`, then `./moco.db`.
-`verify` without a keyring checks archive structure, size, checksum, clean
-supported migration version, SQLite integrity, foreign keys, and manifest state.
-Supplying a keyring additionally authenticates every wrapped vault key,
-including keys in empty vaults, decrypts every secret in bounded row memory,
-and verifies its plaintext digest. Plaintext is wiped after checking and is
-never persisted or printed.
+Verification without a keyring checks archive structure, checksums, schema and
+database integrity. Supplying the keyring also verifies that every vault key
+and secret can be decrypted, without printing values. Success prints the
+manifest; failure exits nonzero. Existing archive destinations are never overwritten.
 
-The command prints the manifest as JSON to stdout on success. Failures produce
-a nonzero exit status and diagnostics on stderr. Every command has a positive
-`--timeout` (default ten minutes) and honors interrupt/termination cancellation.
-Archives and restored databases use `0600`; staging directories use `0700`.
-Publication syncs the file and parent directory and uses a same-filesystem hard
-link to avoid replacing an existing file, even if another writer races to
-create the destination. The destination filesystem must support hard links.
-Temporary files are removed on success, error, or handled cancellation.
-An uncatchable kill/power loss can leave a private `.moco-*` staging directory;
-remove abandoned staging directories after confirming no operation uses them.
-If directory sync fails after publication, the command reports failure and
-leaves the published file for inspection; it never replaces it on retry.
-
-Backups scan the full database and use local staging space roughly equal to a
-snapshot plus its uncompressed archive. Verification and restoration also need
-space for a complete extracted database. Long reads can increase WAL retention;
-monitor disk use and schedule backups for the deployment's workload. Choose
-backup frequency and off-host retention according to the maximum acceptable
-data loss, and alert on failed or overdue backups. Scheduling and remote
-transfer are deployment responsibilities.
+Use private directories and mode `0600` for keys, archives and restored files.
+The destination filesystem must support hard links and file/directory sync.
+Allow space for a full snapshot, its archive, verification extraction and WAL
+growth. Set a suitable `--timeout` for your database size. Schedule off-host
+copies and alert on overdue or failed backups.
 
 ## Restore after losing a host
 
@@ -125,7 +104,7 @@ transfer are deployment responsibilities.
 3. Restore to a path that does not exist:
 
    ```bash
-   ./moco-backup restore --backup /backups/moco-20261025T120000Z.tar \
+   moco-backup restore --backup /backups/moco-20261025T120000Z.tar \
      --database /var/lib/moco-recovery/moco.db \
      --keyring /secure/recovery-keys.json
    ```
@@ -151,30 +130,10 @@ transfer are deployment responsibilities.
    convergence. Reconcile any writes that occurred after the backup boundary.
 7. Reopen client access and resume scheduled backups, exports and monitoring.
 
-## Recovery test, including rotation
+## Rehearse recovery
 
-```bash
-GOWORK=off go test ./internal/adapters/backup \
-  -run TestRecoveryBeforeDuringAndAfterRootKeyRotation -count=1 -v
-GOWORK=off go test ./cmd/moco-backup ./internal/adapters/backup -count=1
-```
-
-The recovery test captures backups before rotation, with a mixture of old/new
-vault-key eras, and after completed rotation. It mutates the live service and
-removes the original database before restoring each backup. Pre-rotation and
-mixed-era recovery fail without the historical root key. Successful recovery
-checks tenants, vaults, plaintext values and ETags, policy snapshots, tenant
-isolation through authenticated HTTP, creation-idempotency replay, watch state,
-audit history, and continued writes. It then finishes rotation on the restored
-database and verifies that current key material alone can decrypt it.
-
-Additional tests cover concurrent writes, wrong key bytes, empty-vault key
-authentication, missing vault keys, tampered ciphertext even with a recomputed
-archive checksum, schema/foreign-key damage, malformed archives, unsafe tar
-entries, insecure permissions, existing files/sidecars, and cancellation cleanup.
-The commands are exercised end to end through their argument parser.
-
-Run regular deployment recovery drills with actual off-host backups and
-separately recovered key custody, and record elapsed recovery time and the
-backup boundary. Repository tests do not verify the deployment's storage,
-credential custody, scheduling, or network configuration.
+Periodically restore an actual off-host backup into an isolated deployment with
+separately recovered keys. Check a known value and ETag, an authorized write,
+a denied cross-tenant request, and a fresh backup after startup. Include a
+backup made before a root-key rotation so the drill exercises historical keys.
+Record the snapshot's age and elapsed recovery time before reopening traffic.
