@@ -1,0 +1,22 @@
+name: Notify OpenAPI catalog
+
+on:
+  push:
+    branches: [main]
+    tags: ['openapi/**']
+    paths:
+      - openapi/**
+      - .github/workflows/notify-oapi.yml
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  notify:
+    if: github.repository_owner == 'araihu' && (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'openapi/'))
+    uses: araihu/oapi/.github/workflows/notify-producer.yml@f0617f0d52e1459e2429dee704ec891bc420c13e
+    secrets:
+      app_id: ${{ secrets.ARAIHU_ASSETS_APP_ID }}
+      private_key: ${{ secrets.ARAIHU_ASSETS_APP_PRIVATE_KEY }}
