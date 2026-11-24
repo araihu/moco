@@ -189,10 +189,23 @@ func TestToolchainFloorsMatchApplication(t *testing.T) {
 	application := repoGoVersion(t, "go.mod")
 	for _, module := range []string{
 		"tools/go.mod", "tools/actionlint/go.mod", "tools/golangci-lint/go.mod",
-		"dagger/go.mod", "dagger/third_party/otel-go/go.mod",
+		"controller/go.mod", "cli/go.mod", "cli/tools/go.mod",
 	} {
 		if toolchain := repoGoVersion(t, module); version.Compare(toolchain, application) < 0 {
 			t.Errorf("%s permits %s, below application floor %s", module, toolchain, application)
+		}
+	}
+}
+
+func TestDaggerCompilerAndGeneratorVersions(t *testing.T) {
+	application := repoGoVersion(t, "go.mod")
+	source := readRepoFile(t, "dagger/main.go")
+	if !strings.Contains(source, `const goToolchain = "`+application+`"`) {
+		t.Fatalf("Dagger builds and scans must select %s", application)
+	}
+	for _, name := range []string{"dagger/go.mod", "dagger/third_party/otel-go/go.mod"} {
+		if floor := repoGoVersion(t, name); floor != "go1.27.3" {
+			t.Errorf("%s declares %s, want the Dagger v0.21.11 generator floor go1.27.3", name, floor)
 		}
 	}
 }

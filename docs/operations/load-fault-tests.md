@@ -102,8 +102,9 @@ CI pins CLI and engine to Dagger v0.21.11, with the engine image pinned by diges
 The engine supplies the built-in Go SDK and its code generator. All runner lanes
 install the selected CLI for the job, and the job overrides runner-wide engine
 endpoints. This prevents a newer CLI from silently loading an older engine's
-SDK. The module keeps Go 1.27.4, matching the application floor; it does not lower
-the module's Go version to accommodate the old generator.
+SDK. The generator accepts Go directives through 1.27.3. The Dagger module and
+its local telemetry dependency use that directive. Moco compiles and scans
+both with the application's patched Go 1.27.4 toolchain.
 
 `dagger develop` first regenerates bindings, and CI rejects any dependency
 manifest changes. `dagger functions` then loads type definitions through the

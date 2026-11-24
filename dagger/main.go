@@ -8,6 +8,7 @@ import (
 )
 
 const toolsBinPath = "/opt/moco-tools/bin"
+const goToolchain = "go1.27.4"
 
 // Moco provides the repository CI contract.
 type Moco struct {
@@ -33,7 +34,7 @@ func (m *Moco) BuildTools() *dagger.Directory {
 		Base().
 		WithWorkdir("/src/tools").
 		WithEnvVariable("GOWORK", "off").
-		WithEnvVariable("GOTOOLCHAIN", "auto").
+		WithEnvVariable("GOTOOLCHAIN", goToolchain).
 		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithEnvVariable("GOBIN", "/out").
 		WithEnvVariable("GOMAXPROCS", "1").
@@ -78,7 +79,7 @@ func (m *Moco) Check(
 		Base().
 		WithWorkdir("/src").
 		WithEnvVariable("GOWORK", "off").
-		WithEnvVariable("GOTOOLCHAIN", "auto").
+		WithEnvVariable("GOTOOLCHAIN", goToolchain).
 		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithDirectory(toolsBinPath, ciTools).
 		WithEnvVariable("MOCO_RUN_NONCE", runNonce).
@@ -101,7 +102,7 @@ func (m *Moco) Check(
 		Base().
 		WithWorkdir("/src").
 		WithEnvVariable("GOWORK", "off").
-		WithEnvVariable("GOTOOLCHAIN", "auto").
+		WithEnvVariable("GOTOOLCHAIN", goToolchain).
 		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithDirectory(toolsBinPath, ciTools).
 		WithFile("/config/.golangci.yml", m.Source.File(".golangci.yml")).

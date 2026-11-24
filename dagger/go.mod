@@ -1,6 +1,6 @@
 module dagger/moco
 
-go 1.27.4
+go 1.27.3
 
 // The upstream bridge still uses log.Value/log.KeyValue, removed in logs v0.21.
 // Keep the compatibility adaptation local while using patched upstream SDKs.

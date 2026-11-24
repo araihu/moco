@@ -85,8 +85,8 @@ same gate through Dagger, explicitly builds every Go-managed tool first, and
 rejects stale generated files. The Dagger module reuses immutable shared modules
 from `araihu/dagger`; the CI tool build includes `golangci-lint` from its isolated
 module and uses the same version and source checksums as local builds.
-Dagger sets `GOTOOLCHAIN=auto` so each module can select its required Go version
-when the shared base image provides an older compiler.
+Moco selects Go 1.27.4 in the shared container for tool builds, tests and
+vulnerability scans, including the Dagger module.
 CLI and engine/SDK are pinned together to v0.21.11; every runner installs that
 CLI and CI validates `dagger functions` before building tools. The pinned engine
 endpoint overrides any older runner-wide engine so SDK bootstrap can load the
