@@ -9,7 +9,7 @@ The website runs no Moco server and accepts no credentials or secret values.
 
 ## Build and preview
 
-Requires Go 1.27.3 or newer, Python 3 and Make. First build needs network access
+Requires Go 1.27.4 or newer, Python 3 and Make. First build needs network access
 for pinned Go publication tools; they are isolated under ignored `tools/bin/site/`.
 Node is required only for Wrangler deployment or browser testing.
 

@@ -5,8 +5,8 @@ The CLI connects to your server; it does not store credentials.
 
 ## Install the CLI
 
-Release 0.0.3 ships server images and Helm charts. Install its CLI from the
-released source using Git and Go 1.27.3 or newer:
+Release 0.0.3 ships server images and Helm charts. Its CLI source declares
+Go 1.27.3 as the minimum. Use Go 1.27.4 or a later patched release to build it.
 
 ```sh
 git clone --branch v0.0.3 --depth 1 https://github.com/araihu/moco.git moco-cli-source

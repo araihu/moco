@@ -1,6 +1,6 @@
 module github.com/araihu/moco
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/casbin/casbin/v2 v2.135.0

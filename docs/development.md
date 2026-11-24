@@ -85,20 +85,20 @@ same gate through Dagger, explicitly builds every Go-managed tool first, and
 rejects stale generated files. The Dagger module reuses immutable shared modules
 from `araihu/dagger`; the CI tool build includes `golangci-lint` from its isolated
 module and uses the same version and source checksums as local builds.
-Dagger sets `GOTOOLCHAIN=auto` so each module can select its required Go version
-when the shared base image provides an older compiler.
+Moco selects Go 1.27.4 in the shared container for tool builds, tests and
+vulnerability scans, including the Dagger module.
 CLI and engine/SDK are pinned together to v0.21.11; every runner installs that
 CLI and CI validates `dagger functions` before building tools. The pinned engine
 endpoint overrides any older runner-wide engine so SDK bootstrap can load the
 current Go module before its own build functions run.
 The local SDK adapter preserves the reviewed dependency manifests after binding
-generation and compiles the module with a digest-pinned Go 1.27.3 image using
+generation and compiles the module with a digest-pinned Go 1.27.4 image using
 `-mod=readonly`. See [load/fault acceptance and SDK compatibility](operations/load-fault-tests.md).
 
-The Dagger module selects patched OpenTelemetry v1.45.0, Logs v0.21.0, and
-`golang.org/x/net` v0.60.0. Its SDK telemetry bridge needs a local compatibility
-adaptation for the unified Logs value API; source provenance, license, tests,
-and removal conditions are documented in
+The Dagger module selects OpenTelemetry core, SDK and Logs v1.47.0, OTLP log
+exporters v0.23.0 and `golang.org/x/net` v0.60.0. Its local SDK telemetry
+bridge preserves empty log bodies and record round trips. Source provenance,
+license, tests and removal conditions are documented in
 [`dagger/third_party/otel-go/README.moco.md`](../dagger/third_party/otel-go/README.moco.md).
 
 Public API source lives in `openapi/public.yaml`; administrative and probe operations

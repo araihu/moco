@@ -7,7 +7,7 @@ releases or documentation. To install or operate a deployment, use the
 ## Development
 
 The repository contains separate Go modules for the server, CLI, controller,
-Dagger and pinned development tools. Use Go 1.27.3 or newer. Python 3 and OpenSSL
+Dagger and pinned development tools. Use Go 1.27.4 or newer. Python 3 and OpenSSL
 are required for operational drills; Docker and Helm are required for image
 and chart checks. Run commands from the repository root unless noted otherwise.
 
