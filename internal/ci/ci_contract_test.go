@@ -137,14 +137,30 @@ func TestSharedDaggerDependenciesUseImmutablePins(t *testing.T) {
 	}
 }
 
-func TestGolangCILintUsesIsolatedModule(t *testing.T) {
-	toolsModule := readRepoFile(t, "tools/go.mod")
-	if strings.Contains(toolsModule, "github.com/golangci/golangci-lint") {
-		t.Fatal("golangci-lint must keep its dependency graph separate from Vacuum")
+func TestLintToolsUsePinnedReleaseArchives(t *testing.T) {
+	var releases map[string]map[string]struct {
+		URL    string
+		SHA256 string
+		Member string
 	}
-	linterModule := readRepoFile(t, "tools/golangci-lint/go.mod")
-	if !strings.Contains(linterModule, "tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint") {
-		t.Fatal("golangci-lint must be pinned as a Go-managed tool")
+	if err := json.Unmarshal([]byte(readRepoFile(t, "tools/linters.json")), &releases); err != nil {
+		t.Fatal(err)
+	}
+	toolsModule := readRepoFile(t, "tools/go.mod")
+	digest := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	for tool, repository := range map[string]string{
+		"vacuum": "daveshanley/vacuum", "golangci-lint": "golangci/golangci-lint",
+	} {
+		if strings.Contains(toolsModule, "github.com/"+repository) {
+			t.Errorf("%s still belongs to the source tool graph", tool)
+		}
+		for _, platform := range []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"} {
+			release := releases[tool][platform]
+			if !strings.HasPrefix(release.URL, "https://github.com/"+repository+"/releases/download/v") ||
+				!digest.MatchString(release.SHA256) || release.Member == "" {
+				t.Errorf("missing pinned release for %s on %s", tool, platform)
+			}
+		}
 	}
 }
 
@@ -195,7 +211,7 @@ func TestDaggerTelemetryUsesPatchedModules(t *testing.T) {
 func TestToolchainFloorsMatchApplication(t *testing.T) {
 	application := repoGoVersion(t, "go.mod")
 	for _, module := range []string{
-		"tools/go.mod", "tools/actionlint/go.mod", "tools/golangci-lint/go.mod",
+		"tools/go.mod", "tools/actionlint/go.mod",
 		"controller/go.mod", "cli/go.mod", "cli/tools/go.mod",
 	} {
 		if toolchain := repoGoVersion(t, module); version.Compare(toolchain, application) < 0 {

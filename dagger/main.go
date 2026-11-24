@@ -30,7 +30,7 @@ func goBase(source *dagger.Directory) *dagger.Container {
 		WithEnvVariable("GOFLAGS", "-mod=readonly")
 }
 
-// BuildTools compiles all Go-managed tool binaries required by CI.
+// BuildTools prepares the pinned tools required by CI.
 func (m *Moco) BuildTools() *dagger.Directory {
 	toolsSource := dag.Directory().
 		WithDirectory("tools", m.Source.Directory("tools")).
@@ -46,14 +46,13 @@ func (m *Moco) BuildTools() *dagger.Directory {
 		WithExec([]string{"go", "install", "-p=1", "tool"}).
 		WithWorkdir("/src/tools/actionlint").
 		WithExec([]string{"go", "install", "-p=1", "tool"}).
-		WithWorkdir("/src/tools/golangci-lint").
-		WithEnvVariable("GOMEMLIMIT", "4GiB").
-		WithEnvVariable("GOGC", "100").
-		WithExec([]string{"go", "install", "-p=1", "tool"}).
+		WithWorkdir("/src/tools").
+		WithExec([]string{"sh", "-eu", "-c", `for tool in vacuum golangci-lint; do
+  binary=$(python3 linter.py --path "$tool")
+  install -m 0755 "$binary" "/out/$tool"
+done`}).
 		WithWorkdir("/src/cli/tools").
 		WithEnvVariable("GOBIN", "/out/cli").
-		WithEnvVariable("GOMEMLIMIT", "2GiB").
-		WithEnvVariable("GOGC", "50").
 		WithExec([]string{"go", "install", "-p=1", "tool"}).
 		WithExec([]string{
 			"sh", "-euc",

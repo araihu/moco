@@ -87,8 +87,9 @@ an incompatible SDK bootstrap.
 The local SDK adapter preserves reviewed module manifests after binding
 generation. The OpenTelemetry compatibility patch and its removal conditions
 are documented in [the third-party adapter notes](../dagger/third_party/otel-go/README.moco.md).
-Update isolated tools modules as well as runtime modules when addressing a
-vulnerability, and scan the compiled tools with the selected Go version.
+Update the relevant module or pinned linter release when addressing a tool
+vulnerability. The binary scans cover the executables used in CI, including
+the Go runtime embedded in each upstream linter.
 
 ## Publishing a release
 
