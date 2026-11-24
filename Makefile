@@ -14,18 +14,15 @@ TOOL_BIN_DIR ?=
 TOOL_GOMEMLIMIT ?= 2GiB
 TOOL_GOGC ?= 50
 TOOL_BUILD_ENV := GOWORK=off GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=$(TOOL_GOMEMLIMIT) GOGC=$(TOOL_GOGC)
-LINT_BUILD_GOMEMLIMIT ?= 4GiB
-LINT_BUILD_GOGC ?= 100
-LINT_BUILD_ENV := GOWORK=off GOFLAGS='-mod=readonly -p=1' GOMAXPROCS=1 GOMEMLIMIT=$(LINT_BUILD_GOMEMLIMIT) GOGC=$(LINT_BUILD_GOGC)
 
 ifeq ($(strip $(TOOL_BIN_DIR)),)
-VACUUM := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n vacuum)
+VACUUM := $$(python3 "$(TOOLS_DIR)/linter.py" --path vacuum)
 ACTIONLINT := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR)/actionlint tool -n actionlint)
 OAPI_CODEGEN := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n oapi-codegen)
 SQLC := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n sqlc)
 MIGRATE_SQLITE := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n migrate-sqlite)
 GOVULNCHECK := $$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n govulncheck)
-GOLANGCI_LINT := $$($(LINT_BUILD_ENV) $(GO) -C $(TOOLS_DIR)/golangci-lint tool -n golangci-lint)
+GOLANGCI_LINT := $$(python3 "$(TOOLS_DIR)/linter.py" --path golangci-lint)
 else
 VACUUM := $(abspath $(TOOL_BIN_DIR))/vacuum
 ACTIONLINT := $(abspath $(TOOL_BIN_DIR))/actionlint
@@ -68,20 +65,20 @@ vind-source-test:
 	python3 -B scripts/vind_test.py --source --helm "$(HELM)"
 
 spec-lint:
-	GOWORK=off $(VACUUM) lint --ruleset openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d openapi/public.yaml
-	GOWORK=off $(VACUUM) lint --ruleset openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d openapi/internal.yaml
+	GOWORK=off "$(VACUUM)" lint --ruleset openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d openapi/public.yaml
+	GOWORK=off "$(VACUUM)" lint --ruleset openapi/vacuum.yaml --fail-severity warn --min-score 100 --no-banner -d openapi/internal.yaml
 
 spec-bundle:
-	GOWORK=off $(VACUUM) bundle --composed --no-style --base openapi openapi/public.yaml openapi/bundled/public.yaml
-	GOWORK=off $(VACUUM) bundle --composed --no-style --base openapi openapi/internal.yaml openapi/bundled/internal.yaml
+	GOWORK=off "$(VACUUM)" bundle --composed --no-style --base openapi openapi/public.yaml openapi/bundled/public.yaml
+	GOWORK=off "$(VACUUM)" bundle --composed --no-style --base openapi openapi/internal.yaml openapi/bundled/internal.yaml
 
 cli-spec-bundle: spec-bundle
 	@set -eu; mkdir -p openapi/bundled/cli; \
 	build_dir=$$(mktemp -d openapi/bundled/cli/.build.XXXXXX); trap 'rm -rf "$$build_dir"' EXIT; \
 	for contract in public internal; do \
-		GOWORK=off $(VACUUM) bundle --composed --no-style --format json "openapi/bundled/$$contract.yaml" "$$build_dir/$$contract.base.json"; \
-		GOWORK=off $(VACUUM) apply-overlay --fail-on-warnings --no-style --stdout "openapi/bundled/$$contract.yaml" "openapi/overlays/cli.$$contract.yaml" > "$$build_dir/$$contract.overlay.yaml"; \
-		GOWORK=off $(VACUUM) bundle --composed --no-style --format json "$$build_dir/$$contract.overlay.yaml" "$$build_dir/$$contract.json"; \
+		GOWORK=off "$(VACUUM)" bundle --composed --no-style --format json "openapi/bundled/$$contract.yaml" "$$build_dir/$$contract.base.json"; \
+		GOWORK=off "$(VACUUM)" apply-overlay --fail-on-warnings --no-style --stdout "openapi/bundled/$$contract.yaml" "openapi/overlays/cli.$$contract.yaml" > "$$build_dir/$$contract.overlay.yaml"; \
+		GOWORK=off "$(VACUUM)" bundle --composed --no-style --format json "$$build_dir/$$contract.overlay.yaml" "$$build_dir/$$contract.json"; \
 		python3 -B scripts/check_cli_specs.py --base "$$build_dir/$$contract.base.json" --cli "$$build_dir/$$contract.json"; \
 		mv "$$build_dir/$$contract.json" "openapi/bundled/cli/$$contract.json"; \
 	done
@@ -121,6 +118,7 @@ db-migrate:
 	GOWORK=off $(MIGRATE_SQLITE) -path db/migrations -database "sqlite://$(abspath $(DB_PATH))" up
 
 test:
+	python3 -B -m unittest discover -s tools -p test_linter.py
 	python3 -B -m unittest discover -s scripts -p test_release_artifacts.py
 	GOWORK=off $(GO) test ./... -count=1
 	GOWORK=off $(GO) -C tools test ./... -count=1
@@ -128,11 +126,11 @@ test:
 	GOWORK=off $(GO) -C dagger/third_party/otel-go test ./... -count=1
 
 lint:
-	GOWORK=off $(GOLANGCI_LINT) run --config .golangci.yml ./...
-	cd controller && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
-	cd tools && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
-	cd cli && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...
-	@if [ -f dagger/dagger.gen.go ]; then cd dagger && GOWORK=off $(GOLANGCI_LINT) run --config ../.golangci.yml ./...; fi
+	GOWORK=off "$(GOLANGCI_LINT)" run --config .golangci.yml ./...
+	cd controller && GOWORK=off "$(GOLANGCI_LINT)" run --config ../.golangci.yml ./...
+	cd tools && GOWORK=off "$(GOLANGCI_LINT)" run --config ../.golangci.yml ./...
+	cd cli && GOWORK=off "$(GOLANGCI_LINT)" run --config ../.golangci.yml ./...
+	@if [ -f dagger/dagger.gen.go ]; then cd dagger && GOWORK=off "$(GOLANGCI_LINT)" run --config ../.golangci.yml ./...; fi
 
 vulncheck:
 	GOWORK=off $(GOVULNCHECK) -test ./...
@@ -141,7 +139,8 @@ vulncheck:
 	GOWORK=off $(GOVULNCHECK) -C dagger/third_party/otel-go -test ./...
 	@set -eu; scanner="$(GOVULNCHECK)"; \
 	if [ -f dagger/dagger.gen.go ]; then GOWORK=off "$$scanner" -C dagger -test ./...; fi; \
-	for tool in vacuum oapi-codegen sqlc migrate-sqlite govulncheck; do \
+	GOWORK=off "$$scanner" -mode=binary "$(VACUUM)"; \
+	for tool in oapi-codegen sqlc migrate-sqlite govulncheck; do \
 		if [ -n "$(TOOL_BIN_DIR)" ]; then binary="$(abspath $(TOOL_BIN_DIR))/$$tool"; else binary="$$($(TOOL_BUILD_ENV) $(GO) -C $(TOOLS_DIR) tool -n "$$tool")"; fi; \
 		GOWORK=off "$$scanner" -mode=binary "$$binary"; \
 	done; \

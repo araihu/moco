@@ -44,12 +44,14 @@ LOAD_REPORT=/tmp/moco-load-fault.json` for a retained JSON report and see the
 [load/fault runbook](operations/load-fault-tests.md) for extended workloads,
 latency/resource budgets and fault guarantees.
 
-Go tool versions are pinned under `tools/`, so global installations are unnecessary.
-`actionlint` and `golangci-lint` have their own nested Go modules to keep their
-dependency graphs isolated from Vacuum:
+Tools are pinned under `tools/`, so global installations are unnecessary.
+`tools/linters.json` records the upstream Vacuum and golangci-lint download URLs
+and SHA-256 digests for both archives and executables for each supported operating system
+and architecture.
+The remaining tools use Go modules, including a separate module for actionlint.
 
 - actionlint `v1.7.12`
-- Vacuum `v0.30.1`
+- Vacuum `v0.42.3`
 - oapi-codegen `v2.8.0`
 - sqlc `v1.31.1`
 - govulncheck `v1.7.0`
@@ -57,13 +59,9 @@ dependency graphs isolated from Vacuum:
 - Casbin `v2.135.0`
 - a SQLite-only migration runner backed by golang-migrate `v4.19.1`
 
-Every tool is compiled from its pinned Go module using the selected Go
-toolchain. Module checksums authenticate the sources, and the Go build cache
-keeps repeat runs fast while rebuilding when the toolchain changes. This also
-updates the standard library embedded in `golangci-lint`, rather than retaining
-the older runtime in an upstream precompiled release. Its first build uses one
-worker with a 4 GiB memory target; override `LINT_BUILD_GOMEMLIMIT` and
-`LINT_BUILD_GOGC` when necessary. Other tools retain their 2 GiB memory target.
+Local Make targets and Dagger use `tools/linter.py` to download each release,
+verify its archive and executable, and recheck the executable on each cache hit.
+The Go-managed tools use the selected Go toolchain with a 2 GiB build memory target.
 
 ```bash
 make workflow-lint
@@ -81,10 +79,8 @@ make check
 analysis, vulnerability scans of every pinned tool binary, and executable
 restart/recovery/key-rotation drills and concurrent load/fault acceptance. CI
 also exercises the OCI profile and monitoring rules in a separate job. CI invokes the
-same gate through Dagger, explicitly builds every Go-managed tool first, and
-rejects stale generated files. The Dagger module reuses immutable shared modules
-from `araihu/dagger`; the CI tool build includes `golangci-lint` from its isolated
-module and uses the same version and source checksums as local builds.
+same gate through Dagger, prepares the tools first, and rejects stale generated
+files. The Dagger module reuses immutable shared modules from `araihu/dagger`.
 Moco selects Go 1.27.4 in the shared container for tool builds, tests and
 vulnerability scans, including the Dagger module.
 CLI and engine/SDK are pinned together to v0.21.11; every runner installs that

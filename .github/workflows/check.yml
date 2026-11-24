@@ -102,7 +102,7 @@ jobs:
           git diff --exit-code -- dagger.json dagger/go.mod dagger/go.sum
           dagger functions
 
-      - name: Build Go tools
+      - name: Prepare CI tools
         shell: bash
         # Large cold-build progress traces can delay CLI shutdown after success.
         run: dagger --silent call build-tools entries
