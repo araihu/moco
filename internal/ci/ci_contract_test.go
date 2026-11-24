@@ -148,9 +148,16 @@ func TestGolangCILintUsesIsolatedModule(t *testing.T) {
 	}
 }
 
-func TestDaggerTelemetryUsesPatchedLogs(t *testing.T) {
-	modules := []string{"go.opentelemetry.io/otel/log", "go.opentelemetry.io/otel/sdk/log",
-		"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc", "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"}
+func TestDaggerTelemetryUsesPatchedModules(t *testing.T) {
+	expected := map[string]string{
+		"go.opentelemetry.io/otel":                                    "v1.47.0",
+		"go.opentelemetry.io/otel/log":                                "v1.47.0",
+		"go.opentelemetry.io/otel/sdk":                                "v1.47.0",
+		"go.opentelemetry.io/otel/sdk/log":                            "v1.47.0",
+		"go.opentelemetry.io/otel/trace":                              "v1.47.0",
+		"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc": "v0.23.0",
+		"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp": "v0.23.0",
+	}
 	policy := readRepoFile(t, "dagger/go.mod")
 	directory := t.TempDir()
 	modfile := filepath.Join(directory, "go.mod")
@@ -164,7 +171,7 @@ func TestDaggerTelemetryUsesPatchedLogs(t *testing.T) {
 	if !ok {
 		t.Fatal("resolve repository")
 	}
-	for _, module := range modules {
+	for module, want := range expected {
 		command := exec.CommandContext(t.Context(), "go", "list", "-mod=readonly", "-modfile="+modfile, "-m", "-json", module) // #nosec G204 -- fixed module allowlist and a test-owned private modfile; no shell or remote input.
 		command.Dir = filepath.Join(filepath.Dir(current), "..", "..", "dagger")
 		command.Env = append(os.Environ(), "GOWORK=off")
@@ -174,13 +181,13 @@ func TestDaggerTelemetryUsesPatchedLogs(t *testing.T) {
 		}
 		var resolved struct {
 			Version string
-			Replace struct{ Version string }
+			Replace *struct{ Version string }
 		}
 		if err := json.Unmarshal(output, &resolved); err != nil {
 			t.Fatal(err)
 		}
-		if resolved.Version != "v0.21.0" || (resolved.Replace.Version != "" && resolved.Replace.Version != "v0.21.0") {
-			t.Fatalf("SDK downgraded %s: %s", module, output)
+		if resolved.Version != want || (resolved.Replace != nil && resolved.Replace.Version != want) {
+			t.Fatalf("expected %s at %s, got %s", module, want, output)
 		}
 	}
 }
@@ -200,7 +207,7 @@ func TestToolchainFloorsMatchApplication(t *testing.T) {
 func TestDaggerCompilerAndGeneratorVersions(t *testing.T) {
 	application := repoGoVersion(t, "go.mod")
 	source := readRepoFile(t, "dagger/main.go")
-	if !strings.Contains(source, `const goToolchain = "`+application+`"`) {
+	if !strings.Contains(source, `WithEnvVariable("GOTOOLCHAIN", "`+application+`")`) {
 		t.Fatalf("Dagger builds and scans must select %s", application)
 	}
 	for _, name := range []string{"dagger/go.mod", "dagger/third_party/otel-go/go.mod"} {

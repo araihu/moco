@@ -8,7 +8,6 @@ import (
 )
 
 const toolsBinPath = "/opt/moco-tools/bin"
-const goToolchain = "go1.27.4"
 
 // Moco provides the repository CI contract.
 type Moco struct {
@@ -24,18 +23,21 @@ func New(
 	return &Moco{Source: source}
 }
 
+func goBase(source *dagger.Directory) *dagger.Container {
+	return dag.GoCi(dagger.GoCiOpts{Source: source}).Base().
+		WithEnvVariable("GOWORK", "off").
+		WithEnvVariable("GOTOOLCHAIN", "go1.27.4").
+		WithEnvVariable("GOFLAGS", "-mod=readonly")
+}
+
 // BuildTools compiles all Go-managed tool binaries required by CI.
 func (m *Moco) BuildTools() *dagger.Directory {
 	toolsSource := dag.Directory().
 		WithDirectory("tools", m.Source.Directory("tools")).
 		WithDirectory("cli/tools", m.Source.Directory("cli/tools"))
 
-	return dag.GoCi(dagger.GoCiOpts{Source: toolsSource}).
-		Base().
+	return goBase(toolsSource).
 		WithWorkdir("/src/tools").
-		WithEnvVariable("GOWORK", "off").
-		WithEnvVariable("GOTOOLCHAIN", goToolchain).
-		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithEnvVariable("GOBIN", "/out").
 		WithEnvVariable("GOMAXPROCS", "1").
 		WithEnvVariable("GOMEMLIMIT", "2GiB").
@@ -75,12 +77,8 @@ func (m *Moco) Check(
 
 	ciTools := m.BuildTools()
 
-	checked := dag.GoCi(dagger.GoCiOpts{Source: m.Source}).
-		Base().
+	checked := goBase(m.Source).
 		WithWorkdir("/src").
-		WithEnvVariable("GOWORK", "off").
-		WithEnvVariable("GOTOOLCHAIN", goToolchain).
-		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithDirectory(toolsBinPath, ciTools).
 		WithEnvVariable("MOCO_RUN_NONCE", runNonce).
 		WithExec([]string{
@@ -98,12 +96,8 @@ func (m *Moco) Check(
 		WithFile("go.sum", m.Source.File("dagger/go.sum")).
 		WithDirectory("third_party/otel-go", m.Source.Directory("dagger/third_party/otel-go"))
 
-	moduleChecked := dag.GoCi(dagger.GoCiOpts{Source: moduleSource}).
-		Base().
+	moduleChecked := goBase(moduleSource).
 		WithWorkdir("/src").
-		WithEnvVariable("GOWORK", "off").
-		WithEnvVariable("GOTOOLCHAIN", goToolchain).
-		WithEnvVariable("GOFLAGS", "-mod=readonly").
 		WithDirectory(toolsBinPath, ciTools).
 		WithFile("/config/.golangci.yml", m.Source.File(".golangci.yml")).
 		WithEnvVariable("MOCO_RUN_NONCE", runNonce).
