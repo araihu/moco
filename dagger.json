@@ -7,18 +7,18 @@
   "dependencies": [
     {
       "name": "generated",
-      "source": "github.com/araihu/dagger/modules/generated@c92da1c397d2f3ef4494498f17f917254bf30907",
-      "pin": "c92da1c397d2f3ef4494498f17f917254bf30907"
+      "source": "github.com/araihu/dagger/modules/generated@00a379726bc1f34f9d917099f9253d9dfb27ac5d",
+      "pin": "00a379726bc1f34f9d917099f9253d9dfb27ac5d"
     },
     {
       "name": "go-ci",
-      "source": "github.com/araihu/dagger/modules/go@c92da1c397d2f3ef4494498f17f917254bf30907",
-      "pin": "c92da1c397d2f3ef4494498f17f917254bf30907"
+      "source": "github.com/araihu/dagger/modules/go@00a379726bc1f34f9d917099f9253d9dfb27ac5d",
+      "pin": "00a379726bc1f34f9d917099f9253d9dfb27ac5d"
     },
     {
       "name": "verified-download",
-      "source": "github.com/araihu/dagger/modules/verified-download@c92da1c397d2f3ef4494498f17f917254bf30907",
-      "pin": "c92da1c397d2f3ef4494498f17f917254bf30907"
+      "source": "github.com/araihu/dagger/modules/verified-download@00a379726bc1f34f9d917099f9253d9dfb27ac5d",
+      "pin": "00a379726bc1f34f9d917099f9253d9dfb27ac5d"
     }
   ],
   "source": "dagger"
