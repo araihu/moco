@@ -92,7 +92,7 @@ CLI and CI validates `dagger functions` before building tools. The pinned engine
 endpoint overrides any older runner-wide engine so SDK bootstrap can load the
 current Go module before its own build functions run.
 The local SDK adapter preserves the reviewed dependency manifests after binding
-generation and compiles the module with a digest-pinned Go 1.27.3 image using
+generation and compiles the module with a digest-pinned Go 1.27.4 image using
 `-mod=readonly`. See [load/fault acceptance and SDK compatibility](operations/load-fault-tests.md).
 
 The Dagger module selects patched OpenTelemetry v1.45.0, Logs v0.21.0, and

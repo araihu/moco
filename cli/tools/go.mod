@@ -1,6 +1,6 @@
 module github.com/araihu/moco/cli/tools
 
-go 1.27.3
+go 1.27.4
 
 tool (
 	github.com/araihu/oapi-cli-gen/cmd/oapi-cli-gen

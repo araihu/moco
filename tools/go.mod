@@ -1,6 +1,6 @@
 module github.com/araihu/moco/tools
 
-go 1.27.3
+go 1.27.4
 
 tool (
 	github.com/araihu/moco/tools/cmd/migrate-sqlite

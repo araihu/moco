@@ -25,14 +25,14 @@ type MocoGoSdk {
   pub moduleTypes(modSource: ModuleSource!, introspectionJson: File!, outputFilePath: String!): Container! {
     let definition = modSource.withSDK("go").asModule.id
     container()
-      .from("golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5")
+      .from("golang:1.27.4-bookworm@sha256:b754301872c53d3dff666ec39e3fae971dc6f5ecd5a9b01fdefabbebb0f59901")
       .withNewFile(outputFilePath, JSON.encode(definition))
       .withEntrypoint(["/bin/true"])
   }
 
   pub moduleRuntime(modSource: ModuleSource!, introspectionJson: File!): Container! {
     let build = container()
-      .from("golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5")
+      .from("golang:1.27.4-bookworm@sha256:b754301872c53d3dff666ec39e3fae971dc6f5ecd5a9b01fdefabbebb0f59901")
       .withMountedCache("/go/pkg/mod", cacheVolume("moco-sdk-go-mod"))
       .withMountedCache("/root/.cache/go-build", cacheVolume("moco-sdk-go-build"))
       .withDirectory("/src", source(modSource))
