@@ -118,6 +118,7 @@ db-migrate:
 	GOWORK=off $(MIGRATE_SQLITE) -path db/migrations -database "sqlite://$(abspath $(DB_PATH))" up
 
 test:
+	python3 -B -m unittest discover -s tools -p test_linter.py
 	python3 -B -m unittest discover -s scripts -p test_release_artifacts.py
 	GOWORK=off $(GO) test ./... -count=1
 	GOWORK=off $(GO) -C tools test ./... -count=1

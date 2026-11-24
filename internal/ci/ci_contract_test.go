@@ -139,9 +139,10 @@ func TestSharedDaggerDependenciesUseImmutablePins(t *testing.T) {
 
 func TestLintToolsUsePinnedReleaseArchives(t *testing.T) {
 	var releases map[string]map[string]struct {
-		URL    string
-		SHA256 string
-		Member string
+		URL          string
+		SHA256       string
+		Member       string
+		BinarySHA256 string `json:"binary_sha256"`
 	}
 	if err := json.Unmarshal([]byte(readRepoFile(t, "tools/linters.json")), &releases); err != nil {
 		t.Fatal(err)
@@ -156,8 +157,9 @@ func TestLintToolsUsePinnedReleaseArchives(t *testing.T) {
 		}
 		for _, platform := range []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"} {
 			release := releases[tool][platform]
-			if !strings.HasPrefix(release.URL, "https://github.com/"+repository+"/releases/download/v") ||
-				!digest.MatchString(release.SHA256) || release.Member == "" {
+			prefix := "https://github.com/" + repository + "/releases/download/v"
+			if !strings.HasPrefix(release.URL, prefix) || !digest.MatchString(release.SHA256) ||
+				!digest.MatchString(release.BinarySHA256) || release.Member == "" {
 				t.Errorf("missing pinned release for %s on %s", tool, platform)
 			}
 		}

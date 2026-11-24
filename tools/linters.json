@@ -1,66 +1,78 @@
 {
   "vacuum": {
     "linux/amd64": {
-      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.30.1/vacuum_0.30.1_linux_x86_64.tar.gz",
-      "sha256": "7e104d44c0987d95cd6499d2517175d7a7bba93be3ac5eb402aff0fbe7df8917",
-      "member": "vacuum"
+      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.42.3/vacuum_0.42.3_linux_x86_64.tar.gz",
+      "sha256": "31d647c75daa4924f5d5b2fe48b3be8e54a910494d5f278039899a36653037f7",
+      "member": "vacuum",
+      "binary_sha256": "0ac045f440158f807f16d374872e446d194e0381dba7b6e99e8fc85f9543b194"
     },
     "linux/arm64": {
-      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.30.1/vacuum_0.30.1_linux_arm64.tar.gz",
-      "sha256": "5f48c76266192f6e50cc58080d54e76f2a70924e5028ec692cda2a591a0c0c19",
-      "member": "vacuum"
+      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.42.3/vacuum_0.42.3_linux_arm64.tar.gz",
+      "sha256": "597c2b74e4f19a7ee1aead1c968a2bf2a6b409581721bef9c298b5c660af6860",
+      "member": "vacuum",
+      "binary_sha256": "8f8b5cff9dee72221ad7a690e277704c0e7bca57fb753ed217ceaa33f9707c43"
     },
     "darwin/amd64": {
-      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.30.1/vacuum_0.30.1_darwin_x86_64.tar.gz",
-      "sha256": "ae6c5a4116cf4c8541de5f469d8fbf9a13b2c06e8c7149a18cf5afe220e23a21",
-      "member": "vacuum"
+      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.42.3/vacuum_0.42.3_darwin_x86_64.tar.gz",
+      "sha256": "775cb522b2d2c3d6b1ee380f10dfecba9660fbd8b5d01e625fb709b2d067a127",
+      "member": "vacuum",
+      "binary_sha256": "3d07a688789cc7d7d332b49d3fdb6b8b73a1d6fd7abf0b36ca4313da48d38d38"
     },
     "darwin/arm64": {
-      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.30.1/vacuum_0.30.1_darwin_arm64.tar.gz",
-      "sha256": "3101425ee2983bb5d4b6ae2d101bc266b9c69bc4a510b816df2c98deafa42ab8",
-      "member": "vacuum"
+      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.42.3/vacuum_0.42.3_darwin_arm64.tar.gz",
+      "sha256": "c851191eaa0e9464be97d9f0a2a7c4a4904f834a3a9c420f604e2f1e339275e6",
+      "member": "vacuum",
+      "binary_sha256": "bdbcd0b129771cfe5c2dc5b5062205e8f0111be2cc5b615516790d4f86e47790"
     },
     "windows/amd64": {
-      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.30.1/vacuum_0.30.1_windows_x86_64.tar.gz",
-      "sha256": "cafeaaf18fd9a84111c849dbb0b7329d99eeec6f6fe9a407bf35c1de7621f585",
-      "member": "vacuum.exe"
+      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.42.3/vacuum_0.42.3_windows_x86_64.tar.gz",
+      "sha256": "fe91e273b60d3fdcf2df0361519b6b5d15efd11ab4f2f77761db1df277ce9557",
+      "member": "vacuum.exe",
+      "binary_sha256": "6fc1cb751cfec89d8c078ccfc9b5b51899d49c0fc2905e006a6dad885b45c173"
     },
     "windows/arm64": {
-      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.30.1/vacuum_0.30.1_windows_arm64.tar.gz",
-      "sha256": "cbddf83e340c6b3886e186cf7fc1ea271b40c4a1f41e208d50f30d878713d13b",
-      "member": "vacuum.exe"
+      "url": "https://github.com/daveshanley/vacuum/releases/download/v0.42.3/vacuum_0.42.3_windows_arm64.tar.gz",
+      "sha256": "40e8f79afbd227f2b40bbb7f66bb0f0ee0cf1bf93410c1118d7924d9313c5075",
+      "member": "vacuum.exe",
+      "binary_sha256": "c76da91332a6a19c0c293556e5c0496525f48a1248d65cfa25233f3c2017c466"
     }
   },
   "golangci-lint": {
     "linux/amd64": {
       "url": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-linux-amd64.tar.gz",
       "sha256": "9b7fe6a6bf6334b98decf8d86b11415ea7889afdabdd1959fdce23af2a9ebcea",
-      "member": "golangci-lint-2.15.0-linux-amd64/golangci-lint"
+      "member": "golangci-lint-2.15.0-linux-amd64/golangci-lint",
+      "binary_sha256": "d9af4564c05beb2f5e130119aec45e5e89d28e5017d558d3ca382659f2427894"
     },
     "linux/arm64": {
       "url": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-linux-arm64.tar.gz",
       "sha256": "b4d8f17068b35ee6060cc2f69a16fb48740d706fbba81661c318649c114a6998",
-      "member": "golangci-lint-2.15.0-linux-arm64/golangci-lint"
+      "member": "golangci-lint-2.15.0-linux-arm64/golangci-lint",
+      "binary_sha256": "14680d7674eb1fed0405446670e15dcffb74e979ef0dcd41f998c088fd6babfb"
     },
     "darwin/amd64": {
       "url": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-darwin-amd64.tar.gz",
       "sha256": "767b899a28285e88ded2823d5dcc4bc5ef681173eb2d80f029a7b17ee4ece3b8",
-      "member": "golangci-lint-2.15.0-darwin-amd64/golangci-lint"
+      "member": "golangci-lint-2.15.0-darwin-amd64/golangci-lint",
+      "binary_sha256": "e04962742507a5f37a4002a7a8b2b549f6864f17807eb5d534d947f6311a051f"
     },
     "darwin/arm64": {
       "url": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-darwin-arm64.tar.gz",
       "sha256": "d1e409481a8ca846c4bc97e781eb5cb1bd5c23353a0b3977a1cbda1b1b6447d5",
-      "member": "golangci-lint-2.15.0-darwin-arm64/golangci-lint"
+      "member": "golangci-lint-2.15.0-darwin-arm64/golangci-lint",
+      "binary_sha256": "71b89744ef6dd92dad9026b70489d1ad660da79ef90dfb5aabe995d916bec8a9"
     },
     "windows/amd64": {
       "url": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-windows-amd64.zip",
       "sha256": "cd7ea6063c95de245e17e5246e42bdc14bb221792c429dbd239ab3a6ade6ca6a",
-      "member": "golangci-lint-2.15.0-windows-amd64/golangci-lint.exe"
+      "member": "golangci-lint-2.15.0-windows-amd64/golangci-lint.exe",
+      "binary_sha256": "5ec86137f1f3b9f68d948adc3644c689c4d805b449c4257b75efdc9fe03085b2"
     },
     "windows/arm64": {
       "url": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-windows-arm64.zip",
       "sha256": "4fb8988abf186158e30af1b8a0fb3671cf2cb02bc91d7e6ce6996f4c1e922e9a",
-      "member": "golangci-lint-2.15.0-windows-arm64/golangci-lint.exe"
+      "member": "golangci-lint-2.15.0-windows-arm64/golangci-lint.exe",
+      "binary_sha256": "99ddad81dd9f42b196eead5341d182f484e94daca63eb371f6cef8d3e1298076"
     }
   }
 }

@@ -15,6 +15,16 @@ from urllib.request import urlopen
 import zipfile
 
 
+def binary_matches(binary, expected):
+    if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
+        return False
+    digest = hashlib.sha256()
+    with binary.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest() == expected
+
+
 def install(name, platforms):
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -26,7 +36,7 @@ def install(name, platforms):
     cache_home = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache").resolve()
     target_dir = cache_home / "moco" / "linters" / release["sha256"]
     binary = target_dir / Path(release["member"]).name
-    if binary.is_file():
+    if binary_matches(binary, release["binary_sha256"]):
         return binary
 
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -48,11 +58,13 @@ def install(name, platforms):
                     with archive.extractfile(member) as executable:
                         shutil.copyfileobj(executable, output)
         pending.chmod(0o755)
+        if not binary_matches(pending, release["binary_sha256"]):
+            raise ValueError(f"SHA-256 mismatch for {release['member']}")
         try:
             pending.replace(binary)
         except PermissionError:
             # Windows may lock a cached binary installed and launched by another invocation.
-            if not binary.is_file():
+            if not binary_matches(binary, release["binary_sha256"]):
                 raise
     return binary
 

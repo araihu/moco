@@ -45,12 +45,13 @@ LOAD_REPORT=/tmp/moco-load-fault.json` for a retained JSON report and see the
 latency/resource budgets and fault guarantees.
 
 Tools are pinned under `tools/`, so global installations are unnecessary.
-`tools/linters.json` records the upstream Vacuum and golangci-lint archives and
-their SHA-256 digests for each supported operating system and architecture.
+`tools/linters.json` records the upstream Vacuum and golangci-lint download URLs
+and SHA-256 digests for both archives and executables for each supported operating system
+and architecture.
 The remaining tools use Go modules, including a separate module for actionlint.
 
 - actionlint `v1.7.12`
-- Vacuum `v0.30.1`
+- Vacuum `v0.42.3`
 - oapi-codegen `v2.8.0`
 - sqlc `v1.31.1`
 - govulncheck `v1.7.0`
@@ -59,8 +60,8 @@ The remaining tools use Go modules, including a separate module for actionlint.
 - a SQLite-only migration runner backed by golang-migrate `v4.19.1`
 
 Local Make targets and Dagger use `tools/linter.py` to download each release,
-verify its archive digest and cache the executable by digest. The Go-managed
-tools use the selected Go toolchain with a 2 GiB build memory target.
+verify its archive and executable, and recheck the executable on each cache hit.
+The Go-managed tools use the selected Go toolchain with a 2 GiB build memory target.
 
 ```bash
 make workflow-lint
